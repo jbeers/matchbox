@@ -1,0 +1,13 @@
+// Test indexed for loop
+println("Starting indexed for loop:")
+for (i = 1; i <= 5; i = i + 1) {
+    println("Iteration:", i)
+}
+
+println("Starting countdown:")
+for (j = 10; j > 0; j = j - 1) {
+    if (j == 5) {
+        println("Halfway there!")
+    }
+    println(j)
+}

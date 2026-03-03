@@ -10,6 +10,12 @@ pub enum Statement {
         collection: Expression,
         body: Vec<Statement>,
     },
+    ForClassic {
+        init: Option<Expression>,
+        condition: Option<Expression>,
+        update: Option<Expression>,
+        body: Vec<Statement>,
+    },
     If {
         condition: Expression,
         then_branch: Vec<Statement>,

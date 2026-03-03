@@ -1,5 +1,4 @@
 use std::fmt;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BxValue {

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
-use anyhow::{Result, bail, anyhow};
+use anyhow::{Result, bail};
 use crate::ast::{Expression, Literal, Statement};
 use crate::env::Environment;
 use crate::types::{BxFunction, BxValue};
@@ -50,11 +50,41 @@ impl Evaluator {
                     Ok(BxValue::Null)
                 }
             }
-            Statement::ForLoop { item, collection, body } => {
+            Statement::ForClassic { init, condition, update, body } => {
+                if let Some(init_expr) = init {
+                    self.eval_expression(init_expr)?;
+                }
+
+                while let Some(cond_expr) = condition {
+                    let cond_val = self.eval_expression(cond_expr)?;
+                    if !is_truthy(&cond_val) {
+                        break;
+                    }
+                    self.eval_block(body)?;
+                    if let Some(update_expr) = update {
+                        self.eval_expression(update_expr)?;
+                    }
+                }
+                
+                // If there's no condition, it's an infinite loop in some languages, 
+                // but for this POC let's just run it once or handle it.
+                // BoxLang/Java allows for(;;).
+                if condition.is_none() {
+                    loop {
+                        self.eval_block(body)?;
+                        if let Some(update_expr) = update {
+                            self.eval_expression(update_expr)?;
+                        }
+                    }
+                }
+
+                Ok(BxValue::Null)
+            }
+            Statement::ForLoop { item: _, collection, body: _ } => {
                 // Simplified for basic POC (only handles arrays eventually, or just basic numbers)
                 // Let's implement a simple numeric loop or just bail for now if collection isn't valid.
                 // Actually, if we want `for(i in null)`, let's evaluate collection:
-                let coll_val = self.eval_expression(collection)?;
+                let _coll_val = self.eval_expression(collection)?;
                 // For simplicity in POC, just run it once or return Null. 
                 // A real BoxLang loop iterates over collections or structs.
                 Ok(BxValue::Null)
@@ -114,7 +144,7 @@ impl Evaluator {
                 let func_val = self.env.borrow().get(name);
                 match func_val {
                     Some(BxValue::Function(func)) => {
-                        let mut call_env = Environment::new_with_parent(Rc::clone(&self.env));
+                        let call_env = Environment::new_with_parent(Rc::clone(&self.env));
                         for (i, param) in func.params.iter().enumerate() {
                             if i < evaluated_args.len() {
                                 call_env.borrow_mut().define(param.clone(), evaluated_args[i].clone());
@@ -140,15 +170,38 @@ impl Evaluator {
                     _ => bail!("Unsupported operands for +: {:?} + {:?}", left, right),
                 }
             }
+            "-" => match (left, right) {
+                (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Number(l - r)),
+                _ => bail!("Unsupported operands for -"),
+            },
+            "*" => match (left, right) {
+                (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Number(l * r)),
+                _ => bail!("Unsupported operands for *"),
+            },
+            "/" => match (left, right) {
+                (BxValue::Number(l), BxValue::Number(r)) => {
+                    if *r == 0.0 { bail!("Division by zero"); }
+                    Ok(BxValue::Number(l / r))
+                },
+                _ => bail!("Unsupported operands for /"),
+            },
             "==" => Ok(BxValue::Boolean(left == right)),
             "!=" => Ok(BxValue::Boolean(left != right)),
             "<" => match (left, right) {
                 (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Boolean(l < r)),
                 _ => bail!("Unsupported operands for <"),
             },
+            "<=" => match (left, right) {
+                (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Boolean(l <= r)),
+                _ => bail!("Unsupported operands for <="),
+            },
             ">" => match (left, right) {
                 (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Boolean(l > r)),
                 _ => bail!("Unsupported operands for >"),
+            },
+            ">=" => match (left, right) {
+                (BxValue::Number(l), BxValue::Number(r)) => Ok(BxValue::Boolean(l >= r)),
+                _ => bail!("Unsupported operands for >="),
             },
             _ => bail!("Unsupported operator: {}", operator),
         }

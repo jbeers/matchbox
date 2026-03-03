@@ -50,16 +50,38 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
         }
         Rule::for_loop => {
             let mut inner_rules = inner.into_inner();
-            let item = inner_rules.next().unwrap().as_str().to_string();
-            let collection = parse_expression(inner_rules.next().unwrap())?;
+            let loop_type = inner_rules.next().unwrap();
+            let body_rule = inner_rules.next().unwrap();
             let mut body = Vec::new();
-            
-            for rule in inner_rules {
-                if rule.as_rule() == Rule::statement {
-                    body.push(parse_statement(rule)?);
-                }
+            for stmt_rule in body_rule.into_inner() {
+                body.push(parse_statement(stmt_rule)?);
             }
-            Ok(Statement::ForLoop { item, collection, body })
+
+            match loop_type.as_rule() {
+                Rule::for_in => {
+                    let mut rules = loop_type.into_inner();
+                    let item = rules.next().unwrap().as_str().to_string();
+                    let collection = parse_expression(rules.next().unwrap())?;
+                    Ok(Statement::ForLoop { item, collection, body })
+                }
+                Rule::for_classic => {
+                    let rules = loop_type.into_inner();
+                    let mut init = None;
+                    let mut condition = None;
+                    let mut update = None;
+                    
+                    for rule in rules {
+                        match rule.as_rule() {
+                            Rule::init => init = Some(parse_expression(rule)?),
+                            Rule::condition => condition = Some(parse_expression(rule)?),
+                            Rule::update => update = Some(parse_expression(rule)?),
+                            _ => {}
+                        }
+                    }
+                    Ok(Statement::ForClassic { init, condition, update, body })
+                }
+                _ => bail!("Unexpected for_loop variant: {:?}", loop_type.as_rule()),
+            }
         }
         Rule::if_statement => {
             let mut inner_rules = inner.into_inner();
@@ -93,6 +115,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
 fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
+        Rule::expression | Rule::init | Rule::condition | Rule::update => parse_expression(inner),
         Rule::assignment => {
             let mut rules = inner.into_inner();
             let target = rules.next().unwrap().as_str().to_string();
