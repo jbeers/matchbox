@@ -10,14 +10,14 @@ pub enum BxValue {
     Number(f64),
     Boolean(bool),
     Null,
-    Array(Rc<RefCell<Vec<BxValue>>>),
-    Struct(Rc<RefCell<BxStruct>>),
+    Array(usize), // GcId
+    Struct(usize), // GcId
     CompiledFunction(Rc<BxCompiledFunction>),
     #[serde(skip)]
     NativeFunction(BxNativeFunction),
     Class(Rc<RefCell<BxClass>>),
-    Instance(Rc<RefCell<BxInstance>>),
-    Future(Rc<RefCell<BxFuture>>),
+    Instance(usize), // GcId
+    Future(usize), // GcId
     #[cfg(target_arch = "wasm32")]
     #[serde(skip)]
     JsValue(wasm_bindgen::JsValue),
@@ -34,6 +34,12 @@ pub trait BxVM {
     fn sleep(&mut self, ms: u64);
     fn get_root_shape(&self) -> usize;
     fn get_shape_index(&self, shape_id: usize, field_name: &str) -> Option<usize>;
+    fn array_len(&self, id: usize) -> usize;
+    fn array_push(&mut self, id: usize, val: BxValue);
+    fn array_new(&mut self) -> usize;
+    fn struct_len(&self, id: usize) -> usize;
+    fn struct_new(&mut self) -> usize;
+    fn struct_get_shape(&self, id: usize) -> usize;
 }
 
 pub type BxNativeFunction = fn(&mut dyn BxVM, &[BxValue]) -> Result<BxValue, String>;
@@ -44,10 +50,9 @@ pub trait BxNativeObject: fmt::Debug {
     fn call_method(&mut self, vm: &mut dyn BxVM, name: &str, args: &[BxValue]) -> Result<BxValue, String>;
 }
 
-// Implement PartialEq for NativeObject manually since dyn trait can't derive it
 impl PartialEq for dyn BxNativeObject {
     fn eq(&self, _other: &Self) -> bool {
-        false // Identity-based equality is safer for native objects
+        false 
     }
 }
 
@@ -58,18 +63,13 @@ impl fmt::Display for BxValue {
             BxValue::Number(n) => write!(f, "{}", n),
             BxValue::Boolean(b) => write!(f, "{}", b),
             BxValue::Null => write!(f, "null"),
-            BxValue::Array(arr) => {
-                let items: Vec<String> = arr.borrow().iter().map(|v| v.to_string()).collect();
-                write!(f, "[{}]", items.join(", "))
-            }
-            BxValue::Struct(s) => {
-                write!(f, "<struct shape:{}>", s.borrow().shape_id)
-            }
+            BxValue::Array(id) => write!(f, "<array id:{}>", id),
+            BxValue::Struct(id) => write!(f, "<struct id:{}>", id),
             BxValue::CompiledFunction(func) => write!(f, "<compiled function {}>", func.name),
             BxValue::NativeFunction(_) => write!(f, "<native function>"),
             BxValue::Class(class) => write!(f, "<class {}>", class.borrow().name),
-            BxValue::Instance(inst) => write!(f, "<instance of {} shape:{}>", inst.borrow().class.borrow().name, inst.borrow().shape_id),
-            BxValue::Future(_) => write!(f, "<future>"),
+            BxValue::Instance(id) => write!(f, "<instance id:{}>", id),
+            BxValue::Future(id) => write!(f, "<future id:{}>", id),
             #[cfg(target_arch = "wasm32")]
             BxValue::JsValue(js) => write!(f, "<js value {:?}>", js),
             BxValue::NativeObject(obj) => write!(f, "<native object {:?}>", obj.borrow()),

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::types::{BxValue, BxVM, BxStruct};
+use crate::types::{BxValue, BxVM};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::RngExt;
 use std::rc::Rc;
@@ -86,55 +86,52 @@ fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn len(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("len() expects exactly 1 argument".to_string()); }
     match &args[0] {
         BxValue::String(s) => Ok(BxValue::Number(s.len() as f64)),
-        BxValue::Array(a) => Ok(BxValue::Number(a.borrow().len() as f64)),
-        BxValue::Struct(s) => Ok(BxValue::Number(s.borrow().properties.len() as f64)),
+        BxValue::Array(id) => Ok(BxValue::Number(vm.array_len(*id) as f64)),
+        BxValue::Struct(id) => Ok(BxValue::Number(vm.struct_len(*id) as f64)),
         _ => Err("len() expects a string, array, or struct".to_string()),
     }
 }
 
-fn array_append(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn array_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("arrayAppend() expects exactly 2 arguments".to_string()); }
     match &args[0] {
-        BxValue::Array(a) => {
-            a.borrow_mut().push(args[1].clone());
+        BxValue::Array(id) => {
+            vm.array_push(*id, args[1].clone());
             Ok(BxValue::Boolean(true))
         }
         _ => Err("arrayAppend() expects an array as the first argument".to_string()),
     }
 }
 
-fn array_new(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Ok(BxValue::Array(Rc::new(RefCell::new(Vec::new()))))
+fn array_new(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::Array(vm.array_new()))
 }
 
 fn struct_key_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("structKeyExists() expects exactly 2 arguments".to_string()); }
     match (&args[0], &args[1]) {
-        (BxValue::Struct(s), BxValue::String(k)) => {
-            let s_borrow = s.borrow();
-            Ok(BxValue::Boolean(vm.get_shape_index(s_borrow.shape_id, &k.to_lowercase()).is_some()))
+        (BxValue::Struct(id), BxValue::String(k)) => {
+            let shape_id = vm.struct_get_shape(*id);
+            Ok(BxValue::Boolean(vm.get_shape_index(shape_id, &k.to_lowercase()).is_some()))
         }
         _ => Err("structKeyExists() expects a struct and a string key".to_string()),
     }
 }
 
-fn struct_count(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn struct_count(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("structCount() expects exactly 1 argument".to_string()); }
     match &args[0] {
-        BxValue::Struct(s) => Ok(BxValue::Number(s.borrow().properties.len() as f64)),
+        BxValue::Struct(id) => Ok(BxValue::Number(vm.struct_len(*id) as f64)),
         _ => Err("structCount() expects a struct".to_string()),
     }
 }
 
 fn struct_new(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Ok(BxValue::Struct(Rc::new(RefCell::new(BxStruct {
-        shape_id: vm.get_root_shape(),
-        properties: Vec::new(),
-    }))))
+    Ok(BxValue::Struct(vm.struct_new()))
 }
 
 fn now(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
@@ -190,13 +187,7 @@ fn create_object(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
 
     match obj_type.as_str() {
         "java" => {
-            #[cfg(feature = "jvm")]
-            {
-                // Real JNI initialization and class loading would go here.
-                // For this POC, we'll fall through to simulator if not matched.
-            }
-            
-            // SIMULATOR for Demo Purposes
+            // Simulator
             if class_name == "java.util.ArrayList" {
                 return Ok(BxValue::NativeObject(Rc::new(RefCell::new(JavaArrayListSimulator {
                     items: Vec::new(),
@@ -204,11 +195,9 @@ fn create_object(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
             } else if class_name == "java.lang.System" {
                 return Ok(BxValue::NativeObject(Rc::new(RefCell::new(JavaSystemSimulator))));
             }
-            
             Err(format!("Java class {} not found in simulator", class_name))
         }
         "rust" | "native" => {
-            // For this POC, we'll return a Mock Native Object if the class matches "Mock"
             if class_name == "Mock" {
                 return Ok(BxValue::NativeObject(Rc::new(RefCell::new(MockNativeObject {
                     data: "I am a Rust Mock".to_string(),

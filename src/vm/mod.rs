@@ -1,6 +1,7 @@
 pub mod chunk;
 pub mod opcode;
 pub mod shape;
+pub mod gc;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -16,20 +17,21 @@ use js_sys::{Reflect, Function, Array};
 use self::chunk::{Chunk, IcEntry};
 use self::opcode::OpCode;
 use self::shape::ShapeRegistry;
+use self::gc::{Heap, GcObject, GcId};
 
 #[derive(Debug, Clone)]
 struct CallFrame {
     function: Rc<BxCompiledFunction>,
     ip: usize,
     stack_base: usize,
-    receiver: Option<Rc<RefCell<BxInstance>>>,
+    receiver: Option<BxValue>, 
     handlers: Vec<usize>, // IP targets for catch blocks
 }
 
 pub struct BxFiber {
     stack: Vec<BxValue>,
     frames: Vec<CallFrame>,
-    pub future: Rc<RefCell<BxFuture>>,
+    pub future_id: GcId,
     pub wait_until: Option<std::time::Instant>,
     pub yield_requested: bool,
 }
@@ -39,6 +41,7 @@ pub struct VM {
     pub globals: HashMap<String, BxValue>,
     current_fiber_idx: Option<usize>,
     pub shapes: ShapeRegistry,
+    pub heap: Heap,
 }
 
 impl BxVM for VM {
@@ -67,6 +70,41 @@ impl BxVM for VM {
     fn get_shape_index(&self, shape_id: usize, field_name: &str) -> Option<usize> {
         self.shapes.get_index(shape_id, field_name)
     }
+
+    fn array_len(&self, id: usize) -> usize {
+        if let GcObject::Array(arr) = self.heap.get(id) {
+            arr.len()
+        } else { 0 }
+    }
+
+    fn array_push(&mut self, id: usize, val: BxValue) {
+        if let GcObject::Array(arr) = self.heap.get_mut(id) {
+            arr.push(val);
+        }
+    }
+
+    fn array_new(&mut self) -> usize {
+        self.heap.alloc(GcObject::Array(Vec::new()))
+    }
+
+    fn struct_len(&self, id: usize) -> usize {
+        if let GcObject::Struct(s) = self.heap.get(id) {
+            s.properties.len()
+        } else { 0 }
+    }
+
+    fn struct_new(&mut self) -> usize {
+        self.heap.alloc(GcObject::Struct(BxStruct {
+            shape_id: self.shapes.get_root(),
+            properties: Vec::new(),
+        }))
+    }
+
+    fn struct_get_shape(&self, id: usize) -> usize {
+        if let GcObject::Struct(s) = self.heap.get(id) {
+            s.shape_id
+        } else { 0 }
+    }
 }
 
 impl VM {
@@ -85,6 +123,7 @@ impl VM {
             globals,
             current_fiber_idx: None,
             shapes: ShapeRegistry::new(),
+            heap: Heap::new(),
         }
     }
 
@@ -95,7 +134,7 @@ impl VM {
             chunk: Rc::new(RefCell::new(chunk)),
         });
         
-        let future = Rc::new(RefCell::new(BxFuture {
+        let future_id = self.heap.alloc(GcObject::Future(BxFuture {
             value: BxValue::Null,
             status: FutureStatus::Pending,
         }));
@@ -109,7 +148,7 @@ impl VM {
                 receiver: None,
                 handlers: Vec::new(),
             }],
-            future: Rc::clone(&future),
+            future_id,
             wait_until: None,
             yield_requested: false,
         };
@@ -120,7 +159,7 @@ impl VM {
     }
 
     pub fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue {
-        let future = Rc::new(RefCell::new(BxFuture {
+        let future_id = self.heap.alloc(GcObject::Future(BxFuture {
             value: BxValue::Null,
             status: FutureStatus::Pending,
         }));
@@ -139,13 +178,13 @@ impl VM {
                 receiver: None,
                 handlers: Vec::new(),
             }],
-            future: Rc::clone(&future),
+            future_id,
             wait_until: None,
             yield_requested: false,
         };
 
         self.fibers.push(fiber);
-        BxValue::Future(future)
+        BxValue::Future(future_id)
     }
 
     fn run_all(&mut self) -> Result<BxValue> {
@@ -170,8 +209,10 @@ impl VM {
                 match self.run_fiber(i, 100) {
                     Ok(Some(result)) => {
                         let fiber = self.fibers.remove(i);
-                        fiber.future.borrow_mut().value = result.clone();
-                        fiber.future.borrow_mut().status = FutureStatus::Completed;
+                        if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                            f.value = result.clone();
+                            f.status = FutureStatus::Completed;
+                        }
                         if self.fibers.is_empty() {
                             last_result = result;
                         }
@@ -181,7 +222,9 @@ impl VM {
                     }
                     Err(e) => {
                         let fiber = self.fibers.remove(i);
-                        fiber.future.borrow_mut().status = FutureStatus::Failed(e.to_string());
+                        if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                            f.status = FutureStatus::Failed(e.to_string());
+                        }
                         if self.fibers.is_empty() {
                             return Err(e);
                         }
@@ -193,9 +236,32 @@ impl VM {
             if all_waiting && !self.fibers.is_empty() {
                 std::thread::sleep(std::time::Duration::from_millis(1));
             }
+
+            // Periodically collect garbage
+            if self.heap.should_collect() {
+                self.collect_garbage();
+            }
         }
         
         Ok(last_result)
+    }
+
+    fn collect_garbage(&mut self) {
+        let mut roots = Vec::new();
+        // 1. Fiber stacks and futures
+        for fiber in &self.fibers {
+            roots.extend(fiber.stack.iter().cloned());
+            for frame in &fiber.frames {
+                if let Some(recv) = &frame.receiver {
+                    roots.push(recv.clone());
+                }
+            }
+            roots.push(BxValue::Future(fiber.future_id));
+        }
+        // 2. Globals
+        roots.extend(self.globals.values().cloned());
+
+        self.heap.collect(&roots);
     }
 
     fn run_fiber(&mut self, fiber_idx: usize, quantum: usize) -> Result<Option<BxValue>> {
@@ -377,7 +443,8 @@ impl VM {
                         items.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     items.reverse();
-                    self.fibers[fiber_idx].stack.push(BxValue::Array(Rc::new(RefCell::new(items))));
+                    let id = self.heap.alloc(GcObject::Array(items));
+                    self.fibers[fiber_idx].stack.push(BxValue::Array(id));
                 }
                 OpCode::OpStruct(count) => {
                     let mut shape_id = self.shapes.get_root();
@@ -396,38 +463,37 @@ impl VM {
                         props.push(value);
                     }
 
-                    let bx_struct = BxStruct {
-                        shape_id,
-                        properties: props,
-                    };
-                    self.fibers[fiber_idx].stack.push(BxValue::Struct(Rc::new(RefCell::new(bx_struct))));
+                    let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
+                    self.fibers[fiber_idx].stack.push(BxValue::Struct(id));
                 }
                 OpCode::OpIndex => {
                     let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     match base_val {
-                        BxValue::Array(arr) => {
+                        BxValue::Array(id) => {
                             if let BxValue::Number(n) = index_val {
                                 let idx = n as usize;
-                                let arr = arr.borrow();
-                                if idx < 1 || idx > arr.len() {
-                                    self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
-                                    continue;
-                                } else {
-                                    self.fibers[fiber_idx].stack.push(arr[idx - 1].clone());
+                                if let GcObject::Array(arr) = self.heap.get(id) {
+                                    if idx < 1 || idx > arr.len() {
+                                        self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
+                                        continue;
+                                    } else {
+                                        self.fibers[fiber_idx].stack.push(arr[idx - 1].clone());
+                                    }
                                 }
                             } else {
                                 self.throw_error(fiber_idx, "Array index must be a number")?;
                                 continue;
                             }
                         }
-                        BxValue::Struct(s) => {
+                        BxValue::Struct(id) => {
                             let key = index_val.to_string().to_lowercase();
-                            let s_borrow = s.borrow();
-                            if let Some(idx) = self.shapes.get_index(s_borrow.shape_id, &key) {
-                                self.fibers[fiber_idx].stack.push(s_borrow.properties[idx].clone());
-                            } else {
-                                self.fibers[fiber_idx].stack.push(BxValue::Null);
+                            if let GcObject::Struct(s) = self.heap.get(id) {
+                                if let Some(idx) = self.shapes.get_index(s.shape_id, &key) {
+                                    self.fibers[fiber_idx].stack.push(s.properties[idx].clone());
+                                } else {
+                                    self.fibers[fiber_idx].stack.push(BxValue::Null);
+                                }
                             }
                         }
                         _ => { self.throw_error(fiber_idx, "Invalid access: base must be array or struct")?; continue; }
@@ -439,41 +505,44 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     match base_val {
-                        BxValue::Array(arr) => {
+                        BxValue::Array(id) => {
                             if let BxValue::Number(n) = index_val {
                                 let idx = n as usize;
-                                let mut arr = arr.borrow_mut();
-                                if idx < 1 || idx > arr.len() {
-                                    self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
-                                    continue;
-                                } else {
-                                    arr[idx - 1] = val.clone();
-                                    self.fibers[fiber_idx].stack.push(val);
+                                if let GcObject::Array(arr) = self.heap.get_mut(id) {
+                                    if idx < 1 || idx > arr.len() {
+                                        self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
+                                        continue;
+                                    } else {
+                                        arr[idx - 1] = val.clone();
+                                        self.fibers[fiber_idx].stack.push(val);
+                                    }
                                 }
                             } else {
                                 self.throw_error(fiber_idx, "Array index must be a number")?;
                                 continue;
                             }
                         }
-                        BxValue::Struct(s) => {
+                        BxValue::Struct(id) => {
                             let key = index_val.to_string().to_lowercase();
-                            let mut s_borrow = s.borrow_mut();
-                            if let Some(idx) = self.shapes.get_index(s_borrow.shape_id, &key) {
-                                s_borrow.properties[idx] = val.clone();
-                            } else {
-                                s_borrow.shape_id = self.shapes.transition(s_borrow.shape_id, &key);
-                                s_borrow.properties.push(val.clone());
+                            if let GcObject::Struct(s) = self.heap.get_mut(id) {
+                                if let Some(idx) = self.shapes.get_index(s.shape_id, &key) {
+                                    s.properties[idx] = val.clone();
+                                } else {
+                                    s.shape_id = self.shapes.transition(s.shape_id, &key);
+                                    s.properties.push(val.clone());
+                                }
                             }
                             self.fibers[fiber_idx].stack.push(val);
                         }
-                        BxValue::Instance(inst) => {
+                        BxValue::Instance(id) => {
                             let key = index_val.to_string().to_lowercase();
-                            let mut inst_borrow = inst.borrow_mut();
-                            if let Some(idx) = self.shapes.get_index(inst_borrow.shape_id, &key) {
-                                inst_borrow.properties[idx] = val.clone();
-                            } else {
-                                inst_borrow.shape_id = self.shapes.transition(inst_borrow.shape_id, &key);
-                                inst_borrow.properties.push(val.clone());
+                            if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                                if let Some(idx) = self.shapes.get_index(inst.shape_id, &key) {
+                                    inst.properties[idx] = val.clone();
+                                } else {
+                                    inst.shape_id = self.shapes.transition(inst.shape_id, &key);
+                                    inst.properties.push(val.clone());
+                                }
                             }
                             self.fibers[fiber_idx].stack.push(val);
                         }
@@ -485,10 +554,11 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     match base_val {
-                        BxValue::Struct(s) => {
-                            let shape_id = s.borrow().shape_id;
+                        BxValue::Struct(id) => {
+                            let (shape_id, properties_ptr) = if let GcObject::Struct(s) = self.heap.get(id) {
+                                (s.shape_id, &s.properties as *const Vec<BxValue>)
+                            } else { unreachable!() };
 
-                            // IC Fast Path
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -498,31 +568,30 @@ impl VM {
 
                             if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    let val = s.borrow().properties[index].clone();
+                                    let val = unsafe { &*properties_ptr }[index].clone();
                                     self.fibers[fiber_idx].stack.push(val);
                                     continue;
                                 }
                             }
 
-                            // Slow Path
                             if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                // Update Cache
                                 {
                                     let fiber = &self.fibers[fiber_idx];
                                     let frame = fiber.frames.last().unwrap();
                                     let mut chunk = frame.function.chunk.borrow_mut();
                                     chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                 }
-                                let val = s.borrow().properties[idx].clone();
+                                let val = unsafe { &*properties_ptr }[idx].clone();
                                 self.fibers[fiber_idx].stack.push(val);
                             } else {
                                 self.fibers[fiber_idx].stack.push(BxValue::Null);
                             }
                         }
-                        BxValue::Instance(inst) => {
-                            let shape_id = inst.borrow().shape_id;
+                        BxValue::Instance(id) => {
+                            let (shape_id, properties_ptr, class) = if let GcObject::Instance(inst) = self.heap.get(id) {
+                                (inst.shape_id, &inst.properties as *const Vec<BxValue>, Rc::clone(&inst.class))
+                            } else { unreachable!() };
 
-                            // IC Fast Path
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -532,24 +601,22 @@ impl VM {
 
                             if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    let val = inst.borrow().properties[index].clone();
+                                    let val = unsafe { &*properties_ptr }[index].clone();
                                     self.fibers[fiber_idx].stack.push(val);
                                     continue;
                                 }
                             }
 
-                            // Slow Path
                             if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                // Update Cache
                                 {
                                     let fiber = &self.fibers[fiber_idx];
                                     let frame = fiber.frames.last().unwrap();
                                     let mut chunk = frame.function.chunk.borrow_mut();
                                     chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                 }
-                                let val = inst.borrow().properties[idx].clone();
+                                let val = unsafe { &*properties_ptr }[idx].clone();
                                 self.fibers[fiber_idx].stack.push(val);
-                            } else if let Some(method) = inst.borrow().class.borrow().methods.get(&name) {
+                            } else if let Some(method) = class.borrow().methods.get(&name) {
                                 self.fibers[fiber_idx].stack.push(BxValue::CompiledFunction(Rc::clone(method)));
                             } else {
                                 self.fibers[fiber_idx].stack.push(BxValue::Null);
@@ -579,10 +646,11 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     match base_val {
-                        BxValue::Struct(s) => {
-                            let shape_id = s.borrow().shape_id;
+                        BxValue::Struct(id) => {
+                            let shape_id = if let GcObject::Struct(s) = self.heap.get(id) {
+                                s.shape_id
+                            } else { unreachable!() };
 
-                            // Monomorphic IC for SetMember (Same Shape -> Same Index)
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -592,32 +660,37 @@ impl VM {
 
                             if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    s.borrow_mut().properties[index] = val.clone();
+                                    if let GcObject::Struct(s) = self.heap.get_mut(id) {
+                                        s.properties[index] = val.clone();
+                                    }
                                     self.fibers[fiber_idx].stack.push(val);
                                     continue;
                                 }
                             }
 
                             if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                // Update Cache
                                 {
                                     let fiber = &self.fibers[fiber_idx];
                                     let frame = fiber.frames.last().unwrap();
                                     let mut chunk = frame.function.chunk.borrow_mut();
                                     chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                 }
-                                s.borrow_mut().properties[idx] = val.clone();
+                                if let GcObject::Struct(s) = self.heap.get_mut(id) {
+                                    s.properties[idx] = val.clone();
+                                }
                             } else {
-                                // Shape transition
-                                s.borrow_mut().shape_id = self.shapes.transition(shape_id, &name);
-                                s.borrow_mut().properties.push(val.clone());
+                                if let GcObject::Struct(s) = self.heap.get_mut(id) {
+                                    s.shape_id = self.shapes.transition(shape_id, &name);
+                                    s.properties.push(val.clone());
+                                }
                             }
                             self.fibers[fiber_idx].stack.push(val);
                         }
-                        BxValue::Instance(inst) => {
-                            let shape_id = inst.borrow().shape_id;
+                        BxValue::Instance(id) => {
+                            let shape_id = if let GcObject::Instance(inst) = self.heap.get(id) {
+                                inst.shape_id
+                            } else { unreachable!() };
 
-                            // IC Fast Path
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -627,24 +700,29 @@ impl VM {
 
                             if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    inst.borrow_mut().properties[index] = val.clone();
+                                    if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                                        inst.properties[index] = val.clone();
+                                    }
                                     self.fibers[fiber_idx].stack.push(val);
                                     continue;
                                 }
                             }
 
                             if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                // Update Cache
                                 {
                                     let fiber = &self.fibers[fiber_idx];
                                     let frame = fiber.frames.last().unwrap();
                                     let mut chunk = frame.function.chunk.borrow_mut();
                                     chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                 }
-                                inst.borrow_mut().properties[idx] = val.clone();
+                                if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                                    inst.properties[idx] = val.clone();
+                                }
                             } else {
-                                inst.borrow_mut().shape_id = self.shapes.transition(shape_id, &name);
-                                inst.borrow_mut().properties.push(val.clone());
+                                if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                                    inst.shape_id = self.shapes.transition(shape_id, &name);
+                                    inst.properties.push(val.clone());
+                                }
                             }
                             self.fibers[fiber_idx].stack.push(val);
                         }
@@ -672,21 +750,21 @@ impl VM {
                     let receiver_val = self.fibers[fiber_idx].stack.get(receiver_idx).cloned().unwrap();
                     
                     match receiver_val {
-                        BxValue::Future(f) => {
+                        BxValue::Future(id) => {
+                            let (status, value) = if let GcObject::Future(f) = self.heap.get(id) {
+                                (f.status.clone(), f.value.clone())
+                            } else { unreachable!() };
+
                             if name == "get" {
-                                let status = f.borrow().status.clone();
                                 match status {
                                     FutureStatus::Pending => {
-                                        // Yield and retry
                                         self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= 1;
                                         return Ok(None);
                                     }
                                     FutureStatus::Completed => {
-                                        // Pop args and receiver
                                         for _ in 0..arg_count { self.fibers[fiber_idx].stack.pop(); }
                                         self.fibers[fiber_idx].stack.pop();
-                                        let val = f.borrow().value.clone();
-                                        self.fibers[fiber_idx].stack.push(val);
+                                        self.fibers[fiber_idx].stack.push(value);
                                         continue;
                                     }
                                     FutureStatus::Failed(e) => {
@@ -699,10 +777,11 @@ impl VM {
                                 continue;
                             }
                         }
-                        BxValue::Instance(inst) => {
-                            let shape_id = inst.borrow().shape_id;
+                        BxValue::Instance(id) => {
+                            let (shape_id, properties_ptr, class) = if let GcObject::Instance(inst) = self.heap.get(id) {
+                                (inst.shape_id, &inst.properties as *const Vec<BxValue>, Rc::clone(&inst.class))
+                            } else { unreachable!() };
 
-                            // Monomorphic IC for Instance Method Lookups
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -712,47 +791,33 @@ impl VM {
 
                             let method = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    if let BxValue::CompiledFunction(f) = &inst.borrow().properties[index] {
-                                        Some(Rc::clone(f))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
+                                    if let BxValue::CompiledFunction(f) = unsafe { &*properties_ptr }[index].clone() {
+                                        Some(f)
+                                    } else { None }
+                                } else { None }
+                            } else { None };
 
                             let method = if method.is_none() {
                                 if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                    if let BxValue::CompiledFunction(f) = &inst.borrow().properties[idx] {
-                                        // Update cache if found in properties
+                                    if let BxValue::CompiledFunction(f) = unsafe { &*properties_ptr }[idx].clone() {
                                         {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
                                             chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                         }
-                                        Some(Rc::clone(f))
-                                    } else {
-                                        None
-                                    }
-                                } else if let Some(f) = inst.borrow().class.borrow().methods.get(&name) {
+                                        Some(f)
+                                    } else { None }
+                                } else if let Some(f) = class.borrow().methods.get(&name) {
                                     Some(Rc::clone(f))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                method
-                            };
+                                } else { None }
+                            } else { method };
                             
                             if let Some(func) = method {
                                 if arg_count != func.arity {
                                     self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
                                     continue;
                                 } else {
-                                    // Pop args and receiver, then push args back for the new frame
                                     let mut args = Vec::with_capacity(arg_count);
                                     for _ in 0..arg_count {
                                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
@@ -765,7 +830,7 @@ impl VM {
                                         function: func,
                                         ip: 0,
                                         stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
-                                        receiver: Some(inst),
+                                        receiver: Some(receiver_val),
                                         handlers: Vec::new(),
                                     };
                                     self.fibers[fiber_idx].frames.push(frame);
@@ -775,10 +840,11 @@ impl VM {
                                 continue;
                             }
                         }
-                        BxValue::Struct(s) => {
-                            let shape_id = s.borrow().shape_id;
+                        BxValue::Struct(id) => {
+                            let (shape_id, properties_ptr) = if let GcObject::Struct(s) = self.heap.get(id) {
+                                (s.shape_id, &s.properties as *const Vec<BxValue>)
+                            } else { unreachable!() };
 
-                            // IC Fast Path for Struct Method Lookups
                             let ic = {
                                 let fiber = &self.fibers[fiber_idx];
                                 let frame = fiber.frames.last().unwrap();
@@ -788,37 +854,25 @@ impl VM {
 
                             let method = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
                                 if cached_shape == shape_id {
-                                    if let BxValue::CompiledFunction(f) = &s.borrow().properties[index] {
-                                        Some(Rc::clone(f))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            };
+                                    if let BxValue::CompiledFunction(f) = unsafe { &*properties_ptr }[index].clone() {
+                                        Some(f)
+                                    } else { None }
+                                } else { None }
+                            } else { None };
 
                             let method = if method.is_none() {
                                 if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                                    if let BxValue::CompiledFunction(func) = &s.borrow().properties[idx] {
+                                    if let BxValue::CompiledFunction(func) = unsafe { &*properties_ptr }[idx].clone() {
                                         {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
                                             chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
                                         }
-                                        Some(Rc::clone(func))
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                method
-                            };
+                                        Some(func)
+                                    } else { None }
+                                } else { None }
+                            } else { method };
 
                             if let Some(func) = method {
                                 if arg_count != func.arity {
@@ -834,10 +888,10 @@ impl VM {
                                     
                                     for arg in args { self.fibers[fiber_idx].stack.push(arg); }
                                     let frame = CallFrame {
-                                        function: Rc::clone(&func),
+                                        function: func,
                                         ip: 0,
                                         stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
-                                        receiver: None,
+                                        receiver: Some(receiver_val),
                                         handlers: Vec::new(),
                                     };
                                     self.fibers[fiber_idx].frames.push(frame);
@@ -904,7 +958,7 @@ impl VM {
                             self.throw_error(fiber_idx, "Java method invocation not yet implemented in this POC")?;
                             continue;
                         }
-                        _ => { self.throw_error(fiber_idx, "Can only invoke methods on instances, structs, JS objects, and native objects.")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Can only invoke methods on instances, structs, JS objects, native objects, and Java objects.")?; continue; }
                     }
                 }
                 OpCode::OpCall(arg_count) => {
@@ -1033,33 +1087,35 @@ impl VM {
                         };
                         
                         match &self.fibers[fiber_idx].stack[collection_idx] {
-                            BxValue::Array(arr) => {
-                                let arr = arr.borrow();
-                                if cursor_val < arr.len() {
-                                    (false, Some(arr[cursor_val].clone()), Some(BxValue::Number(cursor_val as f64 + 1.0)))
-                                } else {
-                                    (true, None, None)
-                                }
-                            }
-                            BxValue::Struct(s) => {
-                                let s = s.borrow();
-                                let keys = {
-                                    let mut k = Vec::new();
-                                    let shape = &self.shapes.shapes[s.shape_id];
-                                    for key in shape.fields.keys() {
-                                        k.push(key.clone());
+                            BxValue::Array(id) => {
+                                if let GcObject::Array(arr) = self.heap.get(*id) {
+                                    if cursor_val < arr.len() {
+                                        (false, Some(arr[cursor_val].clone()), Some(BxValue::Number(cursor_val as f64 + 1.0)))
+                                    } else {
+                                        (true, None, None)
                                     }
-                                    k.sort();
-                                    k
-                                };
-                                if cursor_val < keys.len() {
-                                    let key = &keys[cursor_val];
-                                    let idx = self.shapes.get_index(s.shape_id, key).unwrap();
-                                    let val = &s.properties[idx];
-                                    (false, Some(BxValue::String(key.clone())), Some(val.clone()))
-                                } else {
-                                    (true, None, None)
-                                }
+                                } else { unreachable!() }
+                            }
+                            BxValue::Struct(id) => {
+                                if let GcObject::Struct(s) = self.heap.get(*id) {
+                                    let keys = {
+                                        let mut k = Vec::new();
+                                        let shape = &self.shapes.shapes[s.shape_id];
+                                        for key in shape.fields.keys() {
+                                            k.push(key.clone());
+                                        }
+                                        k.sort();
+                                        k
+                                    };
+                                    if cursor_val < keys.len() {
+                                        let key = &keys[cursor_val];
+                                        let idx = self.shapes.get_index(s.shape_id, key).unwrap();
+                                        let val = &s.properties[idx];
+                                        (false, Some(BxValue::String(key.clone())), Some(val.clone()))
+                                    } else {
+                                        (true, None, None)
+                                    }
+                                } else { unreachable!() }
                             }
                             _ => { 
                                 self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
@@ -1086,14 +1142,15 @@ impl VM {
                     if let BxValue::Class(class) = class_val {
                         let variables_scope = Rc::new(RefCell::new(HashMap::new()));
                         
-                        let instance = Rc::new(RefCell::new(BxInstance {
+                        let inst_id = self.heap.alloc(GcObject::Instance(BxInstance {
                             class: Rc::clone(&class),
                             shape_id: self.shapes.get_root(),
                             properties: Vec::new(),
                             variables: variables_scope.clone(),
                         }));
                         
-                        self.fibers[fiber_idx].stack[class_idx] = BxValue::Instance(Rc::clone(&instance));
+                        let instance_val = BxValue::Instance(inst_id);
+                        self.fibers[fiber_idx].stack[class_idx] = instance_val.clone();
 
                         let frame = CallFrame {
                             function: Rc::new(BxCompiledFunction {
@@ -1103,7 +1160,7 @@ impl VM {
                             }),
                             ip: 0,
                             stack_base: class_idx + 1 + arg_count,
-                            receiver: Some(Rc::clone(&instance)),
+                            receiver: Some(instance_val),
                             handlers: Vec::new(),
                         };
                         self.fibers[fiber_idx].frames.push(frame);
@@ -1114,18 +1171,22 @@ impl VM {
                 }
                 OpCode::OpGetPrivate(idx) => {
                     let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
-                    let val = if let Some(ref receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
+                    let val = if let Some(BxValue::Instance(id)) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
                         if name == "this" {
-                            Some(BxValue::Instance(Rc::clone(receiver)))
+                            Some(BxValue::Instance(id))
                         } else if name == "variables" {
-                            let _vars = Rc::clone(&receiver.borrow().variables);
-                            Some(BxValue::Struct(Rc::new(RefCell::new(BxStruct {
-                                shape_id: self.shapes.get_root(), 
-                                properties: Vec::new(),
-                            }))))
+                            if let GcObject::Instance(inst) = self.heap.get(id) {
+                                let _vars = Rc::clone(&inst.variables);
+                                Some(BxValue::Struct(self.heap.alloc(GcObject::Struct(BxStruct {
+                                    shape_id: self.shapes.get_root(),
+                                    properties: Vec::new(),
+                                }))))
+                            } else { None }
                         } else {
-                            let val = receiver.borrow().variables.borrow().get(&name).cloned().unwrap_or(BxValue::Null);
-                            Some(val)
+                            if let GcObject::Instance(inst) = self.heap.get(id) {
+                                let val = inst.variables.borrow().get(&name).cloned().unwrap_or(BxValue::Null);
+                                Some(val)
+                            } else { None }
                         }
                     } else {
                         None
@@ -1141,8 +1202,10 @@ impl VM {
                 OpCode::OpSetPrivate(idx) => {
                     let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
                     let val = self.fibers[fiber_idx].stack.last().unwrap().clone();
-                    if let Some(ref receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
-                        receiver.borrow().variables.borrow_mut().insert(name, val);
+                    if let Some(BxValue::Instance(id)) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
+                        if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                            inst.variables.borrow_mut().insert(name, val);
+                        }
                     } else {
                         self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
                         continue;
@@ -1228,19 +1291,22 @@ impl VM {
             BxValue::Number(n) => JsValue::from_f64(*n),
             BxValue::Boolean(b) => JsValue::from_bool(*b),
             BxValue::Null => JsValue::NULL,
-            BxValue::Array(arr) => {
+            BxValue::Array(id) => {
                 let js_arr = Array::new();
-                for item in arr.borrow().iter() {
-                    js_arr.push(&self.bx_to_js(item));
+                if let GcObject::Array(arr) = self.heap.get(*id) {
+                    for item in arr {
+                        js_arr.push(&self.bx_to_js(item));
+                    }
                 }
                 js_arr.into()
             }
-            BxValue::Struct(s) => {
+            BxValue::Struct(id) => {
                 let js_obj = js_sys::Object::new();
-                let s_borrow = s.borrow();
-                let shape = &self.shapes.shapes[s_borrow.shape_id];
-                for (k, &idx) in shape.fields.iter() {
-                    Reflect::set(&js_obj, &JsValue::from_str(k), &self.bx_to_js(&s_borrow.properties[idx])).ok();
+                if let GcObject::Struct(s) = self.heap.get(*id) {
+                    let shape = &self.shapes.shapes[s.shape_id];
+                    for (k, &idx) in shape.fields.iter() {
+                        Reflect::set(&js_obj, &JsValue::from_str(k), &self.bx_to_js(&s.properties[idx])).ok();
+                    }
                 }
                 js_obj.into()
             }
@@ -1250,7 +1316,7 @@ impl VM {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn js_to_bx(&self, val: JsValue) -> BxValue {
+    fn js_to_bx(&mut self, val: JsValue) -> BxValue {
         if val.is_string() {
             BxValue::String(val.as_string().unwrap())
         } else if let Some(n) = val.as_f64() {
@@ -1265,32 +1331,10 @@ impl VM {
             for i in 0..js_arr.length() {
                 bx_arr.push(self.js_to_bx(js_arr.get(i)));
             }
-            BxValue::Array(Rc::new(RefCell::new(bx_arr)))
+            BxValue::Array(self.heap.alloc(GcObject::Array(bx_arr)))
         } else if val.is_instance_of::<js_sys::Promise>() {
             let promise: js_sys::Promise = val.into();
-            let future = Rc::new(RefCell::new(BxFuture {
-                value: BxValue::Null,
-                status: FutureStatus::Pending,
-            }));
-            
-            let f_clone = Rc::clone(&future);
-            let on_success = Closure::wrap(Box::new(move |val: JsValue| {
-                let mut f = f_clone.borrow_mut();
-                f.value = BxValue::JsValue(val);
-                f.status = FutureStatus::Completed;
-            }) as Box<dyn FnMut(JsValue)>);
-
-            let f_clone_err = Rc::clone(&future);
-            let on_error = Closure::wrap(Box::new(move |err: JsValue| {
-                let mut f = f_clone_err.borrow_mut();
-                f.status = FutureStatus::Failed(format!("{:?}", err));
-            }) as Box<dyn FnMut(JsValue)>);
-
-            let _ = promise.then2(&on_success, &on_error);
-            on_success.forget();
-            on_error.forget();
-
-            BxValue::Future(future)
+            BxValue::JsValue(promise.into())
         } else {
             BxValue::JsValue(val)
         }
