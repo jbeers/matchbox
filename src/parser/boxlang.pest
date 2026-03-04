@@ -50,7 +50,7 @@ for_loop = { for_keyword ~ "(" ~ (for_in | for_classic) ~ ")" ~ block }
 in_keyword = @{ "in" ~ !ASCII_ALPHANUMERIC }
 for_in = { identifier ~ ("," ~ identifier)? ~ in_keyword ~ expression }
 for_classic = { init? ~ ";" ~ condition? ~ ";" ~ update? }
-init = { assignment | expression }
+init = { variable_decl | assignment | expression }
 condition = { expression }
 update = { expression }
 
@@ -73,14 +73,18 @@ binary_expr = { primary ~ (operator ~ primary)* }
 
 operator = { "+" | "-" | "*" | "/" | "==" | "!=" | "<=" | ">=" | "<" | ">" | "&" }
 
-primary = { atom ~ (function_call_args | array_access | member_access)* }
+primary = { atom ~ (function_call_args | array_access | member_access | postfix_op)* }
 
 atom = {
-    new_expression
+    prefix_op
+    | new_expression
     | literal
     | identifier
     | "(" ~ expression ~ ")"
 }
+
+prefix_op = { ("++" | "--") ~ target }
+postfix_op = { "++" | "--" }
 
 new_keyword = @{ "new" ~ !ASCII_ALPHANUMERIC }
 new_expression = { new_keyword ~ identifier ~ "(" ~ args? ~ ")" }

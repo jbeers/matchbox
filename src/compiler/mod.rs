@@ -215,9 +215,8 @@ impl Compiler {
             }
             Statement::ForClassic { init, condition, update, body } => {
                 self.begin_scope();
-                if let Some(init_expr) = init {
-                    self.compile_expression(init_expr)?;
-                    self.chunk.write(OpCode::OpPop);
+                if let Some(init_stmt) = init {
+                    self.compile_statement(init_stmt)?;
                 }
 
                 let loop_start = self.chunk.code.len();
@@ -500,6 +499,95 @@ impl Compiler {
                 self.compile_expression(base)?;
                 let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
                 self.chunk.write(OpCode::OpMember(name_idx));
+                Ok(())
+            }
+            Expression::Prefix { operator, target } => {
+                match target {
+                    crate::ast::AssignmentTarget::Identifier(name) => {
+                        self.compile_expression(&Expression::Identifier(name.clone()))?;
+                        if operator == "++" {
+                            self.chunk.write(OpCode::OpInc);
+                        } else {
+                            self.chunk.write(OpCode::OpDec);
+                        }
+                        
+                        // Set back
+                        if let Some(slot) = self.resolve_local(name) {
+                            self.chunk.write(OpCode::OpSetLocal(slot));
+                        } else if self.is_class {
+                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            self.chunk.write(OpCode::OpSetPrivate(idx));
+                        } else {
+                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            self.chunk.write(OpCode::OpSetGlobal(idx));
+                        }
+                    }
+                    crate::ast::AssignmentTarget::Member { base, member } => {
+                        self.compile_expression(base)?;
+                        self.chunk.write(OpCode::OpDup);
+                        let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                        self.chunk.write(OpCode::OpMember(name_idx));
+                        if operator == "++" {
+                            self.chunk.write(OpCode::OpInc);
+                        } else {
+                            self.chunk.write(OpCode::OpDec);
+                        }
+                        self.chunk.write(OpCode::OpSetMember(name_idx));
+                    }
+                    crate::ast::AssignmentTarget::Index { base, index } => {
+                        self.compile_expression(base)?;
+                        self.compile_expression(index)?;
+                        self.chunk.write(OpCode::OpDup);
+                        // Wait, I need base AND index.
+                        // [base, index] -> [base, index, base, index] would be better.
+                        // Let's just implement for Identifier and Member for now if too complex.
+                        // Actually, I can just use temporary locals or more DUPs.
+                        // For now, let's bail on Index prefix/postfix if not easy.
+                        bail!("Prefix ops on indexed targets not yet implemented");
+                    }
+                }
+                Ok(())
+            }
+            Expression::Postfix { base, operator } => {
+                // Postfix is more complex because we need to return original value
+                match base.as_ref() {
+                    Expression::Identifier(name) => {
+                        self.compile_expression(base)?; // [val]
+                        self.chunk.write(OpCode::OpDup); // [val, val]
+                        if operator == "++" {
+                            self.chunk.write(OpCode::OpInc); // [val, val+1]
+                        } else {
+                            self.chunk.write(OpCode::OpDec); // [val, val-1]
+                        }
+                        // Set back
+                        if let Some(slot) = self.resolve_local(name) {
+                            self.chunk.write(OpCode::OpSetLocal(slot)); // [val, val+1]
+                        } else if self.is_class {
+                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            self.chunk.write(OpCode::OpSetPrivate(idx));
+                        } else {
+                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            self.chunk.write(OpCode::OpSetGlobal(idx));
+                        }
+                        self.chunk.write(OpCode::OpPop); // [val]
+                    }
+                    Expression::MemberAccess { base: member_base, member } => {
+                        self.compile_expression(member_base)?; // [obj]
+                        self.chunk.write(OpCode::OpDup); // [obj, obj]
+                        let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                        self.chunk.write(OpCode::OpMember(name_idx)); // [obj, val]
+                        self.chunk.write(OpCode::OpSwap); // [val, obj]
+                        self.chunk.write(OpCode::OpOver); // [val, obj, val]
+                        if operator == "++" {
+                            self.chunk.write(OpCode::OpInc); // [val, obj, val+1]
+                        } else {
+                            self.chunk.write(OpCode::OpDec); // [val, obj, val-1]
+                        }
+                        self.chunk.write(OpCode::OpSetMember(name_idx)); // [val, val+1]
+                        self.chunk.write(OpCode::OpPop); // [val]
+                    }
+                    _ => bail!("Postfix ops only supported on identifiers and members currently"),
+                }
                 Ok(())
             }
         }

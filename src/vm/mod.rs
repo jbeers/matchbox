@@ -149,6 +149,38 @@ impl VM {
                 OpCode::OpPop => {
                     self.stack.pop();
                 }
+                OpCode::OpDup => {
+                    let val = self.stack.last().unwrap().clone();
+                    self.stack.push(val);
+                }
+                OpCode::OpSwap => {
+                    let b = self.stack.pop().unwrap();
+                    let a = self.stack.pop().unwrap();
+                    self.stack.push(b);
+                    self.stack.push(a);
+                }
+                OpCode::OpOver => {
+                    let val = self.stack[self.stack.len() - 2].clone();
+                    self.stack.push(val);
+                }
+                OpCode::OpInc => {
+                    let val = self.stack.pop().unwrap();
+                    if let BxValue::Number(n) = val {
+                        self.stack.push(BxValue::Number(n + 1.0));
+                    } else {
+                        self.throw_error("Increment operand must be a number")?;
+                        continue;
+                    }
+                }
+                OpCode::OpDec => {
+                    let val = self.stack.pop().unwrap();
+                    if let BxValue::Number(n) = val {
+                        self.stack.push(BxValue::Number(n - 1.0));
+                    } else {
+                        self.throw_error("Decrement operand must be a number")?;
+                        continue;
+                    }
+                }
                 OpCode::OpDefineGlobal(idx) => {
                     let name = self.read_string_constant(idx);
                     let val = self.stack.pop().unwrap();

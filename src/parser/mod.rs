@@ -28,6 +28,11 @@ fn parse_params(pair: pest::iterators::Pair<Rule>) -> Vec<String> {
     pair.into_inner().map(|p| p.as_str().to_string()).collect()
 }
 
+fn parse_init(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
+    let inner = pair.into_inner().next().ok_or_else(|| anyhow!("Empty init"))?;
+    parse_statement(inner)
+}
+
 fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Statement>> {
     let mut stmts = Vec::new();
     for inner in pair.into_inner() {
@@ -37,10 +42,14 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Statement>> {
 }
 
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
-    let inner = pair.into_inner().next().unwrap();
-    match inner.as_rule() {
+    let rule = pair.as_rule();
+    match rule {
+        Rule::statement => {
+            let inner = pair.into_inner().next().unwrap();
+            parse_statement(inner)
+        }
         Rule::class_decl => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // class_keyword
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut members = Vec::new();
@@ -62,7 +71,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             Ok(Statement::ClassDecl { name, members })
         }
         Rule::function_decl => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // function_keyword
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut params = Vec::new();
@@ -73,12 +82,11 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 next = inner_rules.next().unwrap();
             }
             
-            let mut body_stmts = Vec::new();
-            if next.as_rule() == Rule::block {
-                for stmt_pair in next.into_inner() {
-                    body_stmts.push(parse_statement(stmt_pair)?);
-                }
-            }
+            let body_stmts = if next.as_rule() == Rule::block {
+                parse_block(next)?
+            } else {
+                Vec::new()
+            };
             
             Ok(Statement::FunctionDecl { 
                 name, 
@@ -87,14 +95,11 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             })
         }
         Rule::for_loop => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // for_keyword
             let loop_type = inner_rules.next().unwrap();
             let body_rule = inner_rules.next().unwrap();
-            let mut body = Vec::new();
-            for stmt_rule in body_rule.into_inner() {
-                body.push(parse_statement(stmt_rule)?);
-            }
+            let body = parse_block(body_rule)?;
 
             match loop_type.as_rule() {
                 Rule::for_in => {
@@ -120,7 +125,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                     
                     for rule in rules {
                         match rule.as_rule() {
-                            Rule::init => init = Some(parse_expression(rule)?),
+                            Rule::init => init = Some(Box::new(parse_init(rule)?)),
                             Rule::condition => condition = Some(parse_expression(rule)?),
                             Rule::update => update = Some(parse_expression(rule)?),
                             _ => {}
@@ -132,31 +137,22 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             }
         }
         Rule::if_statement => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // if_keyword
             let condition = parse_expression(inner_rules.next().unwrap())?;
-            let mut then_branch = Vec::new();
-            let mut else_branch = None;
-            
             let then_block_rule = inner_rules.next().unwrap();
-            for stmt_rule in then_block_rule.into_inner() {
-                then_branch.push(parse_statement(stmt_rule)?);
-            }
+            let then_branch = parse_block(then_block_rule)?;
+            let mut else_branch = None;
 
-            if let Some(_next) = inner_rules.next() {
-                // Could be else_keyword
+            if let Some(_else_kw) = inner_rules.next() {
                 let else_block_rule = inner_rules.next().unwrap();
-                let mut e_branch = Vec::new();
-                for stmt_rule in else_block_rule.into_inner() {
-                    e_branch.push(parse_statement(stmt_rule)?);
-                }
-                else_branch = Some(e_branch);
+                else_branch = Some(parse_block(else_block_rule)?);
             }
             
             Ok(Statement::If { condition, then_branch, else_branch })
         }
         Rule::try_catch => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _try_kw = inner_rules.next().unwrap();
             let try_branch = parse_block(inner_rules.next().unwrap())?;
             
@@ -183,27 +179,27 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             Ok(Statement::TryCatch { try_branch, catches, finally_branch })
         }
         Rule::return_stmt => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // return_keyword
-            let expr = if let Some(pair) = inner_rules.next() {
-                Some(parse_expression(pair)?)
+            let expr = if let Some(p) = inner_rules.next() {
+                Some(parse_expression(p)?)
             } else {
                 None
             };
             Ok(Statement::Return(expr))
         }
         Rule::throw_stmt => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // throw_keyword
-            let expr = if let Some(pair) = inner_rules.next() {
-                Some(parse_expression(pair)?)
+            let expr = if let Some(p) = inner_rules.next() {
+                Some(parse_expression(p)?)
             } else {
                 None
             };
             Ok(Statement::Throw(expr))
         }
         Rule::variable_decl => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // var_keyword
             let assignment_rule = inner_rules.next().unwrap();
             let mut assignment_inner = assignment_rule.into_inner();
@@ -211,18 +207,21 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let target = parse_target(target_rule)?;
             let value = parse_expression(assignment_inner.next().unwrap())?;
             
-            // VariableDecl in AST currently only supports simple name
             if let AssignmentTarget::Identifier(name) = target {
                 Ok(Statement::VariableDecl { name, value })
             } else {
                 bail!("'var' only supported for simple identifiers");
             }
         }
-        Rule::expression_stmt => {
-            let expr = parse_expression(inner.into_inner().next().unwrap())?;
+        Rule::assignment => {
+            let expr = parse_expression(pair)?;
             Ok(Statement::Expression(expr))
         }
-        _ => bail!("Unexpected statement rule: {:?}", inner.as_rule()),
+        Rule::expression_stmt => {
+            let expr = parse_expression(pair.into_inner().next().unwrap())?;
+            Ok(Statement::Expression(expr))
+        }
+        _ => bail!("Unexpected statement rule: {:?}", rule),
     }
 }
 
@@ -347,6 +346,13 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                     member,
                 };
             }
+            Rule::postfix_op => {
+                let operator = postfix.as_str().to_string();
+                expr = Expression::Postfix {
+                    base: Box::new(expr),
+                    operator,
+                };
+            }
             _ => bail!("Unexpected postfix rule: {:?}", postfix.as_rule()),
         }
     }
@@ -354,10 +360,20 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
 }
 
 fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let inner = pair.into_inner().next().unwrap();
-    match inner.as_rule() {
+    let rule = pair.as_rule();
+    match rule {
+        Rule::atom => {
+            let inner = pair.into_inner().next().unwrap();
+            parse_atom(inner)
+        }
+        Rule::prefix_op => {
+            let operator = if pair.as_str().starts_with("++") { "++" } else { "--" }.to_string();
+            let mut inner_rules = pair.into_inner();
+            let target = parse_target(inner_rules.next().unwrap())?;
+            Ok(Expression::Prefix { operator, target })
+        }
         Rule::new_expression => {
-            let mut inner_rules = inner.into_inner();
+            let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // new_keyword
             let class_name = inner_rules.next().unwrap().as_str().to_string();
             let mut args = Vec::new();
@@ -369,7 +385,7 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
             Ok(Expression::New { class_name, args })
         }
         Rule::literal => {
-            let lit = inner.into_inner().next().unwrap();
+            let lit = pair.into_inner().next().unwrap();
             match lit.as_rule() {
                 Rule::string => {
                     let mut parts = Vec::new();
@@ -416,7 +432,6 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         let key_expr = match key_pair.as_rule() {
                             Rule::identifier => Expression::Identifier(key_pair.as_str().to_string()),
                             Rule::string => {
-                                // Specialized string parsing
                                 let mut parts = Vec::new();
                                 for part in key_pair.into_inner() {
                                     match part.as_rule() {
@@ -459,10 +474,8 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                                 _ => vec![],
                             }
                         };
-                        // Operands like => are literals, not rules, so they don't appear in into_inner()
                         (params, inner.next().unwrap())
                     } else {
-                        // first is function_keyword, next is params or block
                         let next = inner.next().unwrap();
                         if next.as_rule() == Rule::params {
                             let params = parse_params(next);
@@ -473,10 +486,7 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                     };
                     
                     let body = if body_rule.as_rule() == Rule::block {
-                        let mut stmts = Vec::new();
-                        for stmt_pair in body_rule.into_inner() {
-                            stmts.push(parse_statement(stmt_pair)?);
-                        }
+                        let stmts = parse_block(body_rule)?;
                         crate::ast::FunctionBody::Block(stmts)
                     } else {
                         crate::ast::FunctionBody::Expression(Box::new(parse_expression(body_rule)?))
@@ -488,9 +498,9 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
             }
         }
         Rule::identifier => {
-            Ok(Expression::Identifier(inner.as_str().to_string()))
+            Ok(Expression::Identifier(pair.as_str().to_string()))
         }
-        Rule::expression => parse_expression(inner),
-        _ => bail!("Unexpected atom rule: {:?}", inner.as_rule()),
+        Rule::expression => parse_expression(pair),
+        _ => bail!("Unexpected atom rule: {:?}", rule),
     }
 }

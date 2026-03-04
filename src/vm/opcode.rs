@@ -17,6 +17,11 @@ pub enum OpCode {
     OpPrint(usize),        // arg count
     OpPrintln(usize),      // arg count
     OpPop,
+    OpDup,
+    OpSwap,
+    OpOver,
+    OpInc,
+    OpDec,
     OpDefineGlobal(usize), // index of name in constant pool
     OpGetGlobal(usize),    // index of name in constant pool
     OpSetGlobal(usize),    // index of name in constant pool

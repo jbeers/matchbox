@@ -16,7 +16,7 @@ pub enum Statement {
         body: Vec<Statement>,
     },
     ForClassic {
-        init: Option<Expression>,
+        init: Option<Box<Statement>>,
         condition: Option<Expression>,
         update: Option<Expression>,
         body: Vec<Statement>,
@@ -78,6 +78,14 @@ pub enum Expression {
     MemberAccess {
         base: Box<Expression>,
         member: String,
+    },
+    Prefix {
+        operator: String,
+        target: AssignmentTarget,
+    },
+    Postfix {
+        base: Box<Expression>,
+        operator: String,
     },
     Identifier(String),
     Literal(Literal),
