@@ -625,6 +625,16 @@ impl VM {
     }
 
     fn throw_value(&mut self, val: BxValue) -> Result<()> {
+        let mut line = 0;
+        let mut filename = "unknown".to_string();
+        if !self.frames.is_empty() {
+            let frame = self.frames.last().unwrap();
+            filename = frame.function.chunk.filename.clone();
+            if frame.ip > 0 && frame.ip <= frame.function.chunk.lines.len() {
+                line = frame.function.chunk.lines[frame.ip - 1];
+            }
+        }
+
         while !self.frames.is_empty() {
             let frame_idx = self.frames.len() - 1;
             if !self.frames[frame_idx].handlers.is_empty() {
@@ -638,7 +648,7 @@ impl VM {
             }
             self.frames.pop();
         }
-        bail!("Unhandled exception: {}", val);
+        bail!("VM Runtime Error: {} (at {} line {})", val, filename, line);
     }
 
     fn is_truthy(&self, val: &BxValue) -> bool {

@@ -6,19 +6,23 @@ use serde::{Serialize, Deserialize};
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: Vec<BxValue>,
-    // In a real VM, we'd want line numbers here for debugging
+    pub lines: Vec<usize>,
+    pub filename: String,
 }
 
 impl Chunk {
-    pub fn new() -> Self {
+    pub fn new(filename: &str) -> Self {
         Chunk {
             code: Vec::new(),
             constants: Vec::new(),
+            lines: Vec::new(),
+            filename: filename.to_string(),
         }
     }
 
-    pub fn write(&mut self, opcode: OpCode) {
+    pub fn write(&mut self, opcode: OpCode, line: usize) {
         self.code.push(opcode);
+        self.lines.push(line);
     }
 
     pub fn add_constant(&mut self, value: BxValue) -> usize {

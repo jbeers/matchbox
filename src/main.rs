@@ -69,7 +69,7 @@ fn process_file(path: &Path, is_build: bool, target: Option<&str>) -> Result<()>
     } else {
         let source = fs::read_to_string(path)?;
         let ast = parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error: {}", e))?;
-        let compiler = compiler::Compiler::new();
+        let compiler = compiler::Compiler::new(path.to_str().unwrap_or("unknown"));
         let chunk = compiler.compile(&ast).map_err(|e| anyhow::anyhow!("Compiler Error: {}", e))?;
 
         if is_build {
@@ -109,7 +109,7 @@ fn run_chunk(chunk: Chunk) -> Result<()> {
     for (name, val) in bifs::register_all() {
         vm.globals.insert(name, val);
     }
-    vm.interpret(chunk).map_err(|e| anyhow::anyhow!("VM Runtime Error: {}", e))?;
+    vm.interpret(chunk)?;
     Ok(())
 }
 

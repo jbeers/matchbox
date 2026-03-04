@@ -1,5 +1,17 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum Statement {
+pub struct Statement {
+    pub kind: StatementKind,
+    pub line: usize,
+}
+
+impl Statement {
+    pub fn new(kind: StatementKind, line: usize) -> Self {
+        Self { kind, line }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StatementKind {
     Import(String),
     ClassDecl {
         name: String,
@@ -54,7 +66,19 @@ pub enum ClassMember {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Expression {
+pub struct Expression {
+    pub kind: ExpressionKind,
+    pub line: usize,
+}
+
+impl Expression {
+    pub fn new(kind: ExpressionKind, line: usize) -> Self {
+        Self { kind, line }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExpressionKind {
     New {
         class_path: String,
         args: Vec<Expression>,
