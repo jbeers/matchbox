@@ -8,11 +8,24 @@ statement = {
     | function_decl
     | for_loop
     | if_statement
+    | try_catch
     | return_stmt
+    | throw_stmt
     | variable_decl
     | expression_stmt
     )
 }
+
+try_catch = { try_keyword ~ block ~ catch_block* ~ finally_block? }
+catch_block = { catch_keyword ~ "(" ~ identifier ~ ")" ~ block }
+finally_block = { finally_keyword ~ block }
+
+try_keyword = @{ "try" ~ !ASCII_ALPHANUMERIC }
+catch_keyword = @{ "catch" ~ !ASCII_ALPHANUMERIC }
+finally_keyword = @{ "finally" ~ !ASCII_ALPHANUMERIC }
+
+throw_stmt = { throw_keyword ~ expression? ~ ";"? }
+throw_keyword = @{ "throw" ~ !ASCII_ALPHANUMERIC }
 
 class_keyword = @{ "class" ~ !ASCII_ALPHANUMERIC }
 class_decl = { class_keyword ~ identifier ~ "{" ~ class_member* ~ "}" }

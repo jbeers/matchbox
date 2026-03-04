@@ -50,7 +50,6 @@ impl Compiler {
                 for member in members {
                     match member {
                         ClassMember::Property(prop_name) => {
-                            // property x; -> variables.x = null;
                             let null_idx = constructor_compiler.chunk.add_constant(BxValue::Null);
                             constructor_compiler.chunk.write(OpCode::OpConstant(null_idx));
                             let name_idx = constructor_compiler.chunk.add_constant(BxValue::String(prop_name.clone()));
@@ -100,6 +99,72 @@ impl Compiler {
                     self.chunk.write(OpCode::OpConstant(null_idx));
                 }
                 self.chunk.write(OpCode::OpReturn);
+                Ok(())
+            }
+            Statement::Throw(expr) => {
+                if let Some(e) = expr {
+                    self.compile_expression(e)?;
+                } else {
+                    let null_idx = self.chunk.add_constant(BxValue::Null);
+                    self.chunk.write(OpCode::OpConstant(null_idx));
+                }
+                self.chunk.write(OpCode::OpThrow);
+                Ok(())
+            }
+            Statement::TryCatch { try_branch, catches, finally_branch } => {
+                // 1. Push Handler
+                let push_handler_idx = self.chunk.code.len();
+                self.chunk.write(OpCode::OpPushHandler(0));
+
+                // 2. Try block
+                self.begin_scope();
+                for s in try_branch {
+                    self.compile_statement(s)?;
+                }
+                self.end_scope();
+
+                // 3. Pop Handler (if try finished successfully)
+                self.chunk.write(OpCode::OpPopHandler);
+
+                // 4. Jump to finally/end
+                let jump_to_finally_idx = self.chunk.code.len();
+                self.chunk.write(OpCode::OpJump(0));
+
+                // 5. Catch targets
+                let catch_target = self.chunk.code.len();
+                let offset = catch_target - push_handler_idx - 1;
+                self.chunk.code[push_handler_idx] = OpCode::OpPushHandler(offset);
+
+                // For simplicity, we handle the first catch block only in this POC
+                // In a real VM, OpThrow might push the exception value
+                if !catches.is_empty() {
+                    // For simplicity, we handle the first catch block only in this POC
+                    let first_catch = &catches[0];
+                    self.begin_scope();
+                    // Exception value is on top of stack
+                    self.add_local(first_catch.exception_var.clone());
+                    for s in &first_catch.body {
+                        self.compile_statement(s)?;
+                    }
+                    self.end_scope();
+                } else {
+                    // No catch? Rethrow so outer try/catch can handle it
+                    self.chunk.write(OpCode::OpThrow);
+                }
+
+                // 6. Finally block (simplified: just run it at the end)
+                let finally_target = self.chunk.code.len();
+                let jump_offset = finally_target - jump_to_finally_idx - 1;
+                self.chunk.code[jump_to_finally_idx] = OpCode::OpJump(jump_offset);
+
+                if let Some(finally_stmts) = finally_branch {
+                    self.begin_scope();
+                    for s in finally_stmts {
+                        self.compile_statement(s)?;
+                    }
+                    self.end_scope();
+                }
+
                 Ok(())
             }
             Statement::VariableDecl { name, value } => {
@@ -248,7 +313,6 @@ impl Compiler {
     fn compile_expression(&mut self, expr: &Expression) -> Result<()> {
         match expr {
             Expression::New { class_name, args } => {
-                // Look up class in globals
                 let class_idx = self.chunk.add_constant(BxValue::String(class_name.clone()));
                 self.chunk.write(OpCode::OpGetGlobal(class_idx));
                 

@@ -28,16 +28,15 @@ pub enum OpCode {
     OpSetMember(usize),    // dot assignment .member = val
     OpInvoke(usize, usize), // name index, arg count
     OpCall(usize),         // arg count
+    OpIterNext(usize, usize, usize, bool), // collection slot, cursor slot, offset if done, bool if should push index
+    OpNew(usize),          // arg count
+    OpGetPrivate(usize),   // name index (variables scope)
+    OpSetPrivate(usize),   // name index (variables scope)
+    OpPushHandler(usize),  // offset to catch block
+    OpPopHandler,          // remove catch handler
+    OpThrow,               // throw value on stack
     OpJump(usize),         // offset to jump forward
     OpJumpIfFalse(usize),  // offset to jump forward if top of stack is falsey
     OpLoop(usize),         // offset to jump backward
-    OpIterNext(usize, usize, usize, bool), // collection slot, cursor slot, offset if done, bool if should push index
-    OpClass(usize),        // index of name in constant pool
-    OpMethod(usize),       // index of name in constant pool
-    OpNew(usize),          // arg count
-    OpGetThis(usize),      // name index
-    OpSetThis(usize),      // name index
-    OpGetPrivate(usize),   // name index (variables scope)
-    OpSetPrivate(usize),   // name index (variables scope)
     OpReturn,
 }

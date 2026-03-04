@@ -27,11 +27,23 @@ pub enum Statement {
         else_branch: Option<Vec<Statement>>,
     },
     Return(Option<Expression>),
+    Throw(Option<Expression>),
+    TryCatch {
+        try_branch: Vec<Statement>,
+        catches: Vec<CatchBlock>,
+        finally_branch: Option<Vec<Statement>>,
+    },
     VariableDecl {
         name: String,
         value: Expression,
     },
     Expression(Expression),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatchBlock {
+    pub exception_var: String,
+    pub body: Vec<Statement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

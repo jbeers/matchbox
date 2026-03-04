@@ -1,0 +1,28 @@
+// Test try/catch/finally and throw in the VM
+println("Starting exception test")
+
+try {
+    println("Inside try 1")
+    throw "Oops, an error occurred!"
+    println("This should NOT print 1")
+} catch( e ) {
+    println("Caught exception: ", e)
+} finally {
+    println("Finally 1 executed")
+}
+
+println("\nTesting unhandled exception (caught by script runner):")
+function testUnhandled() {
+    println("Inside function")
+    // division by zero should throw in our VM now
+    x = 10 / 0 
+    println("This should NOT print 2")
+}
+
+try {
+    testUnhandled()
+} catch( err ) {
+    println("Caught unhandled from function: ", err)
+}
+
+println("\nException test complete")

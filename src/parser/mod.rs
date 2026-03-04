@@ -1,6 +1,6 @@
 use pest::Parser;
 use pest_derive::Parser;
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, anyhow};
 use crate::ast::{Expression, Literal, Statement, ClassMember, AssignmentTarget};
 
 #[derive(Parser)]
@@ -26,6 +26,14 @@ pub fn parse(source: &str) -> Result<Vec<Statement>> {
 
 fn parse_params(pair: pest::iterators::Pair<Rule>) -> Vec<String> {
     pair.into_inner().map(|p| p.as_str().to_string()).collect()
+}
+
+fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Statement>> {
+    let mut stmts = Vec::new();
+    for inner in pair.into_inner() {
+        stmts.push(parse_statement(inner)?);
+    }
+    Ok(stmts)
 }
 
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -147,6 +155,33 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             
             Ok(Statement::If { condition, then_branch, else_branch })
         }
+        Rule::try_catch => {
+            let mut inner_rules = inner.into_inner();
+            let _try_kw = inner_rules.next().unwrap();
+            let try_branch = parse_block(inner_rules.next().unwrap())?;
+            
+            let mut catches = Vec::new();
+            let mut finally_branch = None;
+            
+            for rule in inner_rules {
+                match rule.as_rule() {
+                    Rule::catch_block => {
+                        let mut catch_inner = rule.into_inner();
+                        let _catch_kw = catch_inner.next().unwrap();
+                        let exception_var = catch_inner.next().unwrap().as_str().to_string();
+                        let body = parse_block(catch_inner.next().unwrap())?;
+                        catches.push(crate::ast::CatchBlock { exception_var, body });
+                    }
+                    Rule::finally_block => {
+                        let mut finally_inner = rule.into_inner();
+                        let _finally_kw = finally_inner.next().unwrap();
+                        finally_branch = Some(parse_block(finally_inner.next().unwrap())?);
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Statement::TryCatch { try_branch, catches, finally_branch })
+        }
         Rule::return_stmt => {
             let mut inner_rules = inner.into_inner();
             let _kw = inner_rules.next().unwrap(); // return_keyword
@@ -156,6 +191,16 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 None
             };
             Ok(Statement::Return(expr))
+        }
+        Rule::throw_stmt => {
+            let mut inner_rules = inner.into_inner();
+            let _kw = inner_rules.next().unwrap(); // throw_keyword
+            let expr = if let Some(pair) = inner_rules.next() {
+                Some(parse_expression(pair)?)
+            } else {
+                None
+            };
+            Ok(Statement::Throw(expr))
         }
         Rule::variable_decl => {
             let mut inner_rules = inner.into_inner();
@@ -182,18 +227,21 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
 }
 
 fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let inner = pair.into_inner().next().unwrap();
-    match inner.as_rule() {
-        Rule::expression | Rule::init | Rule::condition | Rule::update => parse_expression(inner),
+    let rule = pair.as_rule();
+    match rule {
+        Rule::expression | Rule::init | Rule::condition | Rule::update => {
+            let inner = pair.into_inner().next().ok_or_else(|| anyhow!("Empty expression"))?;
+            parse_expression(inner)
+        }
         Rule::assignment => {
-            let mut rules = inner.into_inner();
+            let mut rules = pair.into_inner();
             let target_rule = rules.next().unwrap();
             let target = parse_target(target_rule)?;
             let value = parse_expression(rules.next().unwrap())?;
             Ok(Expression::Assignment { target, value: Box::new(value) })
         }
         Rule::binary_expr => {
-            let mut rules = inner.into_inner();
+            let mut rules = pair.into_inner();
             let mut left = parse_primary(rules.next().unwrap())?;
             
             while let Some(op) = rules.next() {
@@ -207,7 +255,7 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
             }
             Ok(left)
         }
-        _ => bail!("Unexpected expression rule: {:?}", inner.as_rule()),
+        _ => bail!("Unexpected expression rule: {:?}", rule),
     }
 }
 
@@ -368,6 +416,7 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         let key_expr = match key_pair.as_rule() {
                             Rule::identifier => Expression::Identifier(key_pair.as_str().to_string()),
                             Rule::string => {
+                                // Specialized string parsing
                                 let mut parts = Vec::new();
                                 for part in key_pair.into_inner() {
                                     match part.as_rule() {
@@ -410,15 +459,16 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                                 _ => vec![],
                             }
                         };
+                        // Operands like => are literals, not rules, so they don't appear in into_inner()
                         (params, inner.next().unwrap())
                     } else {
-                        // function_keyword
-                        let next = inner.next().unwrap();
-                        if next.as_rule() == Rule::params {
-                            let params = parse_params(next);
+                        // "function" is a literal, so it doesn't appear.
+                        // So first is either params or block.
+                        if first.as_rule() == Rule::params {
+                            let params = parse_params(first);
                             (params, inner.next().unwrap())
                         } else {
-                            (vec![], next)
+                            (vec![], first)
                         }
                     };
                     

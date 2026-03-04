@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use anyhow::{Result, bail};
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance};
+use crate::types::{BxValue, BxCompiledFunction, BxInstance};
 use self::chunk::Chunk;
 use self::opcode::OpCode;
 
@@ -14,6 +14,7 @@ struct CallFrame {
     ip: usize,
     stack_base: usize,
     receiver: Option<Rc<RefCell<BxInstance>>>,
+    handlers: Vec<usize>, // IP targets for catch blocks
 }
 
 pub struct VM {
@@ -43,6 +44,7 @@ impl VM {
             ip: 0,
             stack_base: 0,
             receiver: None,
+            handlers: Vec::new(),
         };
         
         self.frames.push(frame);
@@ -70,11 +72,9 @@ impl VM {
                     self.stack.truncate(frame.stack_base);
                     
                     if frame.function.name.ends_with(".constructor") {
-                        // The instance is at stack[frame.stack_base - 1]
                         let instance = self.stack.pop().unwrap();
                         self.stack.push(instance);
                     } else {
-                        // Remove the function object
                         self.stack.pop();
                         self.stack.push(result);
                     }
@@ -89,7 +89,7 @@ impl VM {
                     match (a, b) {
                         (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Number(a + b)),
                         (BxValue::String(a), BxValue::String(b)) => self.stack.push(BxValue::String(format!("{}{}", a, b))),
-                        _ => bail!("Operands must be two numbers or two strings."),
+                        _ => { self.throw_error("Operands must be two numbers or two strings.")?; continue; },
                     }
                 }
                 OpCode::OpSubtract => {
@@ -98,7 +98,8 @@ impl VM {
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
                         self.stack.push(BxValue::Number(a - b));
                     } else {
-                        bail!("Operands must be two numbers.");
+                        self.throw_error("Operands must be two numbers.")?;
+                        continue;
                     }
                 }
                 OpCode::OpMultiply => {
@@ -107,17 +108,19 @@ impl VM {
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
                         self.stack.push(BxValue::Number(a * b));
                     } else {
-                        bail!("Operands must be two numbers.");
+                        self.throw_error("Operands must be two numbers.")?;
+                        continue;
                     }
                 }
                 OpCode::OpDivide => {
                     let b = self.stack.pop().unwrap();
                     let a = self.stack.pop().unwrap();
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
-                        if b == 0.0 { bail!("Division by zero"); }
-                        self.stack.push(BxValue::Number(a / b));
+                        if b == 0.0 { self.throw_error("Division by zero")?; continue; }
+                        else { self.stack.push(BxValue::Number(a / b)); }
                     } else {
-                        bail!("Operands must be two numbers.");
+                        self.throw_error("Operands must be two numbers.")?;
+                        continue;
                     }
                 }
                 OpCode::OpStringConcat => {
@@ -200,18 +203,21 @@ impl VM {
                                 let idx = n as usize;
                                 let arr = arr.borrow();
                                 if idx < 1 || idx > arr.len() {
-                                    bail!("Array index out of bounds: {}", idx);
+                                    self.throw_error(&format!("Array index out of bounds: {}", idx))?;
+                                    continue;
+                                } else {
+                                    self.stack.push(arr[idx - 1].clone());
                                 }
-                                self.stack.push(arr[idx - 1].clone());
                             } else {
-                                bail!("Array index must be a number");
+                                self.throw_error("Array index must be a number")?;
+                                continue;
                             }
                         }
                         BxValue::Struct(s) => {
                             let key = index_val.to_string().to_lowercase();
                             self.stack.push(s.borrow().get(&key).cloned().unwrap_or(BxValue::Null));
                         }
-                        _ => bail!("Invalid access: base must be array or struct"),
+                        _ => { self.throw_error("Invalid access: base must be array or struct")?; continue; }
                     }
                 }
                 OpCode::OpSetIndex => {
@@ -225,12 +231,15 @@ impl VM {
                                 let idx = n as usize;
                                 let mut arr = arr.borrow_mut();
                                 if idx < 1 || idx > arr.len() {
-                                    bail!("Array index out of bounds: {}", idx);
+                                    self.throw_error(&format!("Array index out of bounds: {}", idx))?;
+                                    continue;
+                                } else {
+                                    arr[idx - 1] = val.clone();
+                                    self.stack.push(val);
                                 }
-                                arr[idx - 1] = val.clone();
-                                self.stack.push(val);
                             } else {
-                                bail!("Array index must be a number");
+                                self.throw_error("Array index must be a number")?;
+                                continue;
                             }
                         }
                         BxValue::Struct(s) => {
@@ -243,7 +252,7 @@ impl VM {
                             inst.borrow().this.borrow_mut().insert(key, val.clone());
                             self.stack.push(val);
                         }
-                        _ => bail!("Invalid indexed assignment"),
+                        _ => { self.throw_error("Invalid indexed assignment")?; continue; }
                     }
                 }
                 OpCode::OpMember(idx) => {
@@ -264,7 +273,7 @@ impl VM {
                                 }
                             }
                         }
-                        _ => bail!("Member access only supported on structs and instances"),
+                        _ => { self.throw_error("Member access only supported on structs and instances")?; continue; }
                     }
                 }
                 OpCode::OpSetMember(idx) => {
@@ -281,7 +290,7 @@ impl VM {
                             inst.borrow().this.borrow_mut().insert(name, val.clone());
                             self.stack.push(val);
                         }
-                        _ => bail!("Member assignment only supported on structs and instances"),
+                        _ => { self.throw_error("Member assignment only supported on structs and instances")?; continue; }
                     }
                 }
                 OpCode::OpInvoke(idx, arg_count) => {
@@ -295,7 +304,6 @@ impl VM {
                     let receiver_val = self.stack.pop().unwrap();
                     match receiver_val {
                         BxValue::Instance(inst) => {
-                            // Find method
                             let method = {
                                 let inst_borrow = inst.borrow();
                                 if let Some(BxValue::CompiledFunction(f)) = inst_borrow.this.borrow().get(&name) {
@@ -309,44 +317,46 @@ impl VM {
                             
                             if let Some(func) = method {
                                 if arg_count != func.arity {
-                                    bail!("Expected {} arguments but got {}.", func.arity, arg_count);
+                                    self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                    continue;
+                                } else {
+                                    for arg in args { self.stack.push(arg); }
+                                    let frame = CallFrame {
+                                        function: func,
+                                        ip: 0,
+                                        stack_base: self.stack.len() - arg_count,
+                                        receiver: Some(inst),
+                                        handlers: Vec::new(),
+                                    };
+                                    self.frames.push(frame);
                                 }
-                                // Re-push args
-                                for arg in args {
-                                    self.stack.push(arg);
-                                }
-                                let frame = CallFrame {
-                                    function: func,
-                                    ip: 0,
-                                    stack_base: self.stack.len() - arg_count,
-                                    receiver: Some(inst),
-                                };
-                                self.frames.push(frame);
                             } else {
-                                bail!("Method {} not found.", name);
+                                self.throw_error(&format!("Method {} not found.", name))?;
+                                continue;
                             }
                         }
                         BxValue::Struct(s) => {
-                            // Call closure stored in struct
                             if let Some(BxValue::CompiledFunction(func)) = s.borrow().get(&name) {
                                 if arg_count != func.arity {
-                                    bail!("Expected {} arguments but got {}.", func.arity, arg_count);
+                                    self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                    continue;
+                                } else {
+                                    for arg in args { self.stack.push(arg); }
+                                    let frame = CallFrame {
+                                        function: Rc::clone(func),
+                                        ip: 0,
+                                        stack_base: self.stack.len() - arg_count,
+                                        receiver: None,
+                                        handlers: Vec::new(),
+                                    };
+                                    self.frames.push(frame);
                                 }
-                                for arg in args {
-                                    self.stack.push(arg);
-                                }
-                                let frame = CallFrame {
-                                    function: Rc::clone(func),
-                                    ip: 0,
-                                    stack_base: self.stack.len() - arg_count,
-                                    receiver: None,
-                                };
-                                self.frames.push(frame);
                             } else {
-                                bail!("Member {} not found or not callable.", name);
+                                self.throw_error(&format!("Member {} not found or not callable.", name))?;
+                                continue;
                             }
                         }
-                        _ => bail!("Can only invoke methods on instances and structs."),
+                        _ => { self.throw_error("Can only invoke methods on instances and structs.")?; continue; }
                     }
                 }
                 OpCode::OpCall(arg_count) => {
@@ -354,17 +364,20 @@ impl VM {
                     match func_val {
                         BxValue::CompiledFunction(func) => {
                             if arg_count != func.arity {
-                                bail!("Expected {} arguments but got {}.", func.arity, arg_count);
+                                self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                continue;
+                            } else {
+                                let frame = CallFrame {
+                                    function: Rc::clone(&func),
+                                    ip: 0,
+                                    stack_base: self.stack.len() - arg_count,
+                                    receiver: self.frames.last().unwrap().receiver.clone(),
+                                    handlers: Vec::new(),
+                                };
+                                self.frames.push(frame);
                             }
-                            let frame = CallFrame {
-                                function: Rc::clone(&func),
-                                ip: 0,
-                                stack_base: self.stack.len() - arg_count,
-                                receiver: self.frames.last().unwrap().receiver.clone(),
-                            };
-                            self.frames.push(frame);
                         }
-                        _ => bail!("Can only call functions."),
+                        _ => { self.throw_error("Can only call functions.")?; continue; }
                     }
                 }
                 OpCode::OpEqual => {
@@ -382,7 +395,7 @@ impl VM {
                     let a = self.stack.pop().unwrap();
                     match (a, b) {
                         (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a < b)),
-                        _ => bail!("Comparison only supported for numbers currently"),
+                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpLessEqual => {
@@ -390,7 +403,7 @@ impl VM {
                     let a = self.stack.pop().unwrap();
                     match (a, b) {
                         (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a <= b)),
-                        _ => bail!("Comparison only supported for numbers currently"),
+                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpGreater => {
@@ -398,7 +411,7 @@ impl VM {
                     let a = self.stack.pop().unwrap();
                     match (a, b) {
                         (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a > b)),
-                        _ => bail!("Comparison only supported for numbers currently"),
+                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpGreaterEqual => {
@@ -406,7 +419,7 @@ impl VM {
                     let a = self.stack.pop().unwrap();
                     match (a, b) {
                         (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a >= b)),
-                        _ => bail!("Comparison only supported for numbers currently"),
+                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpJump(offset) => {
@@ -452,40 +465,25 @@ impl VM {
                                     (true, None, None)
                                 }
                             }
-                            _ => bail!("Iteration only supported for arrays and structs"),
+                            _ => { 
+                                self.throw_error("Iteration only supported for arrays and structs")?;
+                                (true, None, None) // Dummy return, IP already changed
+                            }
                         }
                     };
 
-                    if is_done {
-                        self.frames.last_mut().unwrap().ip += offset;
-                    } else {
-                        if let BxValue::Number(ref mut n) = self.stack[cursor_idx] {
-                            *n += 1.0;
+                    if !self.frames.is_empty() { // Check if we re-entered loop because of dummy above? No, throw changes IP.
+                        if is_done {
+                            self.frames.last_mut().unwrap().ip += offset;
+                        } else {
+                            if let BxValue::Number(ref mut n) = self.stack[cursor_idx] {
+                                *n += 1.0;
+                            }
+                            self.stack.push(next_val.unwrap());
+                            if push_index {
+                                self.stack.push(next_idx.unwrap());
+                            }
                         }
-                        self.stack.push(next_val.unwrap());
-                        if push_index {
-                            self.stack.push(next_idx.unwrap());
-                        }
-                    }
-                }
-                OpCode::OpClass(idx) => {
-                    let name = self.read_string_constant(idx);
-                    let class = BxClass {
-                        name: name.clone(),
-                        constructor: Chunk::new(),
-                        methods: HashMap::new(),
-                    };
-                    self.stack.push(BxValue::Class(Rc::new(RefCell::new(class))));
-                }
-                OpCode::OpMethod(idx) => {
-                    let name = self.read_string_constant(idx);
-                    let method_val = self.stack.pop().unwrap();
-                    let class_val = self.stack.last().unwrap();
-                    
-                    if let (BxValue::Class(class), BxValue::CompiledFunction(method)) = (class_val, method_val) {
-                        class.borrow_mut().methods.insert(name.to_lowercase(), method);
-                    } else {
-                        bail!("Method definition error");
                     }
                 }
                 OpCode::OpNew(arg_count) => {
@@ -501,40 +499,23 @@ impl VM {
                             variables: variables_scope.clone(),
                         }));
                         
-                        // Replace Class with Instance on stack
                         self.stack[class_idx] = BxValue::Instance(Rc::clone(&instance));
 
                         let frame = CallFrame {
                             function: Rc::new(BxCompiledFunction {
                                 name: format!("{}.constructor", class.borrow().name),
-                                arity: 0, // pseudo-constructor currently has no params
+                                arity: 0,
                                 chunk: class.borrow().constructor.clone(),
                             }),
                             ip: 0,
                             stack_base: class_idx + 1,
                             receiver: Some(Rc::clone(&instance)),
+                            handlers: Vec::new(),
                         };
                         self.frames.push(frame);
                     } else {
-                        bail!("Can only instantiate classes.");
-                    }
-                }
-                OpCode::OpGetThis(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    if let Some(ref receiver) = self.frames.last().unwrap().receiver {
-                        let val = receiver.borrow().this.borrow().get(&name).cloned().unwrap_or(BxValue::Null);
-                        self.stack.push(val);
-                    } else {
-                        bail!("'this' scope only available in class methods.");
-                    }
-                }
-                OpCode::OpSetThis(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    let val = self.stack.last().unwrap().clone();
-                    if let Some(ref receiver) = self.frames.last().unwrap().receiver {
-                        receiver.borrow().this.borrow_mut().insert(name, val);
-                    } else {
-                        bail!("'this' scope only available in class methods.");
+                        self.throw_error("Can only instantiate classes.")?;
+                        continue;
                     }
                 }
                 OpCode::OpGetPrivate(idx) => {
@@ -550,7 +531,8 @@ impl VM {
                             self.stack.push(val);
                         }
                     } else {
-                        bail!("'variables' scope only available in classes.");
+                        self.throw_error("'variables' scope only available in classes.")?;
+                        continue;
                     }
                 }
                 OpCode::OpSetPrivate(idx) => {
@@ -559,11 +541,45 @@ impl VM {
                     if let Some(ref receiver) = self.frames.last().unwrap().receiver {
                         receiver.borrow().variables.borrow_mut().insert(name, val);
                     } else {
-                        bail!("'variables' scope only available in classes.");
+                        self.throw_error("'variables' scope only available in classes.")?;
+                        continue;
                     }
+                }
+                OpCode::OpPushHandler(offset) => {
+                    let target_ip = self.frames.last().unwrap().ip + offset;
+                    self.frames.last_mut().unwrap().handlers.push(target_ip);
+                }
+                OpCode::OpPopHandler => {
+                    self.frames.last_mut().unwrap().handlers.pop();
+                }
+                OpCode::OpThrow => {
+                    let val = self.stack.pop().unwrap();
+                    self.throw_value(val)?;
                 }
             }
         }
+    }
+
+    fn throw_error(&mut self, msg: &str) -> Result<()> {
+        let val = BxValue::String(msg.to_string());
+        self.throw_value(val)
+    }
+
+    fn throw_value(&mut self, val: BxValue) -> Result<()> {
+        while !self.frames.is_empty() {
+            let frame_idx = self.frames.len() - 1;
+            if !self.frames[frame_idx].handlers.is_empty() {
+                let handler_ip = self.frames[frame_idx].handlers.pop().unwrap();
+                let stack_base = self.frames[frame_idx].stack_base;
+                self.frames[frame_idx].ip = handler_ip;
+                
+                self.stack.truncate(stack_base);
+                self.stack.push(val);
+                return Ok(());
+            }
+            self.frames.pop();
+        }
+        bail!("Unhandled exception: {}", val);
     }
 
     fn is_truthy(&self, val: &BxValue) -> bool {
