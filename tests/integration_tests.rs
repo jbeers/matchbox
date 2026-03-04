@@ -1,49 +1,41 @@
-use std::process::Command;
-use std::fs;
 use std::path::PathBuf;
+use bx_rust::process_file;
 
-#[test]
-fn run_all_boxlang_scripts() {
-    let mut scripts_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    scripts_dir.push("tests/scripts");
-
-    let entries = fs::read_dir(scripts_dir).expect("Failed to read tests/scripts directory");
-
-    let mut failed_scripts = Vec::new();
-
-    for entry in entries {
-        let entry = entry.expect("Failed to read entry");
-        let path = entry.path();
-
-        if path.extension().and_then(|s| s.to_str()) == Some("bxs") {
-            println!("Running test script: {:?}", path.file_name().unwrap());
+macro_rules! script_test {
+    ($name:ident, $file:expr) => {
+        #[test]
+        fn $name() {
+            let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            path.push("tests/scripts");
+            path.push($file);
             
-            let output = Command::new("cargo")
-                .arg("run")
-                .arg("--quiet")
-                .arg("--")
-                .arg(&path)
-                .output()
-                .expect("Failed to execute cargo run");
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                failed_scripts.push(format!(
-                    "Script {:?} failed with exit code {:?}
-Stderr: {}",
-                    path.file_name().unwrap(),
-                    output.status.code(),
-                    stderr
-                ));
+            if let Err(e) = process_file(&path, false, None) {
+                panic!("Script {} failed: {}", $file, e);
             }
         }
-    }
-
-    if !failed_scripts.is_empty() {
-        panic!("The following test scripts failed:
-
-{}", failed_scripts.join("
----
-"));
-    }
+    };
 }
+
+script_test!(arrays, "arrays.bxs");
+script_test!(bifs, "bifs.bxs");
+script_test!(for_in_loops, "for_in_loops.bxs");
+script_test!(for_loop, "for_loop.bxs");
+script_test!(functions, "functions.bxs");
+script_test!(hello_world, "hello_world.bxs");
+script_test!(java_test, "java_test.bxs");
+script_test!(multi_file, "multi_file.bxs");
+script_test!(nested_interpolation, "nested_interpolation.bxs");
+script_test!(return_statement, "return.bxs");
+script_test!(string_concat, "string_concat.bxs");
+script_test!(string_interpolation, "string_interpolation.bxs");
+script_test!(structs, "structs.bxs");
+script_test!(top_level_return, "top_level_return.bxs");
+script_test!(vm_basic, "vm_basic.bxs");
+script_test!(vm_classes, "vm_classes.bxs");
+script_test!(vm_complex_types, "vm_complex_types.bxs");
+script_test!(vm_exceptions, "vm_exceptions.bxs");
+script_test!(vm_functions, "vm_functions.bxs");
+script_test!(vm_if, "vm_if.bxs");
+script_test!(vm_loop, "vm_loop.bxs");
+script_test!(vm_struct_assign, "vm_struct_assign.bxs");
+script_test!(vm_struct_iter, "vm_struct_iter.bxs");
