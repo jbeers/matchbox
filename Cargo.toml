@@ -12,3 +12,10 @@ rand = "0.10.0"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 wasm-encoder = "0.245.1"
 wasmparser = "0.245.1"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization
+codegen-units = 1   # Better optimizations
+panic = "abort"     # Remove stack unwinding code
+strip = true        # Automatically strip symbols from the binary
