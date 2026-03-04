@@ -16,12 +16,13 @@ struct Local {
 }
 
 pub struct Compiler {
-    chunk: Chunk,
+    pub chunk: Chunk,
     locals: Vec<Local>,
     scope_depth: i32,
     is_class: bool,
     imports: HashMap<String, String>, // Alias -> Full Path
     current_line: usize,
+    pub is_repl: bool,
 }
 
 impl Compiler {
@@ -33,18 +34,21 @@ impl Compiler {
             is_class: false,
             imports: HashMap::new(),
             current_line: 0,
+            is_repl: false,
         }
     }
 
     pub fn compile(mut self, ast: &[Statement]) -> Result<Chunk> {
-        for stmt in ast {
-            self.compile_statement(stmt)?;
+        let len = ast.len();
+        for (i, stmt) in ast.iter().enumerate() {
+            let is_last = i == len - 1;
+            self.compile_statement(stmt, is_last)?;
         }
         self.chunk.write(OpCode::OpReturn, self.current_line);
         Ok(self.chunk)
     }
 
-    fn compile_statement(&mut self, stmt: &Statement) -> Result<()> {
+    fn compile_statement(&mut self, stmt: &Statement, is_last: bool) -> Result<()> {
         self.current_line = stmt.line;
         match &stmt.kind {
             StatementKind::Import(path) => {
@@ -81,7 +85,7 @@ impl Compiler {
                                     methods.insert(func_name.to_lowercase(), Rc::new(func));
                                 }
                                 _ => {
-                                    constructor_compiler.compile_statement(inner_stmt)?;
+                                    constructor_compiler.compile_statement(inner_stmt, false)?;
                                 }
                             }
                         }
@@ -104,7 +108,9 @@ impl Compiler {
             }
             StatementKind::Expression(expr) => {
                 self.compile_expression(expr)?;
-                self.chunk.write(OpCode::OpPop, stmt.line);
+                if !self.is_repl || !is_last {
+                    self.chunk.write(OpCode::OpPop, stmt.line);
+                }
                 Ok(())
             }
             StatementKind::Return(expr) => {
@@ -133,7 +139,7 @@ impl Compiler {
 
                 self.begin_scope();
                 for s in try_branch {
-                    self.compile_statement(s)?;
+                    self.compile_statement(s, false)?;
                 }
                 self.end_scope();
 
@@ -151,7 +157,7 @@ impl Compiler {
                     self.begin_scope();
                     self.add_local(first_catch.exception_var.clone());
                     for s in &first_catch.body {
-                        self.compile_statement(s)?;
+                        self.compile_statement(s, false)?;
                     }
                     self.end_scope();
                 } else {
@@ -165,7 +171,7 @@ impl Compiler {
                 if let Some(finally_stmts) = finally_branch {
                     self.begin_scope();
                     for s in finally_stmts {
-                        self.compile_statement(s)?;
+                        self.compile_statement(s, false)?;
                     }
                     self.end_scope();
                 }
@@ -177,6 +183,9 @@ impl Compiler {
                 if self.scope_depth > 0 {
                     self.add_local(name.clone());
                 } else {
+                    if self.is_repl && is_last {
+                        self.chunk.write(OpCode::OpDup, stmt.line);
+                    }
                     let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
                     self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 }
@@ -191,7 +200,7 @@ impl Compiler {
 
                 self.begin_scope();
                 for stmt in then_branch {
-                    self.compile_statement(stmt)?;
+                    self.compile_statement(stmt, false)?;
                 }
                 self.end_scope();
 
@@ -207,7 +216,7 @@ impl Compiler {
                 if let Some(else_stmts) = else_branch {
                     self.begin_scope();
                     for stmt in else_stmts {
-                        self.compile_statement(stmt)?;
+                        self.compile_statement(stmt, false)?;
                     }
                     self.end_scope();
                 }
@@ -221,7 +230,7 @@ impl Compiler {
             StatementKind::ForClassic { init, condition, update, body } => {
                 self.begin_scope();
                 if let Some(init_stmt) = init {
-                    self.compile_statement(init_stmt)?;
+                    self.compile_statement(init_stmt, false)?;
                 }
 
                 let loop_start = self.chunk.code.len();
@@ -236,7 +245,7 @@ impl Compiler {
                 }
 
                 for stmt in body {
-                    self.compile_statement(stmt)?;
+                    self.compile_statement(stmt, false)?;
                 }
 
                 if let Some(update_expr) = update {
@@ -260,6 +269,10 @@ impl Compiler {
             }
             StatementKind::FunctionDecl { name, params, body } => {
                 let func = self.compile_function(&name, &params, &body)?;
+                if self.is_repl && is_last {
+                    let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func.clone())));
+                    self.chunk.write(OpCode::OpConstant(func_idx), stmt.line);
+                }
                 let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func)));
                 self.chunk.write(OpCode::OpConstant(func_idx), stmt.line);
                 let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
@@ -290,7 +303,7 @@ impl Compiler {
                 }
 
                 for stmt in body {
-                    self.compile_statement(stmt)?;
+                    self.compile_statement(stmt, false)?;
                 }
 
                 if index.is_some() {
@@ -634,7 +647,7 @@ impl Compiler {
         match body {
             FunctionBody::Block(stmts) => {
                 for stmt in stmts {
-                    sub_compiler.compile_statement(stmt)?;
+                    sub_compiler.compile_statement(stmt, false)?;
                 }
                 let null_idx = sub_compiler.chunk.add_constant(BxValue::Null);
                 sub_compiler.chunk.write(OpCode::OpConstant(null_idx), sub_compiler.current_line);

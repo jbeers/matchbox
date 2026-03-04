@@ -8,6 +8,7 @@ mod compiler;
 use std::env as std_env;
 use std::fs;
 use std::path::Path;
+use std::io::{self, Write};
 use anyhow::{Result, bail, Context};
 use crate::vm::chunk::Chunk;
 
@@ -26,7 +27,7 @@ fn main() -> Result<()> {
     }
 
     let args: Vec<String> = std_env::args().collect();
-    if args.len() < 2 || args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
+    if args.contains(&"--help".to_string()) || args.contains(&"-h".to_string()) {
         print_usage();
         return Ok(());
     }
@@ -39,26 +40,36 @@ fn main() -> Result<()> {
     };
 
     let filename = args.iter().skip(1)
-        .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm")
-        .context("No filename or directory provided")?;
-    let path = Path::new(filename);
+        .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm");
 
-    if path.is_dir() {
-        process_directory(path, is_build, target)?;
-    } else {
-        process_file(path, is_build, target)?;
+    match filename {
+        Some(name) => {
+            let path = Path::new(name);
+            if path.is_dir() {
+                process_directory(path, is_build, target)?;
+            } else {
+                process_file(path, is_build, target)?;
+            }
+        }
+        None => {
+            if is_build || target.is_some() {
+                bail!("No filename provided for build/target");
+            }
+            run_repl()?;
+        }
     }
 
     Ok(())
 }
 
 fn print_usage() {
-    println!("Usage: bx-rust [options] <file.bxs|file.bxb|directory>");
+    println!("Usage: bx-rust [options] [file.bxs|file.bxb|directory]");
     println!("\nOptions:");
     println!("  -h, --help          Show this help message");
     println!("  --build             Compile to bytecode (.bxb)");
     println!("  --target <native>   Produce a standalone native binary");
     println!("  --target <wasm>     Produce a standalone WASM binary");
+    println!("\nIf no file is provided, bx-rust starts in REPL mode.");
 }
 
 fn process_file(path: &Path, is_build: bool, target: Option<&str>) -> Result<()> {
@@ -110,6 +121,59 @@ fn run_chunk(chunk: Chunk) -> Result<()> {
         vm.globals.insert(name, val);
     }
     vm.interpret(chunk)?;
+    Ok(())
+}
+
+fn run_repl() -> Result<()> {
+    println!("BoxLang REPL (Rust)");
+    println!("Type 'exit' or 'quit' to exit.");
+
+    let mut vm = vm::VM::new();
+    for (name, val) in bifs::register_all() {
+        vm.globals.insert(name, val);
+    }
+
+    loop {
+        print!("bx> ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input)? == 0 {
+            println!();
+            break;
+        }
+
+        let input = input.trim();
+        if input.is_empty() {
+            continue;
+        }
+
+        if input == "exit" || input == "quit" {
+            break;
+        }
+
+        match parser::parse(input) {
+            Ok(ast) => {
+                let mut compiler = compiler::Compiler::new("repl");
+                compiler.is_repl = true;
+                match compiler.compile(&ast) {
+                    Ok(chunk) => {
+                        match vm.interpret(chunk) {
+                            Ok(val) => {
+                                if val != types::BxValue::Null {
+                                    println!("=> {}", val);
+                                }
+                            }
+                            Err(e) => println!("Error: {}", e),
+                        }
+                    }
+                    Err(e) => println!("Compiler Error: {}", e),
+                }
+            }
+            Err(e) => println!("Parse Error: {}", e),
+        }
+    }
+
     Ok(())
 }
 
