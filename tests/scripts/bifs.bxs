@@ -1,0 +1,31 @@
+// Test Math BIFs
+println("abs(-10) =", abs(-10))
+println("min(5, 10) =", min(5, 10))
+println("max(5, 10) =", max(5, 10))
+println("round(3.6) =", round(3.6))
+println("randRange(1, 10) =", randRange(1, 10))
+
+// Test Array BIFs
+arr = arrayNew()
+println("len(new arr) =", len(arr))
+arrayAppend(arr, 1)
+arrayAppend(arr, 2)
+println("After appends, arr =", arr)
+
+// Test Struct BIFs
+person = structNew()
+person.name = "Luis"
+person.age = 40
+println("structCount(person) =", structCount(person))
+println("structKeyExists(person, 'name') =", structKeyExists(person, "name"))
+println("structKeyExists(person, 'invalid') =", structKeyExists(person, "invalid"))
+
+// Test Date/Time BIFs
+println("now() =", now())
+start = getTickCount()
+// Do some work
+for (i = 1; i <= 1000; i = i + 1) {
+    // idle
+}
+end = getTickCount()
+println("Elapsed time (ms) approx:", end - start)

@@ -1,4 +1,5 @@
 mod ast;
+mod bifs;
 mod parser;
 mod types;
 mod vm;
@@ -23,6 +24,12 @@ fn main() -> Result<()> {
             match compiler.compile(&ast) {
                 Ok(chunk) => {
                     let mut vm = vm::VM::new();
+                    
+                    // Register BIFs
+                    for (name, val) in bifs::register_all() {
+                        vm.globals.insert(name, val);
+                    }
+
                     match vm.interpret(chunk) {
                         Ok(_) => {}
                         Err(e) => eprintln!("VM Runtime Error: {}", e),

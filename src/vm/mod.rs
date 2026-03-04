@@ -20,7 +20,7 @@ struct CallFrame {
 pub struct VM {
     frames: Vec<CallFrame>,
     stack: Vec<BxValue>,
-    globals: HashMap<String, BxValue>,
+    pub globals: HashMap<String, BxValue>,
 }
 
 impl VM {
@@ -375,6 +375,22 @@ impl VM {
                                     handlers: Vec::new(),
                                 };
                                 self.frames.push(frame);
+                            }
+                        }
+                        BxValue::NativeFunction(func) => {
+                            let mut args = Vec::with_capacity(arg_count);
+                            for _ in 0..arg_count {
+                                args.push(self.stack.pop().unwrap());
+                            }
+                            args.reverse();
+                            self.stack.pop(); // Pop the function object
+                            
+                            match func(&args) {
+                                Ok(val) => self.stack.push(val),
+                                Err(e) => {
+                                    self.throw_error(&e)?;
+                                    continue;
+                                }
                             }
                         }
                         _ => { self.throw_error("Can only call functions.")?; continue; }

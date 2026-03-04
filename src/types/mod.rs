@@ -12,9 +12,12 @@ pub enum BxValue {
     Array(Rc<RefCell<Vec<BxValue>>>),
     Struct(Rc<RefCell<HashMap<String, BxValue>>>),
     CompiledFunction(Rc<BxCompiledFunction>),
+    NativeFunction(BxNativeFunction),
     Class(Rc<RefCell<BxClass>>),
     Instance(Rc<RefCell<BxInstance>>),
 }
+
+pub type BxNativeFunction = fn(&[BxValue]) -> Result<BxValue, String>;
 
 impl fmt::Display for BxValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -40,6 +43,7 @@ impl fmt::Display for BxValue {
                 write!(f, "{{{}}}", items.join(", "))
             }
             BxValue::CompiledFunction(func) => write!(f, "<compiled function {}>", func.name),
+            BxValue::NativeFunction(_) => write!(f, "<native function>"),
             BxValue::Class(class) => write!(f, "<class {}>", class.borrow().name),
             BxValue::Instance(inst) => write!(f, "<instance of {}>", inst.borrow().class.borrow().name),
         }
