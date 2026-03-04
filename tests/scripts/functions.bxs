@@ -7,7 +7,7 @@ sayHello("BoxLang")
 // Test closure syntax
 add = (a, b) => {
     println("Adding", a, "and", b)
-    a + b
+    return a + b
 }
 println("Sum:", add(5, 10))
 
@@ -21,10 +21,10 @@ println("Square of 5:", square(5))
 
 // Higher-order function
 function applyOp(a, b, op) {
-    op(a, b)
+    return op(a, b)
 }
 println("Result from higher-order:", applyOp(10, 2, (x, y) => x / y))
 
 // Anonymous function with FUNCTION keyword
-sub = function(a, b) { a - b }
+sub = function(a, b) { return a - b }
 println("Subtraction:", sub(20, 5))

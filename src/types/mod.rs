@@ -2,6 +2,8 @@ use std::fmt;
 
 use std::collections::HashMap;
 
+use std::rc::Rc;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BxValue {
     String(String),
@@ -10,8 +12,7 @@ pub enum BxValue {
     Null,
     Array(Vec<BxValue>),
     Struct(HashMap<String, BxValue>),
-    Function(BxFunction),
-    Return(Box<BxValue>),
+    CompiledFunction(Rc<BxCompiledFunction>),
 }
 
 impl fmt::Display for BxValue {
@@ -29,15 +30,14 @@ impl fmt::Display for BxValue {
                 let items: Vec<String> = s.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
                 write!(f, "{{{}}}", items.join(", "))
             }
-            BxValue::Function(func) => write!(f, "<function {}>", func.name),
-            BxValue::Return(val) => write!(f, "{}", val),
+            BxValue::CompiledFunction(func) => write!(f, "<compiled function {}>", func.name),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct BxFunction {
+pub struct BxCompiledFunction {
     pub name: String,
-    pub params: Vec<String>,
-    pub body: crate::ast::FunctionBody,
+    pub arity: usize,
+    pub chunk: crate::vm::chunk::Chunk,
 }

@@ -8,37 +8,40 @@ To create a high-performance, standalone implementation of BoxLang that focuses 
 ## Architectural Decisions
 
 ### 1. Parser: Pest over ANTLR
-- **Decision:** Use [Pest](https://pest.rs/) for grammar and parsing instead of the official ANTLR4 grammar.
-- **Rationale:** The official BoxLang ANTLR grammar contains Java-specific actions and targets. `antlr-rust` is less idiomatic and harder to maintain for this specific use case. Pest allows for a clean, Rust-native PEG grammar that is easy to extend and debug.
+- **Decision:** Use [Pest](https://pest.rs/) for grammar and parsing.
+- **Rationale:** Native Rust performance and idiomatic integration.
 - **Location:** `src/parser/boxlang.pest` and `src/parser/mod.rs`.
 
-### 2. Execution: Tree-Walking Evaluator
-- **Decision:** Use a tree-walking interpreter for the Proof of Concept.
-- **Rationale:** Provides the quickest path to functional parity for dynamic language features (scoping, BIFs, dynamic typing) while maintaining a clean AST structure for future bytecode compilation or JIT improvements.
-- **Location:** `src/evaluator/mod.rs`.
+### 2. Execution: Bytecode Virtual Machine (VM)
+- **Decision:** Migrated from a tree-walking interpreter to a stack-based Bytecode VM.
+- **Rationale:** Better support for future features (Classes, Scopes), faster execution, and portability (WASM support).
+- **Location:** `src/vm/mod.rs` (VM), `src/compiler/mod.rs` (AST to Bytecode compiler).
 
 ### 3. Scoping & Types
-- **Decision:** Case-insensitive variable resolution and dynamic typing.
-- **Rationale:** BoxLang/CFML heritage requires case-insensitivity. The `Environment` struct handles this by normalizing keys to lowercase. `BxValue` handles dynamic type switching.
-- **Location:** `src/env/mod.rs` and `src/types/mod.rs`.
+- **Decision:** Stack-based local scoping and HashMap-based global scoping.
+- **Rationale:** Efficiency and specification parity.
+- **Location:** `src/types/mod.rs` and `src/vm/mod.rs`.
 
 ## Development Guidelines
 
 ### Adding New Syntax
-1. Update `src/parser/boxlang.pest` with the new rule.
-2. Add the corresponding variant to the `Statement` or `Expression` enum in `src/ast/mod.rs`.
-3. Update the `parse_statement` or `parse_expression` functions in `src/parser/mod.rs` to map the Pest rule to the AST node.
-4. Implement the execution logic in `src/evaluator/mod.rs`.
-
-### Adding Built-In Functions (BIFs)
-- Native BIFs are currently intercepted in `src/evaluator/mod.rs` inside `Expression::FunctionCall`.
-- To add a BIF, add its name (lowercase) to the match arms and implement the logic using Rust functions.
+1. Update `src/parser/boxlang.pest`.
+2. Add variant to `Statement` or `Expression` in `src/ast/mod.rs`.
+3. Update `src/parser/mod.rs`.
+4. Update `src/compiler/mod.rs` to emit new opcodes.
+5. Implement opcode in `src/vm/mod.rs`.
 
 ## Future Roadmap
-- [x] Implement `&` for string concatenation (converts operands to strings).
-- [x] Implement anonymous functions, closures, and arrow (lambda) syntax.
-- [x] Implement `return` statement and proper function return values.
-- [x] Add support for `Array` and `Struct` (HashMap) types.
-- [x] Implement the `for(item in collection)` loop for arrays and structs.
-- [ ] Expand the library of BIFs (Math, String manipulation).
+- [x] Implement Stack-Based Bytecode VM.
+- [x] Implement `&` for string concatenation.
+- [x] Implement anonymous functions, closures, and arrow syntax.
+- [x] Implement `return` statement.
+- [x] Add support for `Array` and `Struct` types.
+- [x] Implement for-in loops for arrays and structs.
+- [ ] Add support for Classes and Objects.
+- [ ] Implement Exception Handling (try/catch).
+- [ ] Expand the library of BIFs.
+- [ ] Add a REPL mode.
+- [ ] Produce native/WASM binaries.
+
 - [ ] Add a REPL mode.

@@ -1,0 +1,424 @@
+use anyhow::{Result, bail};
+use crate::ast::{Expression, Literal, Statement, StringPart, FunctionBody};
+use crate::types::{BxValue, BxCompiledFunction};
+use crate::vm::chunk::Chunk;
+use crate::vm::opcode::OpCode;
+use std::rc::Rc;
+
+#[derive(Debug, Clone)]
+struct Local {
+    name: String,
+    depth: i32,
+}
+
+pub struct Compiler {
+    chunk: Chunk,
+    locals: Vec<Local>,
+    scope_depth: i32,
+}
+
+impl Compiler {
+    pub fn new() -> Self {
+        Compiler {
+            chunk: Chunk::new(),
+            locals: Vec::new(),
+            scope_depth: 0,
+        }
+    }
+
+    pub fn compile(mut self, ast: &[Statement]) -> Result<Chunk> {
+        for stmt in ast {
+            self.compile_statement(stmt)?;
+        }
+        self.chunk.write(OpCode::OpReturn);
+        Ok(self.chunk)
+    }
+
+    fn compile_statement(&mut self, stmt: &Statement) -> Result<()> {
+        match stmt {
+            Statement::Expression(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.write(OpCode::OpPop);
+                Ok(())
+            }
+            Statement::Return(expr) => {
+                if let Some(e) = expr {
+                    self.compile_expression(e)?;
+                } else {
+                    let null_idx = self.chunk.add_constant(BxValue::Null);
+                    self.chunk.write(OpCode::OpConstant(null_idx));
+                }
+                self.chunk.write(OpCode::OpReturn);
+                Ok(())
+            }
+            Statement::VariableDecl { name, value } => {
+                self.compile_expression(value)?;
+                if self.scope_depth > 0 {
+                    self.add_local(name.clone());
+                } else {
+                    let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                    self.chunk.write(OpCode::OpDefineGlobal(name_idx));
+                }
+                Ok(())
+            }
+            Statement::If { condition, then_branch, else_branch } => {
+                self.compile_expression(condition)?;
+                
+                let jump_if_false_idx = self.chunk.code.len();
+                self.chunk.write(OpCode::OpJumpIfFalse(0));
+                self.chunk.write(OpCode::OpPop);
+
+                self.begin_scope();
+                for stmt in then_branch {
+                    self.compile_statement(stmt)?;
+                }
+                self.end_scope();
+
+                let jump_idx = self.chunk.code.len();
+                self.chunk.write(OpCode::OpJump(0));
+
+                let false_target = self.chunk.code.len();
+                let offset = false_target - jump_if_false_idx - 1;
+                self.chunk.code[jump_if_false_idx] = OpCode::OpJumpIfFalse(offset);
+                
+                self.chunk.write(OpCode::OpPop);
+
+                if let Some(else_stmts) = else_branch {
+                    self.begin_scope();
+                    for stmt in else_stmts {
+                        self.compile_statement(stmt)?;
+                    }
+                    self.end_scope();
+                }
+
+                let end_target = self.chunk.code.len();
+                let jump_offset = end_target - jump_idx - 1;
+                self.chunk.code[jump_idx] = OpCode::OpJump(jump_offset);
+
+                Ok(())
+            }
+            Statement::ForClassic { init, condition, update, body } => {
+                self.begin_scope();
+                if let Some(init_expr) = init {
+                    self.compile_expression(init_expr)?;
+                    self.chunk.write(OpCode::OpPop);
+                }
+
+                let loop_start = self.chunk.code.len();
+
+                let mut exit_jump = None;
+                if let Some(cond_expr) = condition {
+                    self.compile_expression(cond_expr)?;
+                    let jump_idx = self.chunk.code.len();
+                    self.chunk.write(OpCode::OpJumpIfFalse(0));
+                    self.chunk.write(OpCode::OpPop);
+                    exit_jump = Some(jump_idx);
+                }
+
+                for stmt in body {
+                    self.compile_statement(stmt)?;
+                }
+
+                if let Some(update_expr) = update {
+                    self.compile_expression(update_expr)?;
+                    self.chunk.write(OpCode::OpPop);
+                }
+
+                let loop_end = self.chunk.code.len();
+                let offset = loop_end - loop_start + 1;
+                self.chunk.write(OpCode::OpLoop(offset));
+
+                if let Some(idx) = exit_jump {
+                    let exit_target = self.chunk.code.len();
+                    let offset = exit_target - idx - 1;
+                    self.chunk.code[idx] = OpCode::OpJumpIfFalse(offset);
+                    self.chunk.write(OpCode::OpPop);
+                }
+                self.end_scope();
+
+                Ok(())
+            }
+            Statement::FunctionDecl { name, params, body } => {
+                let func = self.compile_function(name, params, body)?;
+                let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func)));
+                self.chunk.write(OpCode::OpConstant(func_idx));
+                let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                self.chunk.write(OpCode::OpDefineGlobal(name_idx));
+                Ok(())
+            }
+            Statement::ForLoop { item, index, collection, body } => {
+                self.begin_scope();
+                
+                // 1. Evaluate and push collection
+                self.compile_expression(collection)?;
+                let collection_slot = self.locals.len();
+                self.locals.push(Local { name: "$collection".to_string(), depth: self.scope_depth });
+
+                // 2. Push initial cursor
+                let zero_idx = self.chunk.add_constant(BxValue::Number(0.0));
+                self.chunk.write(OpCode::OpConstant(zero_idx));
+                let cursor_slot = self.locals.len();
+                self.locals.push(Local { name: "$cursor".to_string(), depth: self.scope_depth });
+
+                let loop_start = self.chunk.code.len();
+
+                // 3. IterNext
+                let has_index = index.is_some();
+                let iter_next_idx = self.chunk.code.len();
+                self.chunk.write(OpCode::OpIterNext(collection_slot, cursor_slot, 0, has_index));
+
+                // 4. Assign item and index to locals
+                self.add_local(item.clone());
+                if let Some(index_name) = index {
+                    self.add_local(index_name.clone());
+                }
+
+                // 5. Body
+                for stmt in body {
+                    self.compile_statement(stmt)?;
+                }
+
+                // Pop loop variables at end of iteration to keep stack clean for OpIterNext
+                if index.is_some() {
+                    self.chunk.write(OpCode::OpPop);
+                    self.locals.pop();
+                }
+                self.chunk.write(OpCode::OpPop);
+                self.locals.pop();
+
+                // 6. Jump back
+                let loop_end = self.chunk.code.len();
+                let offset = loop_end - loop_start + 1;
+                self.chunk.write(OpCode::OpLoop(offset));
+
+                // 7. Patch exit jump
+                let exit_target = self.chunk.code.len();
+                let offset = exit_target - iter_next_idx - 1;
+                self.chunk.code[iter_next_idx] = OpCode::OpIterNext(collection_slot, cursor_slot, offset, has_index);
+
+                self.end_scope();
+                Ok(())
+            }
+        }
+    }
+
+    fn compile_expression(&mut self, expr: &Expression) -> Result<()> {
+        match expr {
+            Expression::Literal(lit) => match lit {
+                Literal::Number(n) => {
+                    let idx = self.chunk.add_constant(BxValue::Number(*n));
+                    self.chunk.write(OpCode::OpConstant(idx));
+                    Ok(())
+                }
+                Literal::String(parts) => {
+                    if parts.is_empty() {
+                        let idx = self.chunk.add_constant(BxValue::String("".to_string()));
+                        self.chunk.write(OpCode::OpConstant(idx));
+                        return Ok(());
+                    }
+                    self.compile_string_part(&parts[0])?;
+                    for i in 1..parts.len() {
+                        self.compile_string_part(&parts[i])?;
+                        self.chunk.write(OpCode::OpStringConcat);
+                    }
+                    Ok(())
+                }
+                Literal::Boolean(b) => {
+                    let idx = self.chunk.add_constant(BxValue::Boolean(*b));
+                    self.chunk.write(OpCode::OpConstant(idx));
+                    Ok(())
+                }
+                Literal::Null => {
+                    let idx = self.chunk.add_constant(BxValue::Null);
+                    self.chunk.write(OpCode::OpConstant(idx));
+                    Ok(())
+                }
+                Literal::Array(items) => {
+                    for item in items {
+                        self.compile_expression(item)?;
+                    }
+                    self.chunk.write(OpCode::OpArray(items.len()));
+                    Ok(())
+                }
+                Literal::Struct(members) => {
+                    for (key_expr, val_expr) in members {
+                        match key_expr {
+                            Expression::Identifier(name) => {
+                                let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                                self.chunk.write(OpCode::OpConstant(idx));
+                            }
+                            _ => self.compile_expression(key_expr)?,
+                        }
+                        self.compile_expression(val_expr)?;
+                    }
+                    self.chunk.write(OpCode::OpStruct(members.len()));
+                    Ok(())
+                }
+                Literal::Function { params, body } => {
+                    let func = self.compile_function("anonymous", params, body)?;
+                    let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func)));
+                    self.chunk.write(OpCode::OpConstant(func_idx));
+                    Ok(())
+                }
+            },
+            Expression::Binary { left, operator, right } => {
+                self.compile_expression(left)?;
+                self.compile_expression(right)?;
+                match operator.as_str() {
+                    "+" => self.chunk.write(OpCode::OpAdd),
+                    "-" => self.chunk.write(OpCode::OpSubtract),
+                    "*" => self.chunk.write(OpCode::OpMultiply),
+                    "/" => self.chunk.write(OpCode::OpDivide),
+                    "&" => self.chunk.write(OpCode::OpStringConcat),
+                    "==" => self.chunk.write(OpCode::OpEqual),
+                    "!=" => self.chunk.write(OpCode::OpNotEqual),
+                    "<" => self.chunk.write(OpCode::OpLess),
+                    "<=" => self.chunk.write(OpCode::OpLessEqual),
+                    ">" => self.chunk.write(OpCode::OpGreater),
+                    ">=" => self.chunk.write(OpCode::OpGreaterEqual),
+                    _ => bail!("Unknown operator: {}", operator),
+                }
+                Ok(())
+            }
+            Expression::Identifier(name) => {
+                if let Some(slot) = self.resolve_local(name) {
+                    self.chunk.write(OpCode::OpGetLocal(slot));
+                } else {
+                    let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                    self.chunk.write(OpCode::OpGetGlobal(idx));
+                }
+                Ok(())
+            }
+            Expression::Assignment { target, value } => {
+                self.compile_expression(value)?;
+                if let Some(slot) = self.resolve_local(target) {
+                    self.chunk.write(OpCode::OpSetLocal(slot));
+                } else {
+                    let name_idx = self.chunk.add_constant(BxValue::String(target.clone()));
+                    self.chunk.write(OpCode::OpSetGlobal(name_idx));
+                }
+                Ok(())
+            }
+            Expression::FunctionCall { base, args } => {
+                if let Expression::Identifier(name) = base.as_ref() {
+                    let lower_name = name.to_lowercase();
+                    if lower_name == "println" || lower_name == "echo" {
+                        for arg in args {
+                            self.compile_expression(arg)?;
+                        }
+                        self.chunk.write(OpCode::OpPrintln(args.len()));
+                        let null_idx = self.chunk.add_constant(BxValue::Null);
+                        self.chunk.write(OpCode::OpConstant(null_idx));
+                        return Ok(());
+                    }
+                    if lower_name == "print" {
+                        for arg in args {
+                            self.compile_expression(arg)?;
+                        }
+                        self.chunk.write(OpCode::OpPrint(args.len()));
+                        let null_idx = self.chunk.add_constant(BxValue::Null);
+                        self.chunk.write(OpCode::OpConstant(null_idx));
+                        return Ok(());
+                    }
+                }
+                
+                self.compile_expression(base)?;
+                for arg in args {
+                    self.compile_expression(arg)?;
+                }
+                self.chunk.write(OpCode::OpCall(args.len()));
+                Ok(())
+            }
+            Expression::ArrayAccess { base, index } => {
+                self.compile_expression(base)?;
+                self.compile_expression(index)?;
+                self.chunk.write(OpCode::OpIndex);
+                Ok(())
+            }
+            Expression::MemberAccess { base, member } => {
+                self.compile_expression(base)?;
+                let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                self.chunk.write(OpCode::OpMember(name_idx));
+                Ok(())
+            }
+        }
+    }
+
+    fn compile_string_part(&mut self, part: &StringPart) -> Result<()> {
+        match part {
+            StringPart::Text(t) => {
+                let idx = self.chunk.add_constant(BxValue::String(t.clone()));
+                self.chunk.write(OpCode::OpConstant(idx));
+                Ok(())
+            }
+            StringPart::Expression(expr) => self.compile_expression(expr),
+        }
+    }
+
+    fn compile_function(&mut self, name: &str, params: &[String], body: &FunctionBody) -> Result<BxCompiledFunction> {
+        let mut sub_compiler = Compiler::new();
+        sub_compiler.scope_depth = 1;
+        
+        // Add parameters as locals
+        for param in params {
+            sub_compiler.locals.push(Local {
+                name: param.clone(),
+                depth: 1,
+            });
+        }
+
+        match body {
+            FunctionBody::Block(stmts) => {
+                for stmt in stmts {
+                    sub_compiler.compile_statement(stmt)?;
+                }
+                // Implicit return null
+                let null_idx = sub_compiler.chunk.add_constant(BxValue::Null);
+                sub_compiler.chunk.write(OpCode::OpConstant(null_idx));
+                sub_compiler.chunk.write(OpCode::OpReturn);
+            }
+            FunctionBody::Expression(expr) => {
+                sub_compiler.compile_expression(expr)?;
+                sub_compiler.chunk.write(OpCode::OpReturn);
+            }
+        }
+
+        Ok(BxCompiledFunction {
+            name: name.to_string(),
+            arity: params.len(),
+            chunk: sub_compiler.chunk,
+        })
+    }
+
+    fn resolve_local(&self, name: &str) -> Option<usize> {
+        for (i, local) in self.locals.iter().enumerate().rev() {
+            if local.name.to_lowercase() == name.to_lowercase() {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    fn add_local(&mut self, name: String) {
+        self.locals.push(Local {
+            name,
+            depth: self.scope_depth,
+        });
+    }
+
+    fn begin_scope(&mut self) {
+        self.scope_depth += 1;
+    }
+
+    fn end_scope(&mut self) {
+        self.scope_depth -= 1;
+        while let Some(local) = self.locals.last() {
+            if local.depth > self.scope_depth {
+                self.locals.pop();
+                self.chunk.write(OpCode::OpPop);
+            } else {
+                break;
+            }
+        }
+    }
+}

@@ -127,6 +127,14 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             };
             Ok(Statement::Return(expr))
         }
+        Rule::variable_decl => {
+            let mut inner_rules = inner.into_inner();
+            let assignment_rule = inner_rules.next().unwrap();
+            let mut assignment_inner = assignment_rule.into_inner();
+            let name = assignment_inner.next().unwrap().as_str().to_string();
+            let value = parse_expression(assignment_inner.next().unwrap())?;
+            Ok(Statement::VariableDecl { name, value })
+        }
         Rule::expression_stmt => {
             let expr = parse_expression(inner.into_inner().next().unwrap())?;
             Ok(Statement::Expression(expr))
@@ -253,7 +261,30 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         let key_pair = member_inner.next().unwrap().into_inner().next().unwrap();
                         let key_expr = match key_pair.as_rule() {
                             Rule::identifier => Expression::Identifier(key_pair.as_str().to_string()),
-                            Rule::string | Rule::number => parse_atom(key_pair)?,
+                            Rule::string => {
+                                // Specialized string parsing
+                                let mut parts = Vec::new();
+                                for part in key_pair.into_inner() {
+                                    match part.as_rule() {
+                                        Rule::string_text_double | Rule::string_text_single => {
+                                            parts.push(crate::ast::StringPart::Text(part.as_str().to_string()));
+                                        }
+                                        Rule::escaped_hash => {
+                                            parts.push(crate::ast::StringPart::Text("#".to_string()));
+                                        }
+                                        Rule::interpolation => {
+                                            let expr = parse_expression(part.into_inner().next().unwrap())?;
+                                            parts.push(crate::ast::StringPart::Expression(expr));
+                                        }
+                                        _ => bail!("Unexpected string part in struct key: {:?}", part.as_rule()),
+                                    }
+                                }
+                                Expression::Literal(Literal::String(parts))
+                            }
+                            Rule::number => {
+                                let n = key_pair.as_str().parse::<f64>()?;
+                                Expression::Literal(Literal::Number(n))
+                            }
                             _ => bail!("Invalid struct key: {:?}", key_pair.as_rule()),
                         };
                         let val_expr = parse_expression(member_inner.next().unwrap())?;

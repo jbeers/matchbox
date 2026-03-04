@@ -8,6 +8,7 @@ statement = {
     | for_loop
     | if_statement
     | return_stmt
+    | variable_decl
     | expression_stmt
     )
 }
@@ -15,6 +16,8 @@ statement = {
 function_decl = { "function" ~ identifier ~ "(" ~ params? ~ ")" ~ block }
 
 return_stmt = { "return" ~ expression? ~ ";"? }
+
+variable_decl = { "var" ~ assignment }
 params = { identifier ~ ("," ~ identifier)* }
 
 for_loop = { "for" ~ "(" ~ (for_in | for_classic) ~ ")" ~ block }

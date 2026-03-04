@@ -1,0 +1,9 @@
+// Basic math and variable test for the new VM
+x = 10 + 20
+y = 5 * 4
+z = x - y
+println("Result:", z)
+
+a = "Hello"
+b = " VM!"
+println(a & b)

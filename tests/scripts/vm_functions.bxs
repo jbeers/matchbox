@@ -1,0 +1,27 @@
+// Test functions and locals in the VM
+function add(a, b) {
+    return a + b
+}
+
+result = add(10, 20)
+println("Result of add(10, 20): ", result)
+
+// Test closure/lambda
+multiply = (x, y) => x * y
+println("Result of multiply(5, 6): ", multiply(5, 6))
+
+// Nested function call
+function double(n) {
+    return n * 2
+}
+
+println("Double of add(2, 3): ", double(add(2, 3)))
+
+// Scoping test
+x = 100
+function testScope() {
+    var x = 50
+    println("Inside testScope, x = ", x)
+}
+testScope()
+println("Outside testScope, x = ", x)

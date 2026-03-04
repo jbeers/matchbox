@@ -1,0 +1,16 @@
+// Test if statements in the VM
+x = 10
+if (x > 5) {
+    println("x is greater than 5")
+} else {
+    println("x is NOT greater than 5")
+}
+
+y = 2
+if (y > 5) {
+    println("y is greater than 5")
+} else {
+    println("y is NOT greater than 5")
+}
+
+println("If test complete")

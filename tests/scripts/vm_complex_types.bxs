@@ -1,0 +1,19 @@
+// Test arrays and structs in the VM
+arr = [1, 2, 3]
+println("Array: ", arr)
+println("arr[2] = ", arr[2])
+
+person = {
+    name: "Luis",
+    role: "CEO",
+    skills: ["Java", "Rust", "BoxLang"]
+}
+
+println("Person: ", person)
+println("Name: ", person.name)
+println("Role: ", person["role"])
+println("First skill: ", person.skills[1])
+
+// Update struct member - NOT YET SUPPORTED BY GRAMMAR
+// person.role = "Lead Architect"
+// println("New Role: ", person.role)

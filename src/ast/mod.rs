@@ -23,6 +23,10 @@ pub enum Statement {
         else_branch: Option<Vec<Statement>>,
     },
     Return(Option<Expression>),
+    VariableDecl {
+        name: String,
+        value: Expression,
+    },
     Expression(Expression),
 }
 

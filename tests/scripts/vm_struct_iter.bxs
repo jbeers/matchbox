@@ -1,0 +1,11 @@
+// Test struct iteration in the VM
+person = {
+    name: "Luis",
+    role: "CEO",
+    city: "Chicago"
+}
+
+println("Iterating over struct keys:")
+for (key, val in person) {
+    println(key, "=", val)
+}
