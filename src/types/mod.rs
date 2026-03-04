@@ -17,9 +17,16 @@ pub enum BxValue {
     NativeFunction(BxNativeFunction),
     Class(Rc<RefCell<BxClass>>),
     Instance(Rc<RefCell<BxInstance>>),
+    Future(Rc<RefCell<BxFuture>>),
 }
 
-pub type BxNativeFunction = fn(&[BxValue]) -> Result<BxValue, String>;
+pub trait BxVM {
+    fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue;
+    fn yield_fiber(&mut self);
+    fn sleep(&mut self, ms: u64);
+}
+
+pub type BxNativeFunction = fn(&mut dyn BxVM, &[BxValue]) -> Result<BxValue, String>;
 
 impl fmt::Display for BxValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,6 +54,7 @@ impl fmt::Display for BxValue {
             BxValue::NativeFunction(_) => write!(f, "<native function>"),
             BxValue::Class(class) => write!(f, "<class {}>", class.borrow().name),
             BxValue::Instance(inst) => write!(f, "<instance of {}>", inst.borrow().class.borrow().name),
+            BxValue::Future(_) => write!(f, "<future>"),
         }
     }
 }
@@ -70,4 +78,17 @@ pub struct BxInstance {
     pub class: Rc<RefCell<BxClass>>,
     pub this: Rc<RefCell<HashMap<String, BxValue>>>,
     pub variables: Rc<RefCell<HashMap<String, BxValue>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BxFuture {
+    pub value: BxValue,
+    pub status: FutureStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FutureStatus {
+    Pending,
+    Completed,
+    Failed(String),
 }

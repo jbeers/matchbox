@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::types::BxValue;
+use crate::types::{BxValue, BxVM};
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::RngExt;
 use std::rc::Rc;
@@ -28,13 +28,18 @@ pub fn register_all() -> HashMap<String, BxValue> {
     // Date/Time BIFs
     bifs.insert("now".to_string(), BxValue::NativeFunction(now));
     bifs.insert("gettickcount".to_string(), BxValue::NativeFunction(get_tick_count));
+    bifs.insert("sleep".to_string(), BxValue::NativeFunction(sleep));
+    bifs.insert("yield".to_string(), BxValue::NativeFunction(bx_yield));
+
+    // Async BIFs
+    bifs.insert("runasync".to_string(), BxValue::NativeFunction(run_async));
 
     bifs
 }
 
 // --- Implementation ---
 
-fn abs(args: &[BxValue]) -> Result<BxValue, String> {
+fn abs(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("abs() expects exactly 1 argument".to_string()); }
     match &args[0] {
         BxValue::Number(n) => Ok(BxValue::Number(n.abs())),
@@ -42,7 +47,7 @@ fn abs(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn min(args: &[BxValue]) -> Result<BxValue, String> {
+fn min(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("min() expects exactly 2 arguments".to_string()); }
     match (&args[0], &args[1]) {
         (BxValue::Number(a), BxValue::Number(b)) => Ok(BxValue::Number(a.min(*b))),
@@ -50,7 +55,7 @@ fn min(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn max(args: &[BxValue]) -> Result<BxValue, String> {
+fn max(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("max() expects exactly 2 arguments".to_string()); }
     match (&args[0], &args[1]) {
         (BxValue::Number(a), BxValue::Number(b)) => Ok(BxValue::Number(a.max(*b))),
@@ -58,7 +63,7 @@ fn max(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn round(args: &[BxValue]) -> Result<BxValue, String> {
+fn round(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("round() expects exactly 1 argument".to_string()); }
     match &args[0] {
         BxValue::Number(n) => Ok(BxValue::Number(n.round())),
@@ -66,7 +71,7 @@ fn round(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn rand_range(args: &[BxValue]) -> Result<BxValue, String> {
+fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("randRange() expects exactly 2 arguments".to_string()); }
     match (&args[0], &args[1]) {
         (BxValue::Number(min), BxValue::Number(max)) => {
@@ -78,7 +83,7 @@ fn rand_range(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn len(args: &[BxValue]) -> Result<BxValue, String> {
+fn len(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("len() expects exactly 1 argument".to_string()); }
     match &args[0] {
         BxValue::String(s) => Ok(BxValue::Number(s.len() as f64)),
@@ -88,7 +93,7 @@ fn len(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn array_append(args: &[BxValue]) -> Result<BxValue, String> {
+fn array_append(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("arrayAppend() expects exactly 2 arguments".to_string()); }
     match &args[0] {
         BxValue::Array(a) => {
@@ -99,11 +104,11 @@ fn array_append(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn array_new(_args: &[BxValue]) -> Result<BxValue, String> {
+fn array_new(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::Array(Rc::new(RefCell::new(Vec::new()))))
 }
 
-fn struct_key_exists(args: &[BxValue]) -> Result<BxValue, String> {
+fn struct_key_exists(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 { return Err("structKeyExists() expects exactly 2 arguments".to_string()); }
     match (&args[0], &args[1]) {
         (BxValue::Struct(s), BxValue::String(k)) => {
@@ -113,7 +118,7 @@ fn struct_key_exists(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn struct_count(args: &[BxValue]) -> Result<BxValue, String> {
+fn struct_count(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("structCount() expects exactly 1 argument".to_string()); }
     match &args[0] {
         BxValue::Struct(s) => Ok(BxValue::Number(s.borrow().len() as f64)),
@@ -121,19 +126,45 @@ fn struct_count(args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn struct_new(_args: &[BxValue]) -> Result<BxValue, String> {
+fn struct_new(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::Struct(Rc::new(RefCell::new(HashMap::new()))))
 }
 
-fn now(_args: &[BxValue]) -> Result<BxValue, String> {
+fn now(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     let start = SystemTime::now();
     let _since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
-    // BoxLang now() returns a date object, for now we'll just return a formatted string or timestamp
     Ok(BxValue::String(format!("{:?}", start)))
 }
 
-fn get_tick_count(_args: &[BxValue]) -> Result<BxValue, String> {
+fn get_tick_count(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     let start = SystemTime::now();
     let since_the_epoch = start.duration_since(UNIX_EPOCH).expect("Time went backwards");
     Ok(BxValue::Number(since_the_epoch.as_millis() as f64))
+}
+
+fn sleep(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 { return Err("sleep() expects exactly 1 argument".to_string()); }
+    match &args[0] {
+        BxValue::Number(ms) => {
+            vm.sleep(*ms as u64);
+            Ok(BxValue::Null)
+        }
+        _ => Err("sleep() expects a number (milliseconds)".to_string()),
+    }
+}
+
+fn bx_yield(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    vm.yield_fiber();
+    Ok(BxValue::Null)
+}
+
+fn run_async(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() { return Err("runAsync() expects at least 1 argument".to_string()); }
+    match &args[0] {
+        BxValue::CompiledFunction(func) => {
+            let func_args = args[1..].to_vec();
+            Ok(vm.spawn(Rc::clone(func), func_args))
+        }
+        _ => Err("runAsync() expects a function as the first argument".to_string()),
+    }
 }

@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use anyhow::{Result, bail};
-use crate::types::{BxValue, BxCompiledFunction, BxInstance};
+use crate::types::{BxValue, BxCompiledFunction, BxInstance, BxFuture, FutureStatus, BxVM};
 use self::chunk::Chunk;
 use self::opcode::OpCode;
 
+#[derive(Debug, Clone)]
 struct CallFrame {
     function: Rc<BxCompiledFunction>,
     ip: usize,
@@ -17,18 +18,46 @@ struct CallFrame {
     handlers: Vec<usize>, // IP targets for catch blocks
 }
 
-pub struct VM {
-    frames: Vec<CallFrame>,
+pub struct BxFiber {
     stack: Vec<BxValue>,
+    frames: Vec<CallFrame>,
+    pub future: Rc<RefCell<BxFuture>>,
+    pub wait_until: Option<std::time::Instant>,
+    pub yield_requested: bool,
+}
+
+pub struct VM {
+    fibers: Vec<BxFiber>,
     pub globals: HashMap<String, BxValue>,
+    current_fiber_idx: Option<usize>,
+}
+
+impl BxVM for VM {
+    fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue {
+        self.spawn(func, args)
+    }
+
+    fn yield_fiber(&mut self) {
+        if let Some(idx) = self.current_fiber_idx {
+            self.fibers[idx].yield_requested = true;
+        }
+    }
+
+    fn sleep(&mut self, ms: u64) {
+        if let Some(idx) = self.current_fiber_idx {
+            let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+            self.fibers[idx].wait_until = Some(until);
+            self.fibers[idx].yield_requested = true;
+        }
+    }
 }
 
 impl VM {
     pub fn new() -> Self {
         VM {
-            frames: Vec::with_capacity(64),
-            stack: Vec::with_capacity(256),
+            fibers: Vec::new(),
             globals: HashMap::new(),
+            current_fiber_idx: None,
         }
     }
 
@@ -39,99 +68,204 @@ impl VM {
             chunk,
         });
         
-        let frame = CallFrame {
-            function,
-            ip: 0,
-            stack_base: 0,
-            receiver: None,
-            handlers: Vec::new(),
+        let future = Rc::new(RefCell::new(BxFuture {
+            value: BxValue::Null,
+            status: FutureStatus::Pending,
+        }));
+
+        let fiber = BxFiber {
+            stack: Vec::with_capacity(256),
+            frames: vec![CallFrame {
+                function,
+                ip: 0,
+                stack_base: 0,
+                receiver: None,
+                handlers: Vec::new(),
+            }],
+            future: Rc::clone(&future),
+            wait_until: None,
+            yield_requested: false,
         };
         
-        self.frames.push(frame);
+        self.fibers.push(fiber);
         
-        self.run()
+        self.run_all()
     }
 
-    fn run(&mut self) -> Result<BxValue> {
-        loop {
-            let instruction = self.read_instruction().clone();
+    pub fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue {
+        let future = Rc::new(RefCell::new(BxFuture {
+            value: BxValue::Null,
+            status: FutureStatus::Pending,
+        }));
+
+        let mut stack = Vec::with_capacity(256);
+        for arg in args {
+            stack.push(arg);
+        }
+
+        let fiber = BxFiber {
+            stack,
+            frames: vec![CallFrame {
+                function: func,
+                ip: 0,
+                stack_base: 0,
+                receiver: None,
+                handlers: Vec::new(),
+            }],
+            future: Rc::clone(&future),
+            wait_until: None,
+            yield_requested: false,
+        };
+
+        self.fibers.push(fiber);
+        BxValue::Future(future)
+    }
+
+    fn run_all(&mut self) -> Result<BxValue> {
+        let mut last_result = BxValue::Null;
+        
+        while !self.fibers.is_empty() {
+            let mut i = 0;
+            let mut all_waiting = true;
+            while i < self.fibers.len() {
+                let now = std::time::Instant::now();
+                if let Some(until) = self.fibers[i].wait_until {
+                    if now < until {
+                        i += 1;
+                        continue;
+                    } else {
+                        self.fibers[i].wait_until = None;
+                    }
+                }
+                
+                all_waiting = false;
+                self.current_fiber_idx = Some(i);
+                match self.run_fiber(i, 100) {
+                    Ok(Some(result)) => {
+                        let fiber = self.fibers.remove(i);
+                        fiber.future.borrow_mut().value = result.clone();
+                        fiber.future.borrow_mut().status = FutureStatus::Completed;
+                        if self.fibers.is_empty() {
+                            last_result = result;
+                        }
+                    }
+                    Ok(None) => {
+                        i += 1;
+                    }
+                    Err(e) => {
+                        let fiber = self.fibers.remove(i);
+                        fiber.future.borrow_mut().status = FutureStatus::Failed(e.to_string());
+                        if self.fibers.is_empty() {
+                            return Err(e);
+                        }
+                    }
+                }
+                self.current_fiber_idx = None;
+            }
             
+            if all_waiting && !self.fibers.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+        
+        Ok(last_result)
+    }
+
+    fn run_fiber(&mut self, fiber_idx: usize, quantum: usize) -> Result<Option<BxValue>> {
+        for _ in 0..quantum {
+            if self.fibers[fiber_idx].yield_requested {
+                self.fibers[fiber_idx].yield_requested = false;
+                return Ok(None);
+            }
+
+            let instruction = {
+                let fiber = &self.fibers[fiber_idx];
+                let frame = fiber.frames.last().unwrap();
+                if frame.ip >= frame.function.chunk.code.len() {
+                    return Ok(Some(BxValue::Null));
+                }
+                frame.function.chunk.code[frame.ip].clone()
+            };
+            
+            self.fibers[fiber_idx].frames.last_mut().unwrap().ip += 1;
+
             match instruction {
                 OpCode::OpReturn => {
-                    let frame = self.frames.pop().unwrap();
-                    let result = if self.stack.len() > frame.stack_base {
-                        self.stack.pop().unwrap()
+                    let fiber = &mut self.fibers[fiber_idx];
+                    let frame = fiber.frames.pop().unwrap();
+                    let result = if fiber.stack.len() > frame.stack_base {
+                        fiber.stack.pop().unwrap()
                     } else {
                         BxValue::Null
                     };
                     
-                    if self.frames.is_empty() {
-                        return Ok(result);
+                    if fiber.frames.is_empty() {
+                        return Ok(Some(result));
                     }
                     
-                    self.stack.truncate(frame.stack_base);
+                    fiber.stack.truncate(frame.stack_base);
                     
                     if frame.function.name.ends_with(".constructor") {
-                        let instance = self.stack.pop().unwrap();
-                        self.stack.push(instance);
+                        let instance = fiber.stack.pop().unwrap();
+                        fiber.stack.push(instance);
                     } else {
-                        self.stack.pop();
-                        self.stack.push(result);
+                        fiber.stack.pop();
+                        fiber.stack.push(result);
                     }
                 }
                 OpCode::OpConstant(idx) => {
-                    let constant = self.read_constant(idx);
-                    self.stack.push(constant);
+                    let constant = self.read_constant(fiber_idx, idx);
+                    self.fibers[fiber_idx].stack.push(constant);
                 }
                 OpCode::OpAdd => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     match (a, b) {
-                        (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Number(a + b)),
-                        (BxValue::String(a), BxValue::String(b)) => self.stack.push(BxValue::String(format!("{}{}", a, b))),
-                        _ => { self.throw_error("Operands must be two numbers or two strings.")?; continue; },
+                        (BxValue::Number(a), BxValue::Number(b)) => self.fibers[fiber_idx].stack.push(BxValue::Number(a + b)),
+                        (BxValue::String(a), BxValue::String(b)) => self.fibers[fiber_idx].stack.push(BxValue::String(format!("{}{}", a, b))),
+                        _ => { self.throw_error(fiber_idx, "Operands must be two numbers or two strings.")?; continue; },
                     }
                 }
                 OpCode::OpSubtract => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
-                        self.stack.push(BxValue::Number(a - b));
+                        self.fibers[fiber_idx].stack.push(BxValue::Number(a - b));
                     } else {
-                        self.throw_error("Operands must be two numbers.")?;
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
                         continue;
                     }
                 }
                 OpCode::OpMultiply => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
-                        self.stack.push(BxValue::Number(a * b));
+                        self.fibers[fiber_idx].stack.push(BxValue::Number(a * b));
                     } else {
-                        self.throw_error("Operands must be two numbers.")?;
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
                         continue;
                     }
                 }
                 OpCode::OpDivide => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let (BxValue::Number(a), BxValue::Number(b)) = (a, b) {
-                        if b == 0.0 { self.throw_error("Division by zero")?; continue; }
-                        else { self.stack.push(BxValue::Number(a / b)); }
+                        if b == 0.0 { self.throw_error(fiber_idx, "Division by zero")?; continue; }
+                        else { self.fibers[fiber_idx].stack.push(BxValue::Number(a / b)); }
                     } else {
-                        self.throw_error("Operands must be two numbers.")?;
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
                         continue;
                     }
                 }
                 OpCode::OpStringConcat => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(BxValue::String(format!("{}{}", a, b)));
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(BxValue::String(format!("{}{}", a, b)));
                 }
                 OpCode::OpPrint(count) => {
                     let mut args = Vec::with_capacity(count);
                     for _ in 0..count {
-                        args.push(self.stack.pop().unwrap());
+                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     args.reverse();
                     let out = args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" ");
@@ -140,122 +274,122 @@ impl VM {
                 OpCode::OpPrintln(count) => {
                     let mut args = Vec::with_capacity(count);
                     for _ in 0..count {
-                        args.push(self.stack.pop().unwrap());
+                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     args.reverse();
                     let out = args.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(" ");
                     println!("{}", out);
                 }
                 OpCode::OpPop => {
-                    self.stack.pop();
+                    self.fibers[fiber_idx].stack.pop();
                 }
                 OpCode::OpDup => {
-                    let val = self.stack.last().unwrap().clone();
-                    self.stack.push(val);
+                    let val = self.fibers[fiber_idx].stack.last().unwrap().clone();
+                    self.fibers[fiber_idx].stack.push(val);
                 }
                 OpCode::OpSwap => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(b);
-                    self.stack.push(a);
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(b);
+                    self.fibers[fiber_idx].stack.push(a);
                 }
                 OpCode::OpOver => {
-                    let val = self.stack[self.stack.len() - 2].clone();
-                    self.stack.push(val);
+                    let val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 2].clone();
+                    self.fibers[fiber_idx].stack.push(val);
                 }
                 OpCode::OpInc => {
-                    let val = self.stack.pop().unwrap();
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let BxValue::Number(n) = val {
-                        self.stack.push(BxValue::Number(n + 1.0));
+                        self.fibers[fiber_idx].stack.push(BxValue::Number(n + 1.0));
                     } else {
-                        self.throw_error("Increment operand must be a number")?;
+                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
                         continue;
                     }
                 }
                 OpCode::OpDec => {
-                    let val = self.stack.pop().unwrap();
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let BxValue::Number(n) = val {
-                        self.stack.push(BxValue::Number(n - 1.0));
+                        self.fibers[fiber_idx].stack.push(BxValue::Number(n - 1.0));
                     } else {
-                        self.throw_error("Decrement operand must be a number")?;
+                        self.throw_error(fiber_idx, "Decrement operand must be a number")?;
                         continue;
                     }
                 }
                 OpCode::OpDefineGlobal(idx) => {
-                    let name = self.read_string_constant(idx);
-                    let val = self.stack.pop().unwrap();
+                    let name = self.read_string_constant(fiber_idx, idx);
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.globals.insert(name.to_lowercase(), val);
                 }
                 OpCode::OpGetGlobal(idx) => {
-                    let name = self.read_string_constant(idx);
+                    let name = self.read_string_constant(fiber_idx, idx);
                     if let Some(val) = self.globals.get(&name.to_lowercase()) {
-                        self.stack.push(val.clone());
+                        self.fibers[fiber_idx].stack.push(val.clone());
                     } else {
-                        self.stack.push(BxValue::Null); 
+                        self.fibers[fiber_idx].stack.push(BxValue::Null); 
                     }
                 }
                 OpCode::OpSetGlobal(idx) => {
-                    let name = self.read_string_constant(idx);
-                    let val = self.stack.last().unwrap().clone();
+                    let name = self.read_string_constant(fiber_idx, idx);
+                    let val = self.fibers[fiber_idx].stack.last().unwrap().clone();
                     self.globals.insert(name.to_lowercase(), val);
                 }
                 OpCode::OpGetLocal(slot) => {
-                    let base = self.frames.last().unwrap().stack_base;
-                    let val = self.stack[base + slot].clone();
-                    self.stack.push(val);
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack[base + slot].clone();
+                    self.fibers[fiber_idx].stack.push(val);
                 }
                 OpCode::OpSetLocal(slot) => {
-                    let base = self.frames.last().unwrap().stack_base;
-                    let val = self.stack.last().unwrap().clone();
-                    self.stack[base + slot] = val;
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack.last().unwrap().clone();
+                    self.fibers[fiber_idx].stack[base + slot] = val;
                 }
                 OpCode::OpArray(count) => {
                     let mut items = Vec::with_capacity(count);
                     for _ in 0..count {
-                        items.push(self.stack.pop().unwrap());
+                        items.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     items.reverse();
-                    self.stack.push(BxValue::Array(Rc::new(RefCell::new(items))));
+                    self.fibers[fiber_idx].stack.push(BxValue::Array(Rc::new(RefCell::new(items))));
                 }
                 OpCode::OpStruct(count) => {
                     let mut items = HashMap::new();
                     for _ in 0..count {
-                        let value = self.stack.pop().unwrap();
-                        let key = self.stack.pop().unwrap().to_string().to_lowercase();
+                        let value = self.fibers[fiber_idx].stack.pop().unwrap();
+                        let key = self.fibers[fiber_idx].stack.pop().unwrap().to_string().to_lowercase();
                         items.insert(key, value);
                     }
-                    self.stack.push(BxValue::Struct(Rc::new(RefCell::new(items))));
+                    self.fibers[fiber_idx].stack.push(BxValue::Struct(Rc::new(RefCell::new(items))));
                 }
                 OpCode::OpIndex => {
-                    let index_val = self.stack.pop().unwrap();
-                    let base_val = self.stack.pop().unwrap();
+                    let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     match base_val {
                         BxValue::Array(arr) => {
                             if let BxValue::Number(n) = index_val {
                                 let idx = n as usize;
                                 let arr = arr.borrow();
                                 if idx < 1 || idx > arr.len() {
-                                    self.throw_error(&format!("Array index out of bounds: {}", idx))?;
+                                    self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
                                     continue;
                                 } else {
-                                    self.stack.push(arr[idx - 1].clone());
+                                    self.fibers[fiber_idx].stack.push(arr[idx - 1].clone());
                                 }
                             } else {
-                                self.throw_error("Array index must be a number")?;
+                                self.throw_error(fiber_idx, "Array index must be a number")?;
                                 continue;
                             }
                         }
                         BxValue::Struct(s) => {
                             let key = index_val.to_string().to_lowercase();
-                            self.stack.push(s.borrow().get(&key).cloned().unwrap_or(BxValue::Null));
+                            self.fibers[fiber_idx].stack.push(s.borrow().get(&key).cloned().unwrap_or(BxValue::Null));
                         }
-                        _ => { self.throw_error("Invalid access: base must be array or struct")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Invalid access: base must be array or struct")?; continue; }
                     }
                 }
                 OpCode::OpSetIndex => {
-                    let val = self.stack.pop().unwrap();
-                    let index_val = self.stack.pop().unwrap();
-                    let base_val = self.stack.pop().unwrap();
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     match base_val {
                         BxValue::Array(arr) => {
@@ -263,87 +397,107 @@ impl VM {
                                 let idx = n as usize;
                                 let mut arr = arr.borrow_mut();
                                 if idx < 1 || idx > arr.len() {
-                                    self.throw_error(&format!("Array index out of bounds: {}", idx))?;
+                                    self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
                                     continue;
                                 } else {
                                     arr[idx - 1] = val.clone();
-                                    self.stack.push(val);
+                                    self.fibers[fiber_idx].stack.push(val);
                                 }
                             } else {
-                                self.throw_error("Array index must be a number")?;
+                                self.throw_error(fiber_idx, "Array index must be a number")?;
                                 continue;
                             }
                         }
                         BxValue::Struct(s) => {
                             let key = index_val.to_string().to_lowercase();
                             s.borrow_mut().insert(key, val.clone());
-                            self.stack.push(val);
+                            self.fibers[fiber_idx].stack.push(val);
                         }
                         BxValue::Instance(inst) => {
                             let key = index_val.to_string().to_lowercase();
                             inst.borrow().this.borrow_mut().insert(key, val.clone());
-                            self.stack.push(val);
+                            self.fibers[fiber_idx].stack.push(val);
                         }
-                        _ => { self.throw_error("Invalid indexed assignment")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Invalid indexed assignment")?; continue; }
                     }
                 }
                 OpCode::OpMember(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    let base_val = self.stack.pop().unwrap();
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     match base_val {
                         BxValue::Struct(s) => {
-                            self.stack.push(s.borrow().get(&name).cloned().unwrap_or(BxValue::Null));
+                            self.fibers[fiber_idx].stack.push(s.borrow().get(&name).cloned().unwrap_or(BxValue::Null));
                         }
                         BxValue::Instance(inst) => {
-                            if let Some(val) = inst.borrow().this.borrow().get(&name) {
-                                self.stack.push(val.clone());
-                            } else {
-                                if let Some(method) = inst.borrow().class.borrow().methods.get(&name) {
-                                    self.stack.push(BxValue::CompiledFunction(Rc::clone(method)));
+                            let val = {
+                                let inst_borrow = inst.borrow();
+                                if let Some(v) = inst_borrow.this.borrow().get(&name) {
+                                    Some(v.clone())
+                                } else if let Some(method) = inst_borrow.class.borrow().methods.get(&name) {
+                                    Some(BxValue::CompiledFunction(Rc::clone(method)))
                                 } else {
-                                    self.stack.push(BxValue::Null);
+                                    None
                                 }
-                            }
+                            };
+                            self.fibers[fiber_idx].stack.push(val.unwrap_or(BxValue::Null));
                         }
-                        _ => { self.throw_error("Member access only supported on structs and instances")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Member access only supported on structs and instances")?; continue; }
                     }
                 }
                 OpCode::OpSetMember(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    let val = self.stack.pop().unwrap();
-                    let base_val = self.stack.pop().unwrap();
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     match base_val {
                         BxValue::Struct(s) => {
                             s.borrow_mut().insert(name, val.clone());
-                            self.stack.push(val);
+                            self.fibers[fiber_idx].stack.push(val);
                         }
                         BxValue::Instance(inst) => {
                             inst.borrow().this.borrow_mut().insert(name, val.clone());
-                            self.stack.push(val);
+                            self.fibers[fiber_idx].stack.push(val);
                         }
-                        _ => { self.throw_error("Member assignment only supported on structs and instances")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Member assignment only supported on structs and instances")?; continue; }
                     }
                 }
                 OpCode::OpInvoke(idx, arg_count) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
                     
-                    // The receiver is below the arguments on the stack
-                    if self.stack.len() < arg_count + 1 {
+                    if self.fibers[fiber_idx].stack.len() < arg_count + 1 {
                         bail!("Stack underflow: missing receiver or arguments for method call");
                     }
-                    let receiver_idx = self.stack.len() - 1 - arg_count;
-                    let receiver_val = self.stack.get(receiver_idx).cloned().unwrap();
-                    
-                    let mut args = Vec::with_capacity(arg_count);
-                    for _ in 0..arg_count {
-                        args.push(self.stack.pop().unwrap());
-                    }
-                    args.reverse();
-                    
-                    self.stack.pop(); // Pop the receiver now
+                    let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
+                    let receiver_val = self.fibers[fiber_idx].stack.get(receiver_idx).cloned().unwrap();
                     
                     match receiver_val {
+                        BxValue::Future(f) => {
+                            if name == "get" {
+                                let status = f.borrow().status.clone();
+                                match status {
+                                    FutureStatus::Pending => {
+                                        // Yield and retry
+                                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= 1;
+                                        return Ok(None);
+                                    }
+                                    FutureStatus::Completed => {
+                                        // Pop args and receiver
+                                        for _ in 0..arg_count { self.fibers[fiber_idx].stack.pop(); }
+                                        self.fibers[fiber_idx].stack.pop();
+                                        let val = f.borrow().value.clone();
+                                        self.fibers[fiber_idx].stack.push(val);
+                                        continue;
+                                    }
+                                    FutureStatus::Failed(e) => {
+                                        self.throw_error(fiber_idx, &format!("Async operation failed: {}", e))?;
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                self.throw_error(fiber_idx, &format!("Method {} not found on future.", name))?;
+                                continue;
+                            }
+                        }
                         BxValue::Instance(inst) => {
                             let method = {
                                 let inst_borrow = inst.borrow();
@@ -358,151 +512,164 @@ impl VM {
                             
                             if let Some(func) = method {
                                 if arg_count != func.arity {
-                                    self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                    self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
                                     continue;
                                 } else {
-                                    // Re-push args
-                                    for arg in args { self.stack.push(arg); }
+                                    let mut args = Vec::with_capacity(arg_count);
+                                    for _ in 0..arg_count {
+                                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                                    }
+                                    args.reverse();
+                                    self.fibers[fiber_idx].stack.pop(); // Pop the receiver
+                                    
+                                    for arg in args { self.fibers[fiber_idx].stack.push(arg); }
                                     let frame = CallFrame {
                                         function: func,
                                         ip: 0,
-                                        stack_base: self.stack.len() - arg_count,
+                                        stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
                                         receiver: Some(inst),
                                         handlers: Vec::new(),
                                     };
-                                    self.frames.push(frame);
+                                    self.fibers[fiber_idx].frames.push(frame);
                                 }
                             } else {
-                                self.throw_error(&format!("Method {} not found.", name))?;
+                                self.throw_error(fiber_idx, &format!("Method {} not found.", name))?;
                                 continue;
                             }
                         }
                         BxValue::Struct(s) => {
                             if let Some(BxValue::CompiledFunction(func)) = s.borrow().get(&name) {
                                 if arg_count != func.arity {
-                                    self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                    self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
                                     continue;
                                 } else {
-                                    for arg in args { self.stack.push(arg); }
+                                    let mut args = Vec::with_capacity(arg_count);
+                                    for _ in 0..arg_count {
+                                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                                    }
+                                    args.reverse();
+                                    self.fibers[fiber_idx].stack.pop(); // Pop the receiver
+                                    
+                                    for arg in args { self.fibers[fiber_idx].stack.push(arg); }
                                     let frame = CallFrame {
                                         function: Rc::clone(func),
                                         ip: 0,
-                                        stack_base: self.stack.len() - arg_count,
+                                        stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
                                         receiver: None,
                                         handlers: Vec::new(),
                                     };
-                                    self.frames.push(frame);
+                                    self.fibers[fiber_idx].frames.push(frame);
                                 }
                             } else {
-                                self.throw_error(&format!("Member {} not found or not callable.", name))?;
+                                self.throw_error(fiber_idx, &format!("Member {} not found or not callable.", name))?;
                                 continue;
                             }
                         }
-                        _ => { self.throw_error("Can only invoke methods on instances and structs.")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Can only invoke methods on instances and structs.")?; continue; }
                     }
                 }
                 OpCode::OpCall(arg_count) => {
-                    let func_val = self.stack[self.stack.len() - 1 - arg_count].clone();
+                    let func_val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count].clone();
                     match func_val {
                         BxValue::CompiledFunction(func) => {
                             if arg_count != func.arity {
-                                self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
                                 continue;
                             } else {
                                 let frame = CallFrame {
                                     function: Rc::clone(&func),
                                     ip: 0,
-                                    stack_base: self.stack.len() - arg_count,
-                                    receiver: self.frames.last().unwrap().receiver.clone(),
+                                    stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
+                                    receiver: self.fibers[fiber_idx].frames.last().unwrap().receiver.clone(),
                                     handlers: Vec::new(),
                                 };
-                                self.frames.push(frame);
+                                self.fibers[fiber_idx].frames.push(frame);
                             }
                         }
                         BxValue::NativeFunction(func) => {
                             let mut args = Vec::with_capacity(arg_count);
                             for _ in 0..arg_count {
-                                args.push(self.stack.pop().unwrap());
+                                args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                             }
                             args.reverse();
-                            self.stack.pop(); // Pop the function object
+                            self.fibers[fiber_idx].stack.pop(); // Pop the function object
                             
-                            match func(&args) {
-                                Ok(val) => self.stack.push(val),
+                            match func(self, &args) {
+                                Ok(val) => self.fibers[fiber_idx].stack.push(val),
                                 Err(e) => {
-                                    self.throw_error(&e)?;
+                                    self.throw_error(fiber_idx, &e)?;
                                     continue;
                                 }
                             }
                         }
-                        _ => { self.throw_error("Can only call functions.")?; continue; }
+                        _ => { self.throw_error(fiber_idx, "Can only call functions.")?; continue; }
                     }
                 }
                 OpCode::OpEqual => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(BxValue::Boolean(a == b));
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(BxValue::Boolean(a == b));
                 }
                 OpCode::OpNotEqual => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
-                    self.stack.push(BxValue::Boolean(a != b));
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(BxValue::Boolean(a != b));
                 }
                 OpCode::OpLess => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     match (a, b) {
-                        (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a < b)),
-                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
+                        (BxValue::Number(a), BxValue::Number(b)) => self.fibers[fiber_idx].stack.push(BxValue::Boolean(a < b)),
+                        _ => { self.throw_error(fiber_idx, "Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpLessEqual => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     match (a, b) {
-                        (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a <= b)),
-                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
+                        (BxValue::Number(a), BxValue::Number(b)) => self.fibers[fiber_idx].stack.push(BxValue::Boolean(a <= b)),
+                        _ => { self.throw_error(fiber_idx, "Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpGreater => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     match (a, b) {
-                        (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a > b)),
-                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
+                        (BxValue::Number(a), BxValue::Number(b)) => self.fibers[fiber_idx].stack.push(BxValue::Boolean(a > b)),
+                        _ => { self.throw_error(fiber_idx, "Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpGreaterEqual => {
-                    let b = self.stack.pop().unwrap();
-                    let a = self.stack.pop().unwrap();
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     match (a, b) {
-                        (BxValue::Number(a), BxValue::Number(b)) => self.stack.push(BxValue::Boolean(a >= b)),
-                        _ => { self.throw_error("Comparison only supported for numbers currently")?; continue; }
+                        (BxValue::Number(a), BxValue::Number(b)) => self.fibers[fiber_idx].stack.push(BxValue::Boolean(a >= b)),
+                        _ => { self.throw_error(fiber_idx, "Comparison only supported for numbers currently")?; continue; }
                     }
                 }
                 OpCode::OpJump(offset) => {
-                    self.frames.last_mut().unwrap().ip += offset;
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
                 }
                 OpCode::OpJumpIfFalse(offset) => {
-                    if !self.is_truthy(self.stack.last().unwrap()) {
-                        self.frames.last_mut().unwrap().ip += offset;
+                    if !self.is_truthy(self.fibers[fiber_idx].stack.last().unwrap()) {
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
                     }
                 }
                 OpCode::OpLoop(offset) => {
-                    self.frames.last_mut().unwrap().ip -= offset;
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
                 }
                 OpCode::OpIterNext(collection_slot, cursor_slot, offset, push_index) => {
-                    let base = self.frames.last().unwrap().stack_base;
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let collection_idx = base + collection_slot;
                     let cursor_idx = base + cursor_slot;
                     
                     let (is_done, next_val, next_idx) = {
-                        let cursor_val = match &self.stack[cursor_idx] {
+                        let cursor_val = match &self.fibers[fiber_idx].stack[cursor_idx] {
                             BxValue::Number(n) => *n as usize,
                             _ => bail!("Internal VM error: iterator cursor is not a number"),
                         };
                         
-                        match &self.stack[collection_idx] {
+                        match &self.fibers[fiber_idx].stack[collection_idx] {
                             BxValue::Array(arr) => {
                                 let arr = arr.borrow();
                                 if cursor_val < arr.len() {
@@ -524,29 +691,27 @@ impl VM {
                                 }
                             }
                             _ => { 
-                                self.throw_error("Iteration only supported for arrays and structs")?;
-                                (true, None, None) // Dummy return, IP already changed
+                                self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
+                                (true, None, None)
                             }
                         }
                     };
 
-                    if !self.frames.is_empty() { // Check if we re-entered loop because of dummy above? No, throw changes IP.
-                        if is_done {
-                            self.frames.last_mut().unwrap().ip += offset;
-                        } else {
-                            if let BxValue::Number(ref mut n) = self.stack[cursor_idx] {
-                                *n += 1.0;
-                            }
-                            self.stack.push(next_val.unwrap());
-                            if push_index {
-                                self.stack.push(next_idx.unwrap());
-                            }
+                    if is_done {
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                    } else {
+                        if let BxValue::Number(ref mut n) = self.fibers[fiber_idx].stack[cursor_idx] {
+                            *n += 1.0;
+                        }
+                        self.fibers[fiber_idx].stack.push(next_val.unwrap());
+                        if push_index {
+                            self.fibers[fiber_idx].stack.push(next_idx.unwrap());
                         }
                     }
                 }
                 OpCode::OpNew(arg_count) => {
-                    let class_idx = self.stack.len() - 1 - arg_count;
-                    let class_val = self.stack[class_idx].clone();
+                    let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
+                    let class_val = self.fibers[fiber_idx].stack[class_idx].clone();
                     if let BxValue::Class(class) = class_val {
                         let this_scope = Rc::new(RefCell::new(HashMap::new()));
                         let variables_scope = Rc::new(RefCell::new(HashMap::new()));
@@ -557,8 +722,7 @@ impl VM {
                             variables: variables_scope.clone(),
                         }));
                         
-                        // Replace Class with Instance on stack at its original position
-                        self.stack[class_idx] = BxValue::Instance(Rc::clone(&instance));
+                        self.fibers[fiber_idx].stack[class_idx] = BxValue::Instance(Rc::clone(&instance));
 
                         let frame = CallFrame {
                             function: Rc::new(BxCompiledFunction {
@@ -567,86 +731,93 @@ impl VM {
                                 chunk: class.borrow().constructor.clone(),
                             }),
                             ip: 0,
-                            stack_base: class_idx + 1 + arg_count, // Start frame after the instance and args
+                            stack_base: class_idx + 1 + arg_count,
                             receiver: Some(Rc::clone(&instance)),
                             handlers: Vec::new(),
                         };
-                        self.frames.push(frame);
+                        self.fibers[fiber_idx].frames.push(frame);
                     } else {
-                        self.throw_error("Can only instantiate classes.")?;
+                        self.throw_error(fiber_idx, "Can only instantiate classes.")?;
                         continue;
                     }
                 }
                 OpCode::OpGetPrivate(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    if let Some(ref receiver) = self.frames.last().unwrap().receiver {
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let val = if let Some(ref receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
                         if name == "this" {
-                            self.stack.push(BxValue::Instance(Rc::clone(receiver)));
+                            Some(BxValue::Instance(Rc::clone(receiver)))
                         } else if name == "variables" {
                             let vars = Rc::clone(&receiver.borrow().variables);
-                            self.stack.push(BxValue::Struct(vars));
+                            Some(BxValue::Struct(vars))
                         } else {
                             let val = receiver.borrow().variables.borrow().get(&name).cloned().unwrap_or(BxValue::Null);
-                            self.stack.push(val);
+                            Some(val)
                         }
                     } else {
-                        self.throw_error("'variables' scope only available in classes.")?;
+                        None
+                    };
+
+                    if let Some(v) = val {
+                        self.fibers[fiber_idx].stack.push(v);
+                    } else {
+                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
                         continue;
                     }
                 }
                 OpCode::OpSetPrivate(idx) => {
-                    let name = self.read_string_constant(idx).to_lowercase();
-                    let val = self.stack.last().unwrap().clone();
-                    if let Some(ref receiver) = self.frames.last().unwrap().receiver {
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let val = self.fibers[fiber_idx].stack.last().unwrap().clone();
+                    if let Some(ref receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
                         receiver.borrow().variables.borrow_mut().insert(name, val);
                     } else {
-                        self.throw_error("'variables' scope only available in classes.")?;
+                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
                         continue;
                     }
                 }
                 OpCode::OpPushHandler(offset) => {
-                    let target_ip = self.frames.last().unwrap().ip + offset;
-                    self.frames.last_mut().unwrap().handlers.push(target_ip);
+                    let target_ip = self.fibers[fiber_idx].frames.last().unwrap().ip + offset;
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.push(target_ip);
                 }
                 OpCode::OpPopHandler => {
-                    self.frames.last_mut().unwrap().handlers.pop();
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.pop();
                 }
                 OpCode::OpThrow => {
-                    let val = self.stack.pop().unwrap();
-                    self.throw_value(val)?;
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.throw_value(fiber_idx, val)?;
                 }
             }
         }
+        Ok(None)
     }
 
-    fn throw_error(&mut self, msg: &str) -> Result<()> {
+    fn throw_error(&mut self, fiber_idx: usize, msg: &str) -> Result<()> {
         let val = BxValue::String(msg.to_string());
-        self.throw_value(val)
+        self.throw_value(fiber_idx, val)
     }
 
-    fn throw_value(&mut self, val: BxValue) -> Result<()> {
+    fn throw_value(&mut self, fiber_idx: usize, val: BxValue) -> Result<()> {
         let mut line = 0;
         let mut filename = "unknown".to_string();
-        if !self.frames.is_empty() {
-            let frame = self.frames.last().unwrap();
+        if !self.fibers[fiber_idx].frames.is_empty() {
+            let frame = self.fibers[fiber_idx].frames.last().unwrap();
             filename = frame.function.chunk.filename.clone();
             if frame.ip > 0 && frame.ip <= frame.function.chunk.lines.len() {
                 line = frame.function.chunk.lines[frame.ip - 1];
             }
         }
 
-        while !self.frames.is_empty() {
-            let frame_idx = self.frames.len() - 1;
-            if !self.frames[frame_idx].handlers.is_empty() {
-                let handler_ip = self.frames[frame_idx].handlers.pop().unwrap();
-                let stack_base = self.frames[frame_idx].stack_base;
-                self.frames[frame_idx].ip = handler_ip;
+        while !self.fibers[fiber_idx].frames.is_empty() {
+            let frame_idx = self.fibers[fiber_idx].frames.len() - 1;
+            if !self.fibers[fiber_idx].frames[frame_idx].handlers.is_empty() {
+                let handler_ip = self.fibers[fiber_idx].frames[frame_idx].handlers.pop().unwrap();
+                let stack_base = self.fibers[fiber_idx].frames[frame_idx].stack_base;
+                self.fibers[fiber_idx].frames[frame_idx].ip = handler_ip;
                 
-                self.stack.truncate(stack_base);
-                self.stack.push(val);
+                self.fibers[fiber_idx].stack.truncate(stack_base);
+                self.fibers[fiber_idx].stack.push(val);
                 return Ok(());
             }
-            self.frames.pop();
+            self.fibers[fiber_idx].frames.pop();
         }
         bail!("VM Runtime Error: {} (at {} line {})", val, filename, line);
     }
@@ -661,20 +832,13 @@ impl VM {
         }
     }
 
-    fn read_instruction(&mut self) -> &OpCode {
-        let frame = self.frames.last_mut().unwrap();
-        let op = &frame.function.chunk.code[frame.ip];
-        frame.ip += 1;
-        op
-    }
-
-    fn read_constant(&self, idx: usize) -> BxValue {
-        let frame = self.frames.last().unwrap();
+    fn read_constant(&self, fiber_idx: usize, idx: usize) -> BxValue {
+        let frame = self.fibers[fiber_idx].frames.last().unwrap();
         frame.function.chunk.constants[idx].clone()
     }
 
-    fn read_string_constant(&self, idx: usize) -> String {
-        let frame = self.frames.last().unwrap();
+    fn read_string_constant(&self, fiber_idx: usize, idx: usize) -> String {
+        let frame = self.fibers[fiber_idx].frames.last().unwrap();
         match &frame.function.chunk.constants[idx] {
             BxValue::String(s) => s.clone(),
             _ => panic!("Constant at index {} is not a string", idx),
