@@ -1,0 +1,11 @@
+// Test struct member assignment
+s = {}
+s.x = 10
+println("s.x = ", s.x)
+
+s["y"] = 20
+println("s.y = ", s.y)
+
+nested = { inner: {} }
+nested.inner.val = 30
+println("nested.inner.val = ", nested.inner.val)

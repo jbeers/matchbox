@@ -23,11 +23,21 @@ pub enum OpCode {
     OpArray(usize),        // element count
     OpStruct(usize),       // pair count
     OpIndex,               // bracket access [idx]
+    OpSetIndex,            // bracket assignment [idx] = val
     OpMember(usize),       // dot access .member (index in constants)
+    OpSetMember(usize),    // dot assignment .member = val
+    OpInvoke(usize, usize), // name index, arg count
     OpCall(usize),         // arg count
     OpJump(usize),         // offset to jump forward
     OpJumpIfFalse(usize),  // offset to jump forward if top of stack is falsey
     OpLoop(usize),         // offset to jump backward
     OpIterNext(usize, usize, usize, bool), // collection slot, cursor slot, offset if done, bool if should push index
+    OpClass(usize),        // index of name in constant pool
+    OpMethod(usize),       // index of name in constant pool
+    OpNew(usize),          // arg count
+    OpGetThis(usize),      // name index
+    OpSetThis(usize),      // name index
+    OpGetPrivate(usize),   // name index (variables scope)
+    OpSetPrivate(usize),   // name index (variables scope)
     OpReturn,
 }

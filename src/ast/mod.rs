@@ -1,5 +1,9 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    ClassDecl {
+        name: String,
+        members: Vec<ClassMember>,
+    },
     FunctionDecl {
         name: String,
         params: Vec<String>,
@@ -31,9 +35,19 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum ClassMember {
+    Property(String),
+    Statement(Statement),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
+    New {
+        class_name: String,
+        args: Vec<Expression>,
+    },
     Assignment {
-        target: String,
+        target: AssignmentTarget,
         value: Box<Expression>,
     },
     Binary {
@@ -55,6 +69,19 @@ pub enum Expression {
     },
     Identifier(String),
     Literal(Literal),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssignmentTarget {
+    Identifier(String),
+    Member {
+        base: Box<Expression>,
+        member: String,
+    },
+    Index {
+        base: Box<Expression>,
+        index: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

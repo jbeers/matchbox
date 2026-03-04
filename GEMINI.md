@@ -38,7 +38,7 @@ To create a high-performance, standalone implementation of BoxLang that focuses 
 - [x] Implement `return` statement.
 - [x] Add support for `Array` and `Struct` types.
 - [x] Implement for-in loops for arrays and structs.
-- [ ] Add support for Classes and Objects.
+- [x] Add support for Classes and Objects.
 - [ ] Implement Exception Handling (try/catch).
 - [ ] Expand the library of BIFs.
 - [ ] Add a REPL mode.

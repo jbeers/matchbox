@@ -1,0 +1,27 @@
+// Test Class and Objects in the VM
+class Person {
+    property name;
+    
+    // Pseudo-constructor
+    this.age = 0
+    variables.secret = "hidden"
+    
+    function init(name, age) {
+        this.name = name
+        this.age = age
+        return this
+    }
+    
+    function sayHello() {
+        println("Hello, my name is " & this.name & " and I am " & this.age & " years old.")
+        println("Secret: " & secret) // accesses variables scope
+    }
+}
+
+// Instantiate
+p = new Person()
+p.init("Luis", 40)
+p.sayHello()
+
+println("Direct access to name: " & p.name)
+println("Direct access to secret: " & p.secret) // should be null or error
