@@ -37,5 +37,5 @@ impl fmt::Display for BxValue {
 pub struct BxFunction {
     pub name: String,
     pub params: Vec<String>,
-    pub body: Vec<crate::ast::Statement>,
+    pub body: crate::ast::FunctionBody,
 }

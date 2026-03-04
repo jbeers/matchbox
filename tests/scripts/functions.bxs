@@ -1,0 +1,30 @@
+// Test UDF syntax
+function sayHello(name) {
+    println("Hello, " & name & "!")
+}
+sayHello("BoxLang")
+
+// Test closure syntax
+add = (a, b) => {
+    println("Adding", a, "and", b)
+    a + b
+}
+println("Sum:", add(5, 10))
+
+// Test lambda syntax (single expression)
+multiply = (a, b) => a * b
+println("Product:", multiply(3, 4))
+
+// Test lambda syntax (single param, no parens)
+square = x => x * x
+println("Square of 5:", square(5))
+
+// Higher-order function
+function applyOp(a, b, op) {
+    op(a, b)
+}
+println("Result from higher-order:", applyOp(10, 2, (x, y) => x / y))
+
+// Anonymous function with FUNCTION keyword
+sub = function(a, b) { a - b }
+println("Subtraction:", sub(20, 5))

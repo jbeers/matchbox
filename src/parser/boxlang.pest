@@ -52,7 +52,13 @@ member_access = { "." ~ identifier }
 function_call = _{ identifier ~ function_call_args }
 args = { expression ~ ("," ~ expression)* }
 
-literal = { string | number | boolean | null_lit | array_literal | struct_literal }
+literal = { string | number | boolean | null_lit | array_literal | struct_literal | anonymous_function }
+
+anonymous_function = {
+    ("function" ~ "(" ~ params? ~ ")" ~ block) |
+    (lambda_params ~ ("=>" | "->") ~ (block | expression))
+}
+lambda_params = { ("(" ~ params? ~ ")") | identifier }
 
 array_literal = { "[" ~ (expression ~ ("," ~ expression)* ~ ","?)? ~ "]" }
 

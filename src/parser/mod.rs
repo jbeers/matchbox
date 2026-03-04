@@ -24,6 +24,10 @@ pub fn parse(source: &str) -> Result<Vec<Statement>> {
     Ok(ast)
 }
 
+fn parse_params(pair: pest::iterators::Pair<Rule>) -> Vec<String> {
+    pair.into_inner().map(|p| p.as_str().to_string()).collect()
+}
+
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let inner = pair.into_inner().next().unwrap();
     match inner.as_rule() {
@@ -31,22 +35,24 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let mut inner_rules = inner.into_inner();
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut params = Vec::new();
-            let mut body = Vec::new();
+            let mut body_stmts = Vec::new();
             
             for rule in inner_rules {
                 match rule.as_rule() {
                     Rule::params => {
-                        for param in rule.into_inner() {
-                            params.push(param.as_str().to_string());
-                        }
+                        params = parse_params(rule);
                     }
                     Rule::statement => {
-                        body.push(parse_statement(rule)?);
+                        body_stmts.push(parse_statement(rule)?);
                     }
                     _ => {}
                 }
             }
-            Ok(Statement::FunctionDecl { name, params, body })
+            Ok(Statement::FunctionDecl { 
+                name, 
+                params, 
+                body: crate::ast::FunctionBody::Block(body_stmts) 
+            })
         }
         Rule::for_loop => {
             let mut inner_rules = inner.into_inner();
@@ -244,6 +250,44 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         members.push((key_expr, val_expr));
                     }
                     Ok(Expression::Literal(Literal::Struct(members)))
+                }
+                Rule::anonymous_function => {
+                    let mut inner = lit.into_inner();
+                    let first = inner.next().unwrap();
+                    let (params, body_rule) = if first.as_rule() == Rule::lambda_params {
+                        let params = {
+                            let mut param_inner = first.clone().into_inner();
+                            let param_rule = param_inner.next().unwrap();
+                            match param_rule.as_rule() {
+                                Rule::params => parse_params(param_rule),
+                                Rule::identifier => vec![param_rule.as_str().to_string()],
+                                _ => vec![],
+                            }
+                        };
+                        // Operands like => are literals, not rules, so they don't appear in into_inner()
+                        (params, inner.next().unwrap())
+                    } else {
+                        // "function" is a literal, so it doesn't appear.
+                        // So first is either params or block.
+                        if first.as_rule() == Rule::params {
+                            let params = parse_params(first);
+                            (params, inner.next().unwrap())
+                        } else {
+                            (vec![], first)
+                        }
+                    };
+                    
+                    let body = if body_rule.as_rule() == Rule::block {
+                        let mut stmts = Vec::new();
+                        for stmt_pair in body_rule.into_inner() {
+                            stmts.push(parse_statement(stmt_pair)?);
+                        }
+                        crate::ast::FunctionBody::Block(stmts)
+                    } else {
+                        crate::ast::FunctionBody::Expression(Box::new(parse_expression(body_rule)?))
+                    };
+                    
+                    Ok(Expression::Literal(Literal::Function { params, body }))
                 }
                 _ => bail!("Unexpected literal rule: {:?}", lit.as_rule()),
             }

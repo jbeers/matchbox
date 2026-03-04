@@ -3,7 +3,7 @@ pub enum Statement {
     FunctionDecl {
         name: String,
         params: Vec<String>,
-        body: Vec<Statement>,
+        body: FunctionBody,
     },
     ForLoop {
         item: String,
@@ -60,6 +60,16 @@ pub enum Literal {
     Null,
     Array(Vec<Expression>),
     Struct(Vec<(Expression, Expression)>),
+    Function {
+        params: Vec<String>,
+        body: FunctionBody,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionBody {
+    Block(Vec<Statement>),
+    Expression(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -154,6 +154,13 @@ impl Evaluator {
                     }
                     Ok(BxValue::Struct(eval_struct))
                 }
+                Literal::Function { params, body } => {
+                    Ok(BxValue::Function(BxFunction {
+                        name: "".to_string(), // Anonymous
+                        params: params.clone(),
+                        body: body.clone(),
+                    }))
+                }
             },
             Expression::Identifier(name) => {
                 if let Some(val) = self.env.borrow().get(name) {
@@ -207,7 +214,10 @@ impl Evaluator {
                             }
                         }
                         let mut call_eval = Evaluator::with_env(call_env);
-                        call_eval.eval_block(&func.body)
+                        match func.body {
+                            crate::ast::FunctionBody::Block(ref stmts) => call_eval.eval_block(stmts),
+                            crate::ast::FunctionBody::Expression(ref expr) => call_eval.eval_expression(expr),
+                        }
                     }
                     _ => bail!("Value is not callable"),
                 }
