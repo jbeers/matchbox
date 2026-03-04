@@ -1,5 +1,7 @@
 use std::fmt;
 
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BxValue {
     String(String),
@@ -7,6 +9,7 @@ pub enum BxValue {
     Boolean(bool),
     Null,
     Array(Vec<BxValue>),
+    Struct(HashMap<String, BxValue>),
     Function(BxFunction),
 }
 
@@ -20,6 +23,10 @@ impl fmt::Display for BxValue {
             BxValue::Array(arr) => {
                 let items: Vec<String> = arr.iter().map(|v| v.to_string()).collect();
                 write!(f, "[{}]", items.join(", "))
+            }
+            BxValue::Struct(s) => {
+                let items: Vec<String> = s.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+                write!(f, "{{{}}}", items.join(", "))
             }
             BxValue::Function(func) => write!(f, "<function {}>", func.name),
         }

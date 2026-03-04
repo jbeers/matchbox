@@ -37,7 +37,7 @@ binary_expr = { primary ~ (operator ~ primary)* }
 
 operator = { "+" | "-" | "*" | "/" | "==" | "!=" | "<=" | ">=" | "<" | ">" }
 
-primary = { atom ~ (function_call_args | array_access)* }
+primary = { atom ~ (function_call_args | array_access | member_access)* }
 
 atom = {
     literal
@@ -47,13 +47,18 @@ atom = {
 
 function_call_args = { "(" ~ args? ~ ")" }
 array_access = { "[" ~ expression ~ "]" }
+member_access = { "." ~ identifier }
 
 function_call = _{ identifier ~ function_call_args }
 args = { expression ~ ("," ~ expression)* }
 
-literal = { string | number | boolean | null_lit | array_literal }
+literal = { string | number | boolean | null_lit | array_literal | struct_literal }
 
 array_literal = { "[" ~ (expression ~ ("," ~ expression)* ~ ","?)? ~ "]" }
+
+struct_literal = { "{" ~ (struct_member ~ ("," ~ struct_member)* ~ ","?)? ~ "}" }
+struct_member = { struct_key ~ (":" | "=") ~ expression }
+struct_key = { identifier | string | number }
 
 string = ${ "\"" ~ inner_str ~ "\"" | "'" ~ inner_str_single ~ "'" }
 inner_str = @{ (!"\"" ~ ANY)* }

@@ -1,5 +1,6 @@
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use anyhow::{Result, bail};
 use crate::ast::{Expression, Literal, Statement};
 use crate::env::Environment;
@@ -129,6 +130,18 @@ impl Evaluator {
                     }
                     Ok(BxValue::Array(eval_items))
                 }
+                Literal::Struct(members) => {
+                    let mut eval_struct = HashMap::new();
+                    for (key_expr, val_expr) in members {
+                        let key = match key_expr {
+                            Expression::Identifier(name) => name.to_lowercase(),
+                            _ => self.eval_expression(key_expr)?.to_string().to_lowercase(),
+                        };
+                        let val = self.eval_expression(val_expr)?;
+                        eval_struct.insert(key, val);
+                    }
+                    Ok(BxValue::Struct(eval_struct))
+                }
             },
             Expression::Identifier(name) => {
                 if let Some(val) = self.env.borrow().get(name) {
@@ -199,7 +212,29 @@ impl Evaluator {
                         }
                         Ok(arr[idx - 1].clone())
                     }
-                    _ => bail!("Invalid array access: base must be array and index must be number"),
+                    (BxValue::Struct(s), key_val) => {
+                        let key = key_val.to_string().to_lowercase();
+                        if let Some(val) = s.get(&key) {
+                            Ok(val.clone())
+                        } else {
+                            Ok(BxValue::Null)
+                        }
+                    }
+                    _ => bail!("Invalid access: base must be array or struct"),
+                }
+            }
+            Expression::MemberAccess { base, member } => {
+                let base_val = self.eval_expression(base)?;
+                match base_val {
+                    BxValue::Struct(s) => {
+                        let key = member.to_lowercase();
+                        if let Some(val) = s.get(&key) {
+                            Ok(val.clone())
+                        } else {
+                            Ok(BxValue::Null)
+                        }
+                    }
+                    _ => bail!("Member access only supported on structs"),
                 }
             }
         }

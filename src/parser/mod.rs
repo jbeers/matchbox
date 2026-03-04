@@ -174,6 +174,13 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                     index: Box::new(index_expr),
                 };
             }
+            Rule::member_access => {
+                let member = postfix.into_inner().next().unwrap().as_str().to_string();
+                expr = Expression::MemberAccess {
+                    base: Box::new(expr),
+                    member,
+                };
+            }
             _ => bail!("Unexpected postfix rule: {:?}", postfix.as_rule()),
         }
     }
@@ -207,6 +214,28 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         items.push(parse_expression(expr)?);
                     }
                     Ok(Expression::Literal(Literal::Array(items)))
+                }
+                Rule::struct_literal => {
+                    let mut members = Vec::new();
+                    for member_pair in lit.into_inner() {
+                        let mut member_inner = member_pair.into_inner();
+                        let key_pair = member_inner.next().unwrap().into_inner().next().unwrap();
+                        let key_expr = match key_pair.as_rule() {
+                            Rule::identifier => Expression::Identifier(key_pair.as_str().to_string()),
+                            Rule::string => {
+                                let s = key_pair.into_inner().next().unwrap().as_str().to_string();
+                                Expression::Literal(Literal::String(s))
+                            }
+                            Rule::number => {
+                                let n = key_pair.as_str().parse::<f64>()?;
+                                Expression::Literal(Literal::Number(n))
+                            }
+                            _ => bail!("Invalid struct key: {:?}", key_pair.as_rule()),
+                        };
+                        let val_expr = parse_expression(member_inner.next().unwrap())?;
+                        members.push((key_expr, val_expr));
+                    }
+                    Ok(Expression::Literal(Literal::Struct(members)))
                 }
                 _ => bail!("Unexpected literal rule: {:?}", lit.as_rule()),
             }

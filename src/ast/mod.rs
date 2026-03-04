@@ -44,6 +44,10 @@ pub enum Expression {
         base: Box<Expression>,
         index: Box<Expression>,
     },
+    MemberAccess {
+        base: Box<Expression>,
+        member: String,
+    },
     Identifier(String),
     Literal(Literal),
 }
@@ -55,4 +59,5 @@ pub enum Literal {
     Boolean(bool),
     Null,
     Array(Vec<Expression>),
+    Struct(Vec<(Expression, Expression)>),
 }

@@ -1,0 +1,41 @@
+// Test struct definition and member access
+person = {
+    name: "John Doe",
+    age: 30,
+    "isDeveloper": true,
+    1: "one"
+}
+
+println("Person Struct:", person)
+
+// Member access with dot notation (case-insensitive)
+println("Name:", person.name)
+println("NAME (caps):", person.NAME)
+println("Age:", person.age)
+println("Is Developer:", person.isDeveloper)
+
+// Bracket access (case-insensitive)
+println("Name via bracket:", person["name"])
+println("Is Developer via bracket:", person["ISDEVELOPER"])
+println("Number key:", person[1])
+
+// Nested structs
+company = {
+    name: "Ortus Solutions",
+    location: "USA",
+    CEO: {
+        name: "Luis Majano",
+        twitter: "@lmajano"
+    }
+}
+
+println("Company CEO:", company.CEO.name)
+println("CEO Twitter:", company["CEO"]["twitter"])
+
+// Array of structs
+employees = [
+    { name: "Brad Wood", role: "Evangelist" },
+    { name: "Eric Peterson", role: "Developer" }
+]
+
+println("First employee name:", employees[1].name)
