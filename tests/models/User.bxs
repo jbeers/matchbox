@@ -1,0 +1,1 @@
+class User { property name; function init(name) { this.name = name; return this; } function greet() { println("Hello, I am " & this.name); } }

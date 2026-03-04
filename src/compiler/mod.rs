@@ -6,6 +6,8 @@ use crate::vm::opcode::OpCode;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
+use std::fs;
 
 #[derive(Debug, Clone)]
 struct Local {
@@ -18,6 +20,7 @@ pub struct Compiler {
     locals: Vec<Local>,
     scope_depth: i32,
     is_class: bool,
+    imports: HashMap<String, String>, // Alias -> Full Path
 }
 
 impl Compiler {
@@ -27,6 +30,7 @@ impl Compiler {
             locals: Vec::new(),
             scope_depth: 0,
             is_class: false,
+            imports: HashMap::new(),
         }
     }
 
@@ -40,10 +44,16 @@ impl Compiler {
 
     fn compile_statement(&mut self, stmt: &Statement) -> Result<()> {
         match stmt {
+            Statement::Import(path) => {
+                let alias = path.split('.').last().unwrap().to_string().to_lowercase();
+                self.imports.insert(alias, path.clone());
+                Ok(())
+            }
             Statement::ClassDecl { name, members } => {
                 let mut constructor_compiler = Compiler::new();
                 constructor_compiler.is_class = true;
                 constructor_compiler.scope_depth = 1;
+                constructor_compiler.imports = self.imports.clone();
                 
                 let mut methods = HashMap::new();
                 
@@ -61,6 +71,7 @@ impl Compiler {
                                 Statement::FunctionDecl { name: func_name, params, body } => {
                                     let mut method_compiler = Compiler::new();
                                     method_compiler.is_class = true;
+                                    method_compiler.imports = self.imports.clone();
                                     let func = method_compiler.compile_function(func_name, params, body)?;
                                     methods.insert(func_name.to_lowercase(), Rc::new(func));
                                 }
@@ -112,47 +123,36 @@ impl Compiler {
                 Ok(())
             }
             Statement::TryCatch { try_branch, catches, finally_branch } => {
-                // 1. Push Handler
                 let push_handler_idx = self.chunk.code.len();
                 self.chunk.write(OpCode::OpPushHandler(0));
 
-                // 2. Try block
                 self.begin_scope();
                 for s in try_branch {
                     self.compile_statement(s)?;
                 }
                 self.end_scope();
 
-                // 3. Pop Handler (if try finished successfully)
                 self.chunk.write(OpCode::OpPopHandler);
 
-                // 4. Jump to finally/end
                 let jump_to_finally_idx = self.chunk.code.len();
                 self.chunk.write(OpCode::OpJump(0));
 
-                // 5. Catch targets
                 let catch_target = self.chunk.code.len();
                 let offset = catch_target - push_handler_idx - 1;
                 self.chunk.code[push_handler_idx] = OpCode::OpPushHandler(offset);
 
-                // For simplicity, we handle the first catch block only in this POC
-                // In a real VM, OpThrow might push the exception value
                 if !catches.is_empty() {
-                    // For simplicity, we handle the first catch block only in this POC
                     let first_catch = &catches[0];
                     self.begin_scope();
-                    // Exception value is on top of stack
                     self.add_local(first_catch.exception_var.clone());
                     for s in &first_catch.body {
                         self.compile_statement(s)?;
                     }
                     self.end_scope();
                 } else {
-                    // No catch? Rethrow so outer try/catch can handle it
                     self.chunk.write(OpCode::OpThrow);
                 }
 
-                // 6. Finally block (simplified: just run it at the end)
                 let finally_target = self.chunk.code.len();
                 let jump_offset = finally_target - jump_to_finally_idx - 1;
                 self.chunk.code[jump_to_finally_idx] = OpCode::OpJump(jump_offset);
@@ -311,14 +311,33 @@ impl Compiler {
 
     fn compile_expression(&mut self, expr: &Expression) -> Result<()> {
         match expr {
-            Expression::New { class_name, args } => {
-                let class_idx = self.chunk.add_constant(BxValue::String(class_name.clone()));
-                self.chunk.write(OpCode::OpGetGlobal(class_idx));
+            Expression::New { class_path, args } => {
+                let lower_path = class_path.to_lowercase();
+                let resolved_path = self.imports.get(&lower_path).cloned().unwrap_or(class_path.clone());
+                
+                if resolved_path.contains('.') {
+                    let class_val = self.load_class_from_path(&resolved_path)?;
+                    let class_idx = self.chunk.add_constant(class_val);
+                    self.chunk.write(OpCode::OpConstant(class_idx));
+                } else {
+                    let class_idx = self.chunk.add_constant(BxValue::String(resolved_path));
+                    self.chunk.write(OpCode::OpGetGlobal(class_idx));
+                }
                 
                 for arg in args {
                     self.compile_expression(arg)?;
                 }
+                
+                // OpNew(args.len()) replaces Class with Instance BELOW args
+                // and sets up the constructor frame
                 self.chunk.write(OpCode::OpNew(args.len()));
+                
+                // Automatically call init() if args were passed
+                if !args.is_empty() {
+                    let name_idx = self.chunk.add_constant(BxValue::String("init".to_string()));
+                    self.chunk.write(OpCode::OpInvoke(name_idx, args.len()));
+                }
+                
                 Ok(())
             }
             Expression::Literal(lit) => match lit {
@@ -510,8 +529,6 @@ impl Compiler {
                         } else {
                             self.chunk.write(OpCode::OpDec);
                         }
-                        
-                        // Set back
                         if let Some(slot) = self.resolve_local(name) {
                             self.chunk.write(OpCode::OpSetLocal(slot));
                         } else if self.is_class {
@@ -534,34 +551,24 @@ impl Compiler {
                         }
                         self.chunk.write(OpCode::OpSetMember(name_idx));
                     }
-                    crate::ast::AssignmentTarget::Index { base, index } => {
-                        self.compile_expression(base)?;
-                        self.compile_expression(index)?;
-                        self.chunk.write(OpCode::OpDup);
-                        // Wait, I need base AND index.
-                        // [base, index] -> [base, index, base, index] would be better.
-                        // Let's just implement for Identifier and Member for now if too complex.
-                        // Actually, I can just use temporary locals or more DUPs.
-                        // For now, let's bail on Index prefix/postfix if not easy.
+                    crate::ast::AssignmentTarget::Index { base: _, index: _ } => {
                         bail!("Prefix ops on indexed targets not yet implemented");
                     }
                 }
                 Ok(())
             }
             Expression::Postfix { base, operator } => {
-                // Postfix is more complex because we need to return original value
                 match base.as_ref() {
                     Expression::Identifier(name) => {
-                        self.compile_expression(base)?; // [val]
-                        self.chunk.write(OpCode::OpDup); // [val, val]
+                        self.compile_expression(base)?;
+                        self.chunk.write(OpCode::OpDup);
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc); // [val, val+1]
+                            self.chunk.write(OpCode::OpInc);
                         } else {
-                            self.chunk.write(OpCode::OpDec); // [val, val-1]
+                            self.chunk.write(OpCode::OpDec);
                         }
-                        // Set back
                         if let Some(slot) = self.resolve_local(name) {
-                            self.chunk.write(OpCode::OpSetLocal(slot)); // [val, val+1]
+                            self.chunk.write(OpCode::OpSetLocal(slot));
                         } else if self.is_class {
                             let idx = self.chunk.add_constant(BxValue::String(name.clone()));
                             self.chunk.write(OpCode::OpSetPrivate(idx));
@@ -569,22 +576,22 @@ impl Compiler {
                             let idx = self.chunk.add_constant(BxValue::String(name.clone()));
                             self.chunk.write(OpCode::OpSetGlobal(idx));
                         }
-                        self.chunk.write(OpCode::OpPop); // [val]
+                        self.chunk.write(OpCode::OpPop);
                     }
                     Expression::MemberAccess { base: member_base, member } => {
-                        self.compile_expression(member_base)?; // [obj]
-                        self.chunk.write(OpCode::OpDup); // [obj, obj]
+                        self.compile_expression(member_base)?;
+                        self.chunk.write(OpCode::OpDup);
                         let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
-                        self.chunk.write(OpCode::OpMember(name_idx)); // [obj, val]
-                        self.chunk.write(OpCode::OpSwap); // [val, obj]
-                        self.chunk.write(OpCode::OpOver); // [val, obj, val]
+                        self.chunk.write(OpCode::OpMember(name_idx));
+                        self.chunk.write(OpCode::OpSwap);
+                        self.chunk.write(OpCode::OpOver);
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc); // [val, obj, val+1]
+                            self.chunk.write(OpCode::OpInc);
                         } else {
-                            self.chunk.write(OpCode::OpDec); // [val, obj, val-1]
+                            self.chunk.write(OpCode::OpDec);
                         }
-                        self.chunk.write(OpCode::OpSetMember(name_idx)); // [val, val+1]
-                        self.chunk.write(OpCode::OpPop); // [val]
+                        self.chunk.write(OpCode::OpSetMember(name_idx));
+                        self.chunk.write(OpCode::OpPop);
                     }
                     _ => bail!("Postfix ops only supported on identifiers and members currently"),
                 }
@@ -608,6 +615,7 @@ impl Compiler {
         let mut sub_compiler = Compiler::new();
         sub_compiler.scope_depth = 1;
         sub_compiler.is_class = self.is_class;
+        sub_compiler.imports = self.imports.clone();
         
         for param in params {
             sub_compiler.locals.push(Local {
@@ -668,5 +676,33 @@ impl Compiler {
                 break;
             }
         }
+    }
+
+    fn load_class_from_path(&mut self, class_path: &str) -> Result<BxValue> {
+        let rel_path = class_path.replace('.', "/") + ".bxs";
+        let path = Path::new(&rel_path);
+        
+        if !path.exists() {
+            bail!("Class file not found: {}", path.display());
+        }
+        
+        let source = fs::read_to_string(path)?;
+        let ast = crate::parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", class_path, e))?;
+        
+        // We need to compile the file and find the resulting class in its constants
+        let mut sub_compiler = Compiler::new();
+        sub_compiler.imports = self.imports.clone();
+        sub_compiler.is_class = true; // Use class mode if we expect a class? 
+        // Actually, the ClassDecl statement itself will set is_class for its constructor/methods.
+        
+        let chunk = sub_compiler.compile(&ast)?;
+        
+        for constant in chunk.constants {
+            if let BxValue::Class(_) = constant {
+                return Ok(constant);
+            }
+        }
+        
+        bail!("No class declaration found in {}", path.display());
     }
 }

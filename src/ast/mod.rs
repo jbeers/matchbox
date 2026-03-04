@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    Import(String),
     ClassDecl {
         name: String,
         members: Vec<ClassMember>,
@@ -55,7 +56,7 @@ pub enum ClassMember {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     New {
-        class_name: String,
+        class_path: String,
         args: Vec<Expression>,
     },
     Assignment {

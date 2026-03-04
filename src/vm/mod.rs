@@ -327,13 +327,22 @@ impl VM {
                 }
                 OpCode::OpInvoke(idx, arg_count) => {
                     let name = self.read_string_constant(idx).to_lowercase();
+                    
+                    // The receiver is below the arguments on the stack
+                    if self.stack.len() < arg_count + 1 {
+                        bail!("Stack underflow: missing receiver or arguments for method call");
+                    }
+                    let receiver_idx = self.stack.len() - 1 - arg_count;
+                    let receiver_val = self.stack.get(receiver_idx).cloned().unwrap();
+                    
                     let mut args = Vec::with_capacity(arg_count);
                     for _ in 0..arg_count {
                         args.push(self.stack.pop().unwrap());
                     }
                     args.reverse();
                     
-                    let receiver_val = self.stack.pop().unwrap();
+                    self.stack.pop(); // Pop the receiver now
+                    
                     match receiver_val {
                         BxValue::Instance(inst) => {
                             let method = {
@@ -352,6 +361,7 @@ impl VM {
                                     self.throw_error(&format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
                                     continue;
                                 } else {
+                                    // Re-push args
                                     for arg in args { self.stack.push(arg); }
                                     let frame = CallFrame {
                                         function: func,
@@ -547,6 +557,7 @@ impl VM {
                             variables: variables_scope.clone(),
                         }));
                         
+                        // Replace Class with Instance on stack at its original position
                         self.stack[class_idx] = BxValue::Instance(Rc::clone(&instance));
 
                         let frame = CallFrame {
@@ -556,7 +567,7 @@ impl VM {
                                 chunk: class.borrow().constructor.clone(),
                             }),
                             ip: 0,
-                            stack_base: class_idx + 1,
+                            stack_base: class_idx + 1 + arg_count, // Start frame after the instance and args
                             receiver: Some(Rc::clone(&instance)),
                             handlers: Vec::new(),
                         };

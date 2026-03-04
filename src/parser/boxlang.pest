@@ -4,7 +4,8 @@ COMMENT = _{ ("//" ~ (!"\n" ~ ANY)*) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
 program = { SOI ~ statement* ~ EOI }
 
 statement = {
-    ( class_decl
+    ( import_stmt
+    | class_decl
     | function_decl
     | for_loop
     | if_statement
@@ -16,16 +17,9 @@ statement = {
     )
 }
 
-try_catch = { try_keyword ~ block ~ catch_block* ~ finally_block? }
-catch_block = { catch_keyword ~ "(" ~ identifier ~ ")" ~ block }
-finally_block = { finally_keyword ~ block }
-
-try_keyword = @{ "try" ~ !ASCII_ALPHANUMERIC }
-catch_keyword = @{ "catch" ~ !ASCII_ALPHANUMERIC }
-finally_keyword = @{ "finally" ~ !ASCII_ALPHANUMERIC }
-
-throw_stmt = { throw_keyword ~ expression? ~ ";"? }
-throw_keyword = @{ "throw" ~ !ASCII_ALPHANUMERIC }
+import_keyword = @{ "import" ~ !ASCII_ALPHANUMERIC }
+import_stmt = { import_keyword ~ dotted_identifier ~ ";"? }
+dotted_identifier = @{ identifier ~ ("." ~ identifier)* }
 
 class_keyword = @{ "class" ~ !ASCII_ALPHANUMERIC }
 class_decl = { class_keyword ~ identifier ~ "{" ~ class_member* ~ "}" }
@@ -59,6 +53,16 @@ else_keyword = @{ "else" ~ !ASCII_ALPHANUMERIC }
 if_statement = { if_keyword ~ "(" ~ expression ~ ")" ~ block ~ (else_keyword ~ block)? }
 block = { "{" ~ statement* ~ "}" }
 
+try_keyword = @{ "try" ~ !ASCII_ALPHANUMERIC }
+catch_keyword = @{ "catch" ~ !ASCII_ALPHANUMERIC }
+finally_keyword = @{ "finally" ~ !ASCII_ALPHANUMERIC }
+try_catch = { try_keyword ~ block ~ catch_block* ~ finally_block? }
+catch_block = { catch_keyword ~ "(" ~ identifier ~ ")" ~ block }
+finally_block = { finally_keyword ~ block }
+
+throw_keyword = @{ "throw" ~ !ASCII_ALPHANUMERIC }
+throw_stmt = { throw_keyword ~ expression? ~ ";"? }
+
 expression_stmt = { expression ~ ";"? }
 
 expression = {
@@ -76,22 +80,38 @@ operator = { "+" | "-" | "*" | "/" | "==" | "!=" | "<=" | ">=" | "<" | ">" | "&"
 primary = { atom ~ (function_call_args | array_access | member_access | postfix_op)* }
 
 atom = {
-    prefix_op
-    | new_expression
+    new_expression
     | literal
-    | identifier
+    | !keyword ~ identifier
     | "(" ~ expression ~ ")"
 }
 
-prefix_op = { ("++" | "--") ~ target }
-postfix_op = { "++" | "--" }
+keyword = {
+    import_keyword
+    | class_keyword
+    | property_keyword
+    | function_keyword
+    | return_keyword
+    | var_keyword
+    | for_keyword
+    | in_keyword
+    | if_keyword
+    | else_keyword
+    | try_keyword
+    | catch_keyword
+    | finally_keyword
+    | throw_keyword
+    | new_keyword
+}
 
 new_keyword = @{ "new" ~ !ASCII_ALPHANUMERIC }
-new_expression = { new_keyword ~ identifier ~ "(" ~ args? ~ ")" }
+new_expression = { new_keyword ~ dotted_identifier ~ "(" ~ args? ~ ")" }
 
 function_call_args = { "(" ~ args? ~ ")" }
 array_access = { "[" ~ expression ~ "]" }
 member_access = { "." ~ identifier }
+postfix_op = { "++" | "--" }
+prefix_op = { ("++" | "--") ~ target }
 
 function_call = _{ identifier ~ function_call_args }
 args = { expression ~ ("," ~ expression)* }
