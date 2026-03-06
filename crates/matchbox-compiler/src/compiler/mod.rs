@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use crate::ast::{Expression, ExpressionKind, Literal, Statement, StatementKind, StringPart, FunctionBody, ClassMember};
-use matchbox_vm::types::{BxValue, BxCompiledFunction, BxClass};
+use matchbox_vm::types::{BxValue, BxCompiledFunction, BxClass, BxInterface};
 use matchbox_vm::Chunk;
 use matchbox_vm::vm::opcode::OpCode;
 use std::rc::Rc;
@@ -57,7 +57,7 @@ impl Compiler {
                 self.imports.insert(alias, path.clone());
                 Ok(())
             }
-            StatementKind::ClassDecl { name, extends, accessors, members } => {
+            StatementKind::ClassDecl { name, extends, accessors, implements, members } => {
                 let mut constructor_compiler = Compiler::new(&self.chunk.filename);
                 constructor_compiler.is_class = true;
                 constructor_compiler.scope_depth = 1;
@@ -80,6 +80,9 @@ impl Compiler {
                         ClassMember::Statement(inner_stmt) => {
                             match &inner_stmt.kind {
                                 StatementKind::FunctionDecl { name: func_name, access_modifier: _, return_type: _, params, body } => {
+                                    if let FunctionBody::Abstract = body {
+                                        bail!("Abstract functions only allowed in interfaces");
+                                    }
                                     let mut method_compiler = Compiler::new(&self.chunk.filename);
                                     method_compiler.is_class = true;
                                     method_compiler.imports = self.imports.clone();
@@ -138,18 +141,80 @@ impl Compiler {
                         }
                     }
                 }
+
+                // Handle Interfaces (Traits and Contracts)
+                for iface_name in implements {
+                    let iface_val = if let Some(alias_path) = self.imports.get(&iface_name.to_lowercase()) {
+                        let path = alias_path.clone();
+                        self.load_interface_from_path(&path)?
+                    } else {
+                        // Look in local/global scope
+                        // This POC assumes interfaces are in globals if not qualified
+                        self.chunk.constants.iter().find_map(|c| {
+                            if let BxValue::Interface(i) = c {
+                                if i.borrow().name.to_lowercase() == iface_name.to_lowercase() {
+                                    return Some(BxValue::Interface(Rc::clone(i)));
+                                }
+                            }
+                            None
+                        }).ok_or_else(|| anyhow::anyhow!("Interface {} not found", iface_name))?
+                    };
+
+                    if let BxValue::Interface(iface) = iface_val {
+                        let iface_ref = iface.borrow();
+                        for (method_name, method_opt) in &iface_ref.methods {
+                            if !methods.contains_key(method_name) {
+                                if let Some(default_impl) = method_opt {
+                                    methods.insert(method_name.clone(), Rc::clone(default_impl));
+                                } else {
+                                    bail!("Class {} must implement abstract method {} from interface {}", name, method_name, iface_ref.name);
+                                }
+                            }
+                        }
+                    }
+                }
                 
                 constructor_compiler.chunk.write(OpCode::OpReturn, stmt.line);
                 
                 let class = BxClass {
                     name: name.clone(),
                     extends: extends.clone(),
+                    implements: implements.clone(),
                     constructor: Rc::new(RefCell::new(constructor_compiler.chunk)),
                     methods,
                 };
                 
                 let class_idx = self.chunk.add_constant(BxValue::Class(Rc::new(RefCell::new(class))));
                 self.chunk.write(OpCode::OpConstant(class_idx), stmt.line);
+                let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
+                Ok(())
+            }
+            StatementKind::InterfaceDecl { name, members } => {
+                let mut methods = HashMap::new();
+                for member in members {
+                    if let StatementKind::FunctionDecl { name: func_name, access_modifier: _, return_type: _, params, body } = &member.kind {
+                        let method = if let FunctionBody::Abstract = body {
+                            None
+                        } else {
+                            let mut method_compiler = Compiler::new(&self.chunk.filename);
+                            method_compiler.is_class = true;
+                            method_compiler.imports = self.imports.clone();
+                            method_compiler.current_line = member.line;
+                            let func = method_compiler.compile_function(func_name, params, body)?;
+                            Some(Rc::new(func))
+                        };
+                        methods.insert(func_name.to_lowercase(), method);
+                    } else {
+                        bail!("Only function declarations allowed in interfaces");
+                    }
+                }
+                let iface = BxInterface {
+                    name: name.clone(),
+                    methods,
+                };
+                let iface_idx = self.chunk.add_constant(BxValue::Interface(Rc::new(RefCell::new(iface))));
+                self.chunk.write(OpCode::OpConstant(iface_idx), stmt.line);
                 let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
                 self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 Ok(())
@@ -742,6 +807,9 @@ impl Compiler {
                 sub_compiler.compile_expression(expr)?;
                 sub_compiler.chunk.write(OpCode::OpReturn, sub_compiler.current_line);
             }
+            FunctionBody::Abstract => {
+                bail!("Cannot compile an abstract function body");
+            }
         }
 
         Ok(BxCompiledFunction {
@@ -809,5 +877,32 @@ impl Compiler {
         }
         
         bail!("No class declaration found in {}", path.display());
+    }
+
+    fn load_interface_from_path(&mut self, iface_path: &str) -> Result<BxValue> {
+        let rel_path = iface_path.replace('.', "/") + ".bxs";
+        let path = Path::new(&rel_path);
+        
+        if !path.exists() {
+            bail!("Interface file not found: {}", path.display());
+        }
+        
+        let source = fs::read_to_string(path)?;
+        let ast = crate::parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", iface_path, e))?;
+        
+        let mut sub_compiler = Compiler::new(&rel_path);
+        sub_compiler.imports = self.imports.clone();
+        sub_compiler.is_class = true; 
+        sub_compiler.current_line = self.current_line;
+        
+        let chunk = sub_compiler.compile(&ast, &source)?;
+        
+        for constant in chunk.constants {
+            if let BxValue::Interface(_) = constant {
+                return Ok(constant);
+            }
+        }
+        
+        bail!("No interface declaration found in {}", path.display());
     }
 }

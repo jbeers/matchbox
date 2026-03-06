@@ -43,3 +43,12 @@ script_test!(vm_inheritance, "vm_inheritance.bxs");
 script_test!(vm_accessors, "vm_accessors.bxs");
 script_test!(vm_typed_functions, "vm_typed_functions.bxs");
 script_test!(vm_defaults, "vm_defaults.bxs");
+script_test!(vm_interfaces, "vm_interfaces.bxs");
+
+#[test]
+#[should_panic(expected = "must implement abstract method f")]
+fn vm_interface_fail() {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/scripts/vm_interface_fail.bxs");
+    process_file(&path, false, None).unwrap();
+}

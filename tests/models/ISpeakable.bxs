@@ -1,0 +1,5 @@
+interface ISpeakable {
+    function speak() {
+        println("I am speaking...");
+    }
+}

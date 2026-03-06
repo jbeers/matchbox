@@ -16,6 +16,7 @@ pub enum BxValue {
     #[serde(skip)]
     NativeFunction(BxNativeFunction),
     Class(Rc<RefCell<BxClass>>),
+    Interface(Rc<RefCell<BxInterface>>),
     Instance(usize), // GcId
     Future(usize), // GcId
     #[cfg(target_arch = "wasm32")]
@@ -68,6 +69,7 @@ impl fmt::Display for BxValue {
             BxValue::CompiledFunction(func) => write!(f, "<compiled function {}>", func.name),
             BxValue::NativeFunction(_) => write!(f, "<native function>"),
             BxValue::Class(class) => write!(f, "<class {}>", class.borrow().name),
+            BxValue::Interface(iface) => write!(f, "<interface {}>", iface.borrow().name),
             BxValue::Instance(id) => write!(f, "<instance id:{}>", id),
             BxValue::Future(id) => write!(f, "<future id:{}>", id),
             #[cfg(target_arch = "wasm32")]
@@ -89,8 +91,15 @@ pub struct BxCompiledFunction {
 pub struct BxClass {
     pub name: String,
     pub extends: Option<String>,
+    pub implements: Vec<String>,
     pub constructor: Rc<RefCell<crate::vm::chunk::Chunk>>,
     pub methods: HashMap<String, Rc<BxCompiledFunction>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BxInterface {
+    pub name: String,
+    pub methods: HashMap<String, Option<Rc<BxCompiledFunction>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

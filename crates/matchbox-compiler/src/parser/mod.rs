@@ -83,6 +83,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut extends = None;
             let mut accessors = false;
+            let mut implements = Vec::new();
             let mut members = Vec::new();
             for attr_or_member in inner_rules {
                 match attr_or_member.as_rule() {
@@ -108,6 +109,16 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                                 };
                                 accessors = val.to_lowercase() == "true";
                             }
+                            Rule::implements_attr => {
+                                let string_rule = attr_pair.into_inner().next().unwrap();
+                                let raw_str = string_rule.as_str().to_string();
+                                let val = if raw_str.len() >= 2 && (raw_str.starts_with('"') || raw_str.starts_with('\'')) {
+                                    raw_str[1..raw_str.len()-1].to_string()
+                                } else {
+                                    raw_str
+                                };
+                                implements = val.split(',').map(|s| s.trim().to_string()).collect();
+                            }
                             _ => bail!("Unexpected class attribute: {:?}", attr_pair.as_rule()),
                         }
                     }
@@ -129,7 +140,18 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                     _ => bail!("Unexpected rule in class_decl: {:?}", attr_or_member.as_rule()),
                 }
             }
-            Ok(Statement::new(StatementKind::ClassDecl { name, extends, accessors, members }, line))
+            Ok(Statement::new(StatementKind::ClassDecl { name, extends, accessors, implements, members }, line))
+        }
+        Rule::interface_decl => {
+            let mut inner_rules = pair.into_inner();
+            let _kw = inner_rules.next().unwrap(); // interface_keyword
+            let name = inner_rules.next().unwrap().as_str().to_string();
+            let mut members = Vec::new();
+            for member_pair in inner_rules {
+                let member_inner = member_pair.into_inner().next().unwrap();
+                members.push(parse_statement(member_inner)?);
+            }
+            Ok(Statement::new(StatementKind::InterfaceDecl { name, members }, line))
         }
         Rule::import_stmt => {
             let mut inner = pair.into_inner();
@@ -159,16 +181,23 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut params = Vec::new();
             
-            let mut next = inner_rules.next().unwrap();
-            if next.as_rule() == Rule::params {
-                params = parse_params(next)?;
-                next = inner_rules.next().unwrap();
+            let mut next = inner_rules.next();
+            if let Some(n) = next.as_ref() {
+                if n.as_rule() == Rule::params {
+                    params = parse_params(next.take().unwrap())?;
+                    next = inner_rules.next();
+                }
             }
             
-            let body_stmts = if next.as_rule() == Rule::block {
-                parse_block(next)?
+            let body = if let Some(n) = next {
+                if n.as_rule() == Rule::block {
+                    let body_stmts = parse_block(n)?;
+                    crate::ast::FunctionBody::Block(body_stmts)
+                } else {
+                    crate::ast::FunctionBody::Abstract
+                }
             } else {
-                Vec::new()
+                crate::ast::FunctionBody::Abstract
             };
             
             Ok(Statement::new(StatementKind::FunctionDecl { 
@@ -176,7 +205,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                 access_modifier,
                 return_type,
                 params, 
-                body: crate::ast::FunctionBody::Block(body_stmts) 
+                body
             }, line))
         }
         Rule::for_loop => {

@@ -25,7 +25,12 @@ pub enum StatementKind {
         name: String,
         extends: Option<String>,
         accessors: bool,
+        implements: Vec<String>,
         members: Vec<ClassMember>,
+    },
+    InterfaceDecl {
+        name: String,
+        members: Vec<Statement>,
     },
     FunctionDecl {
         name: String,
@@ -159,6 +164,7 @@ pub enum Literal {
 pub enum FunctionBody {
     Block(Vec<Statement>),
     Expression(Box<Expression>),
+    Abstract,
 }
 
 #[derive(Debug, Clone, PartialEq)]
