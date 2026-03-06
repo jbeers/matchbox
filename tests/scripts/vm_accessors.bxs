@@ -1,0 +1,11 @@
+class Person accessors="true" {
+    property name
+    
+    function getName() {
+        return "Override: " & name
+    }
+}
+
+p = new Person()
+p.setName("Luis")
+println(p.getName())

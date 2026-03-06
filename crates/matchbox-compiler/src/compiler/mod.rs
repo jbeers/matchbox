@@ -57,7 +57,7 @@ impl Compiler {
                 self.imports.insert(alias, path.clone());
                 Ok(())
             }
-            StatementKind::ClassDecl { name, extends, members } => {
+            StatementKind::ClassDecl { name, extends, accessors, members } => {
                 let mut constructor_compiler = Compiler::new(&self.chunk.filename);
                 constructor_compiler.is_class = true;
                 constructor_compiler.scope_depth = 1;
@@ -65,10 +65,12 @@ impl Compiler {
                 constructor_compiler.current_line = stmt.line;
                 
                 let mut methods = HashMap::new();
+                let mut properties = Vec::new();
                 
                 for member in members {
                     match member {
                         ClassMember::Property(prop_name) => {
+                            properties.push(prop_name.clone());
                             let null_idx = constructor_compiler.chunk.add_constant(BxValue::Null);
                             constructor_compiler.chunk.write(OpCode::OpConstant(null_idx), stmt.line);
                             let name_idx = constructor_compiler.chunk.add_constant(BxValue::String(prop_name.clone()));
@@ -89,6 +91,48 @@ impl Compiler {
                                     constructor_compiler.compile_statement(inner_stmt, false)?;
                                 }
                             }
+                        }
+                    }
+                }
+
+                if *accessors {
+                    for prop in &properties {
+                        if prop.is_empty() { continue; }
+                        let capitalized = format!("{}{}", &prop[..1].to_uppercase(), &prop[1..]);
+                        
+                        // Getter: getProp()
+                        let getter_name = format!("get{}", capitalized);
+                        if !methods.contains_key(&getter_name.to_lowercase()) {
+                            let mut getter_chunk = Chunk::default();
+                            getter_chunk.filename = self.chunk.filename.clone();
+                            let name_idx = getter_chunk.add_constant(BxValue::String(prop.clone()));
+                            getter_chunk.write(OpCode::OpGetPrivate(name_idx), stmt.line);
+                            getter_chunk.write(OpCode::OpReturn, stmt.line);
+                            
+                            let func = BxCompiledFunction {
+                                name: format!("{}.{}", name, getter_name),
+                                arity: 0,
+                                chunk: Rc::new(RefCell::new(getter_chunk)),
+                            };
+                            methods.insert(getter_name.to_lowercase(), Rc::new(func));
+                        }
+
+                        // Setter: setProp(val)
+                        let setter_name = format!("set{}", capitalized);
+                        if !methods.contains_key(&setter_name.to_lowercase()) {
+                            let mut setter_chunk = Chunk::default();
+                            setter_chunk.filename = self.chunk.filename.clone();
+                            setter_chunk.write(OpCode::OpGetLocal(0), stmt.line);
+                            let name_idx = setter_chunk.add_constant(BxValue::String(prop.clone()));
+                            setter_chunk.write(OpCode::OpSetPrivate(name_idx), stmt.line);
+                            setter_chunk.write(OpCode::OpReturn, stmt.line);
+                            
+                            let func = BxCompiledFunction {
+                                name: format!("{}.{}", name, setter_name),
+                                arity: 1,
+                                chunk: Rc::new(RefCell::new(setter_chunk)),
+                            };
+                            methods.insert(setter_name.to_lowercase(), Rc::new(func));
                         }
                     }
                 }

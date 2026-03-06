@@ -16,6 +16,7 @@ pub enum StatementKind {
     ClassDecl {
         name: String,
         extends: Option<String>,
+        accessors: bool,
         members: Vec<ClassMember>,
     },
     FunctionDecl {

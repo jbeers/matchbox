@@ -64,21 +64,37 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let _kw = inner_rules.next().unwrap(); // class_keyword
             let name = inner_rules.next().unwrap().as_str().to_string();
             let mut extends = None;
+            let mut accessors = false;
             let mut members = Vec::new();
-            for member_pair in inner_rules {
-                match member_pair.as_rule() {
-                    Rule::extends_attr => {
-                        let string_rule = member_pair.into_inner().next().unwrap();
-                        let raw_str = string_rule.as_str().to_string();
-                        // strip quotes
-                        if raw_str.len() >= 2 && (raw_str.starts_with('"') || raw_str.starts_with('\'')) {
-                            extends = Some(raw_str[1..raw_str.len()-1].to_string());
-                        } else {
-                            extends = Some(raw_str);
+            for attr_or_member in inner_rules {
+                match attr_or_member.as_rule() {
+                    Rule::class_attr => {
+                        let attr_pair = attr_or_member.into_inner().next().unwrap();
+                        match attr_pair.as_rule() {
+                            Rule::extends_attr => {
+                                let string_rule = attr_pair.into_inner().next().unwrap();
+                                let raw_str = string_rule.as_str().to_string();
+                                if raw_str.len() >= 2 && (raw_str.starts_with('"') || raw_str.starts_with('\'')) {
+                                    extends = Some(raw_str[1..raw_str.len()-1].to_string());
+                                } else {
+                                    extends = Some(raw_str);
+                                }
+                            }
+                            Rule::accessors_attr => {
+                                let string_rule = attr_pair.into_inner().next().unwrap();
+                                let raw_str = string_rule.as_str().to_string();
+                                let val = if raw_str.len() >= 2 && (raw_str.starts_with('"') || raw_str.starts_with('\'')) {
+                                    raw_str[1..raw_str.len()-1].to_string()
+                                } else {
+                                    raw_str
+                                };
+                                accessors = val.to_lowercase() == "true";
+                            }
+                            _ => bail!("Unexpected class attribute: {:?}", attr_pair.as_rule()),
                         }
                     }
                     Rule::class_member => {
-                        let member_inner = member_pair.into_inner().next().unwrap();
+                        let member_inner = attr_or_member.into_inner().next().unwrap();
                         match member_inner.as_rule() {
                             Rule::property => {
                                 let mut prop_inner = member_inner.into_inner();
@@ -92,10 +108,10 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
                             _ => bail!("Unexpected class member rule: {:?}", member_inner.as_rule()),
                         }
                     }
-                    _ => bail!("Unexpected rule in class_decl: {:?}", member_pair.as_rule()),
+                    _ => bail!("Unexpected rule in class_decl: {:?}", attr_or_member.as_rule()),
                 }
             }
-            Ok(Statement::new(StatementKind::ClassDecl { name, extends, members }, line))
+            Ok(Statement::new(StatementKind::ClassDecl { name, extends, accessors, members }, line))
         }
         Rule::import_stmt => {
             let mut inner = pair.into_inner();

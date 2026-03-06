@@ -962,7 +962,6 @@ impl VM {
                                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                                     }
                                     args.reverse();
-                                    self.fibers[fiber_idx].stack.pop(); // Pop the receiver
                                     
                                     for arg in args { self.fibers[fiber_idx].stack.push(arg); }
                                     let frame = CallFrame {
@@ -973,6 +972,7 @@ impl VM {
                                         handlers: Vec::new(),
                                     };
                                     self.fibers[fiber_idx].frames.push(frame);
+                                    continue;
                                 }
                             } else {
                                 self.throw_error(fiber_idx, &format!("Method {} not found.", name))?;
@@ -1023,7 +1023,6 @@ impl VM {
                                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                                     }
                                     args.reverse();
-                                    self.fibers[fiber_idx].stack.pop(); // Pop the receiver
                                     
                                     for arg in args { self.fibers[fiber_idx].stack.push(arg); }
                                     let frame = CallFrame {
@@ -1034,6 +1033,7 @@ impl VM {
                                         handlers: Vec::new(),
                                     };
                                     self.fibers[fiber_idx].frames.push(frame);
+                                    continue;
                                 }
                             } else if let Some(bif_name) = self.resolve_member_method(&receiver_val, &name) {
                                 if let Some(BxValue::NativeFunction(bif)) = self.globals.get(&bif_name).cloned() {

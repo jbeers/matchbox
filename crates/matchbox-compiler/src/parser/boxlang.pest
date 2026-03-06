@@ -23,7 +23,9 @@ dotted_identifier = @{ identifier ~ ("." ~ identifier)* }
 
 class_keyword = @{ "class" ~ !ASCII_ALPHANUMERIC }
 extends_attr = { "extends" ~ "=" ~ string }
-class_decl = { class_keyword ~ identifier ~ extends_attr? ~ "{" ~ class_member* ~ "}" }
+accessors_attr = { "accessors" ~ "=" ~ string }
+class_attr = { extends_attr | accessors_attr }
+class_decl = { class_keyword ~ identifier ~ class_attr* ~ "{" ~ class_member* ~ "}" }
 class_member = { property | statement }
 
 property_keyword = @{ "property" ~ !ASCII_ALPHANUMERIC }
