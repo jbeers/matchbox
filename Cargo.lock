@@ -303,16 +303,46 @@ dependencies = [
  "anyhow",
  "base64-simd",
  "bincode",
- "getrandom",
- "jni",
  "js-sys",
- "pest",
- "pest_derive",
- "rand",
- "serde",
+ "matchbox_compiler",
+ "matchbox_vm",
  "wasm-bindgen",
  "wasm-encoder 0.245.1",
  "wasmparser 0.245.1",
+]
+
+[[package]]
+name = "matchbox_compiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "matchbox_vm",
+ "pest",
+ "pest_derive",
+ "serde",
+]
+
+[[package]]
+name = "matchbox_runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "matchbox_vm",
+]
+
+[[package]]
+name = "matchbox_vm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "getrandom",
+ "jni",
+ "js-sys",
+ "rand",
+ "serde",
+ "wasm-bindgen",
  "web-sys",
  "web-time",
 ]

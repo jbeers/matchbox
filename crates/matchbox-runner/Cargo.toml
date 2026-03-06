@@ -1,0 +1,16 @@
+[package]
+name = "matchbox_runner"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+matchbox_vm = { path = "../matchbox-vm" }
+bincode = "1.3.3"
+anyhow = "1.0.102"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

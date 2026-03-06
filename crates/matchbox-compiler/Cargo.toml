@@ -1,0 +1,11 @@
+[package]
+name = "matchbox_compiler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+pest = "2.8.6"
+pest_derive = "2.8.6"
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+matchbox_vm = { path = "../matchbox-vm" }

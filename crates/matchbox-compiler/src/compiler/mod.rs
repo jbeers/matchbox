@@ -1,8 +1,8 @@
 use anyhow::{Result, bail};
 use crate::ast::{Expression, ExpressionKind, Literal, Statement, StatementKind, StringPart, FunctionBody, ClassMember};
-use crate::types::{BxValue, BxCompiledFunction, BxClass};
-use crate::vm::chunk::Chunk;
-use crate::vm::opcode::OpCode;
+use matchbox_vm::types::{BxValue, BxCompiledFunction, BxClass};
+use matchbox_vm::Chunk;
+use matchbox_vm::vm::opcode::OpCode;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;

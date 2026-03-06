@@ -1,21 +1,18 @@
-pub mod ast;
-pub mod bifs;
-pub mod parser;
-pub mod types;
-pub mod vm;
-pub mod compiler;
+use matchbox_compiler::{ast, compiler, parser};
+use matchbox_vm::{types, vm, Chunk};
 
 use std::env as std_env;
 use std::fs;
 use std::path::Path;
 use std::io::{self, Write};
 use anyhow::{Result, bail, Context};
-pub use crate::vm::chunk::Chunk;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
+
+const NATIVE_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_native");
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -319,18 +316,7 @@ fn load_wasm_custom_section() -> Result<Chunk> {
 }
 
 fn produce_native_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let self_path = std_env::current_exe()?;
-    let mut binary_bytes = fs::read(self_path)?;
-    if binary_bytes.len() > 16 {
-        let footer_start = binary_bytes.len() - 8;
-        if &binary_bytes[footer_start..] == MAGIC_FOOTER {
-            let len_start = binary_bytes.len() - 16;
-            let mut len_bytes = [0u8; 8];
-            len_bytes.copy_from_slice(&binary_bytes[len_start..footer_start]);
-            let len = u64::from_le_bytes(len_bytes) as usize;
-            binary_bytes.truncate(len_start - len);
-        }
-    }
+    let mut binary_bytes = NATIVE_RUNNER_STUB.to_vec();
     let chunk_bytes = bincode::serialize(chunk)?;
     let chunk_len = chunk_bytes.len() as u64;
     binary_bytes.extend_from_slice(&chunk_bytes);
@@ -361,21 +347,29 @@ fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path,
     let is_wasm = target == "wasm" || target == "js";
 
     // 1. Generate Cargo.toml
+    let vm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/matchbox-vm");
     let mut cargo_toml = format!(r#"[package]
 name = "fusion_build"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+[workspace]
 
 [dependencies]
-matchbox = {{ path = "{}" }}
+matchbox_vm = {{ path = "{}" }}
 bincode = "1.3.3"
 anyhow = "1.0"
-"#, std_env::current_dir()?.display());
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+"#, vm_path);
 
     if is_wasm {
+        cargo_toml.push_str("\n[lib]\ncrate-type = [\"cdylib\", \"rlib\"]\n\n");
         cargo_toml.push_str("wasm-bindgen = \"0.2\"\n");
         cargo_toml.push_str("js-sys = \"0.3\"\n");
     }
@@ -399,11 +393,10 @@ anyhow = "1.0"
 
     // 3. Generate main.rs / lib.rs
     let bytecode = bincode::serialize(chunk)?;
-    let bytecode_array = format!("{:?}", bytecode);
 
     let mut code = format!(r#"
-use matchbox::{{vm::VM, types::BxValue, Chunk}};
-use std::collections::HashMap;
+    use matchbox_vm::{{vm::VM, types::BxValue, Chunk}};
+    use std::collections::HashMap;
 
 {}
 
@@ -411,14 +404,14 @@ fn run_interpreted() -> anyhow::Result<()> {{
     let mut bifs = HashMap::new();
 {}
     
-    let bytecode: Vec<u8> = {};
+    let bytecode: Vec<u8> = vec!{:?};
     let chunk: Chunk = bincode::deserialize(&bytecode)?;
     
     let mut vm = VM::new_with_bifs(bifs);
     vm.interpret(chunk)?;
     Ok(())
 }}
-"#, mod_decls, registration_calls, bytecode_array);
+"#, mod_decls, registration_calls, bytecode);
 
     if is_wasm {
         code.push_str(r#"
@@ -468,7 +461,8 @@ impl BoxLangVM {
     }
 
     // 4. Build
-    let mut cmd = std::process::Command::new("cargo");
+    let cargo_bin = std_env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let mut cmd = std::process::Command::new(cargo_bin);
     cmd.arg("build").arg("--release").current_dir(&build_dir);
     
     if is_wasm {

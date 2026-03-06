@@ -1,3 +1,10 @@
+[workspace]
+members = [
+    "crates/matchbox-vm",
+    "crates/matchbox-compiler",
+    "crates/matchbox-runner",
+]
+
 [package]
 name = "matchbox"
 version = "0.1.0"
@@ -6,30 +13,15 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.102"
 bincode = "1.3.3"
-pest = "2.8.6"
-pest_derive = "2.8.6"
-rand = "0.10.0"
-getrandom = { version = "0.4.2", features = ["wasm_js"] }
-serde = { version = "1.0.228", features = ["derive", "rc"] }
+matchbox_vm = { path = "crates/matchbox-vm" }
+matchbox_compiler = { path = "crates/matchbox-compiler" }
 wasm-encoder = "0.245.1"
 wasmparser = "0.245.1"
+base64-simd = "0.8.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.100"
 js-sys = "0.3.77"
-base64-simd = "0.8.0"
-web-time = "1.1.0"
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-jni = { version = "0.21.1", features = ["invocation"] }
-
-[dependencies.web-sys]
-version = "0.3.77"
-features = [
-  "Window",
-  "Document",
-  "Element",
-  "HtmlElement",
-  "Node",
-  "EventTarget"
-]
 
 [profile.release]
 opt-level = "z"     # Optimize for size
