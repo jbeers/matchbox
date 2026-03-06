@@ -63,23 +63,39 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let mut inner_rules = pair.into_inner();
             let _kw = inner_rules.next().unwrap(); // class_keyword
             let name = inner_rules.next().unwrap().as_str().to_string();
+            let mut extends = None;
             let mut members = Vec::new();
             for member_pair in inner_rules {
-                let member_inner = member_pair.into_inner().next().unwrap();
-                match member_inner.as_rule() {
-                    Rule::property => {
-                        let mut prop_inner = member_inner.into_inner();
-                        let _kw = prop_inner.next().unwrap(); // property_keyword
-                        let prop_name = prop_inner.next().unwrap().as_str().to_string();
-                        members.push(ClassMember::Property(prop_name));
+                match member_pair.as_rule() {
+                    Rule::extends_attr => {
+                        let string_rule = member_pair.into_inner().next().unwrap();
+                        let raw_str = string_rule.as_str().to_string();
+                        // strip quotes
+                        if raw_str.len() >= 2 && (raw_str.starts_with('"') || raw_str.starts_with('\'')) {
+                            extends = Some(raw_str[1..raw_str.len()-1].to_string());
+                        } else {
+                            extends = Some(raw_str);
+                        }
                     }
-                    Rule::statement => {
-                        members.push(ClassMember::Statement(parse_statement(member_inner)?));
+                    Rule::class_member => {
+                        let member_inner = member_pair.into_inner().next().unwrap();
+                        match member_inner.as_rule() {
+                            Rule::property => {
+                                let mut prop_inner = member_inner.into_inner();
+                                let _kw = prop_inner.next().unwrap(); // property_keyword
+                                let prop_name = prop_inner.next().unwrap().as_str().to_string();
+                                members.push(ClassMember::Property(prop_name));
+                            }
+                            Rule::statement => {
+                                members.push(ClassMember::Statement(parse_statement(member_inner)?));
+                            }
+                            _ => bail!("Unexpected class member rule: {:?}", member_inner.as_rule()),
+                        }
                     }
-                    _ => bail!("Unexpected class member rule: {:?}", member_inner.as_rule()),
+                    _ => bail!("Unexpected rule in class_decl: {:?}", member_pair.as_rule()),
                 }
             }
-            Ok(Statement::new(StatementKind::ClassDecl { name, members }, line))
+            Ok(Statement::new(StatementKind::ClassDecl { name, extends, members }, line))
         }
         Rule::import_stmt => {
             let mut inner = pair.into_inner();

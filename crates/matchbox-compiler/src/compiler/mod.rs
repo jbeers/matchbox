@@ -57,7 +57,7 @@ impl Compiler {
                 self.imports.insert(alias, path.clone());
                 Ok(())
             }
-            StatementKind::ClassDecl { name, members } => {
+            StatementKind::ClassDecl { name, extends, members } => {
                 let mut constructor_compiler = Compiler::new(&self.chunk.filename);
                 constructor_compiler.is_class = true;
                 constructor_compiler.scope_depth = 1;
@@ -97,6 +97,7 @@ impl Compiler {
                 
                 let class = BxClass {
                     name: name.clone(),
+                    extends: extends.clone(),
                     constructor: Rc::new(RefCell::new(constructor_compiler.chunk)),
                     methods,
                 };

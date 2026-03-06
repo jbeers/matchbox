@@ -1,0 +1,14 @@
+class Base {
+    function getBaseName() { return "base" }
+}
+
+class Child extends="Base" {
+    function getChildName() { return "child" }
+}
+
+b = new Base()
+println(b.getBaseName())
+
+c = new Child()
+println(c.getChildName())
+println(c.getBaseName())

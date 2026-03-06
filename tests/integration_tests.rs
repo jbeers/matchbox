@@ -39,3 +39,4 @@ script_test!(vm_if, "vm_if.bxs");
 script_test!(vm_loop, "vm_loop.bxs");
 script_test!(vm_struct_assign, "vm_struct_assign.bxs");
 script_test!(vm_struct_iter, "vm_struct_iter.bxs");
+script_test!(vm_inheritance, "vm_inheritance.bxs");

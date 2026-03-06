@@ -87,6 +87,7 @@ pub struct BxCompiledFunction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxClass {
     pub name: String,
+    pub extends: Option<String>,
     pub constructor: Rc<RefCell<crate::vm::chunk::Chunk>>,
     pub methods: HashMap<String, Rc<BxCompiledFunction>>,
 }

@@ -22,7 +22,8 @@ import_stmt = { import_keyword ~ dotted_identifier ~ ";"? }
 dotted_identifier = @{ identifier ~ ("." ~ identifier)* }
 
 class_keyword = @{ "class" ~ !ASCII_ALPHANUMERIC }
-class_decl = { class_keyword ~ identifier ~ "{" ~ class_member* ~ "}" }
+extends_attr = { "extends" ~ "=" ~ string }
+class_decl = { class_keyword ~ identifier ~ extends_attr? ~ "{" ~ class_member* ~ "}" }
 class_member = { property | statement }
 
 property_keyword = @{ "property" ~ !ASCII_ALPHANUMERIC }

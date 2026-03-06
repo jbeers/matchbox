@@ -15,6 +15,7 @@ pub enum StatementKind {
     Import(String),
     ClassDecl {
         name: String,
+        extends: Option<String>,
         members: Vec<ClassMember>,
     },
     FunctionDecl {

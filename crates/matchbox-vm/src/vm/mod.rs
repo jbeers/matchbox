@@ -195,6 +195,26 @@ impl VM {
         }
     }
 
+    fn resolve_method(&self, class: Rc<RefCell<crate::types::BxClass>>, method_name: &str) -> Option<Rc<BxCompiledFunction>> {
+        let mut current_class = class;
+        loop {
+            let class_ref = current_class.borrow();
+            if let Some(method) = class_ref.methods.get(method_name) {
+                return Some(Rc::clone(method));
+            }
+            
+            if let Some(parent_name) = &class_ref.extends {
+                if let Some(BxValue::Class(parent_class)) = self.globals.get(&parent_name.to_lowercase()) {
+                    let next_class = Rc::clone(parent_class);
+                    drop(class_ref); // release borrow
+                    current_class = next_class;
+                    continue;
+                }
+            }
+            return None;
+        }
+    }
+
     pub fn interpret(&mut self, chunk: Chunk) -> Result<BxValue> {
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
@@ -713,8 +733,8 @@ impl VM {
                                 }
                                 let val = unsafe { &*properties_ptr }[idx].clone();
                                 self.fibers[fiber_idx].stack.push(val);
-                            } else if let Some(method) = class.borrow().methods.get(&name) {
-                                self.fibers[fiber_idx].stack.push(BxValue::CompiledFunction(Rc::clone(method)));
+                            } else if let Some(method) = self.resolve_method(Rc::clone(&class), &name) {
+                                self.fibers[fiber_idx].stack.push(BxValue::CompiledFunction(method));
                             } else {
                                 self.fibers[fiber_idx].stack.push(BxValue::Null);
                             }
@@ -927,8 +947,8 @@ impl VM {
                                         }
                                         Some(f)
                                     } else { None }
-                                } else if let Some(f) = class.borrow().methods.get(&name) {
-                                    Some(Rc::clone(f))
+                                } else if let Some(f) = self.resolve_method(Rc::clone(&class), &name) {
+                                    Some(f)
                                 } else { None }
                             } else { method };
                             
