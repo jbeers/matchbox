@@ -489,24 +489,29 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                     let (params, body_rule) = if first.as_rule() == Rule::lambda_params {
                         let params = {
                             let mut param_inner = first.clone().into_inner();
-                            let param_rule = param_inner.next().unwrap();
-                            match param_rule.as_rule() {
-                                Rule::params => parse_params(param_rule),
-                                Rule::identifier => vec![param_rule.as_str().to_string()],
-                                _ => vec![],
+                            if let Some(param_rule) = param_inner.next() {
+                                match param_rule.as_rule() {
+                                    Rule::params => parse_params(param_rule),
+                                    Rule::identifier => vec![param_rule.as_str().to_string()],
+                                    _ => vec![],
+                                }
+                            } else {
+                                vec![]
                             }
                         };
                         // Operands like => are literals, not rules, so they don't appear in into_inner()
                         (params, inner.next().unwrap())
                     } else {
                         // first is function_keyword, next is params or block
-                        let next = inner.next().unwrap();
-                        if next.as_rule() == Rule::params {
-                            let params = parse_params(next);
-                            (params, inner.next().unwrap())
+                        let mut next = inner.next().unwrap();
+                        let params = if next.as_rule() == Rule::params {
+                            let p = parse_params(next);
+                            next = inner.next().unwrap();
+                            p
                         } else {
-                            (vec![], next)
-                        }
+                            vec![]
+                        };
+                        (params, next)
                     };
                     
                     let body = if body_rule.as_rule() == Rule::block {
