@@ -39,7 +39,7 @@ pub fn run_boxlang(source: &str) -> String {
     let res = (|| -> Result<String> {
         let ast = parser::parse(source)?;
         let compiler = compiler::Compiler::new("wasm_input");
-        let chunk = compiler.compile(&ast)?;
+        let chunk = compiler.compile(&ast, source)?;
         let mut vm = vm::VM::new();
         let val = vm.interpret(chunk)?;
         Ok(val.to_string())
@@ -81,7 +81,10 @@ impl BoxLangVM {
             bx_args.push(self.vm.js_to_bx(args.get(i)));
         }
 
-        match self.vm.call_function(name, bx_args) {
+        let func = self.vm.globals.get(name).cloned()
+            .ok_or_else(|| format!("Function {} not found", name))?;
+
+        match self.vm.call_function_value(func, bx_args) {
             Ok(val) => Ok(self.vm.bx_to_js(&val)),
             Err(e) => Err(format!("Error: {}", e)),
         }
@@ -156,7 +159,7 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>) -> Result
         let source = fs::read_to_string(path)?;
         let ast = parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error: {}", e))?;
         let compiler = compiler::Compiler::new(path.to_str().unwrap_or("unknown"));
-        let chunk = compiler.compile(&ast).map_err(|e| anyhow::anyhow!("Compiler Error: {}", e))?;
+        let chunk = compiler.compile(&ast, &source).map_err(|e| anyhow::anyhow!("Compiler Error: {}", e))?;
 
         if is_build {
             let bytes = bincode::serialize(&chunk)?;
@@ -272,7 +275,7 @@ fn run_repl() -> Result<()> {
             Ok(ast) => {
                 let mut compiler = compiler::Compiler::new("repl");
                 compiler.is_repl = true;
-                match compiler.compile(&ast) {
+                match compiler.compile(&ast, input) {
                     Ok(chunk) => {
                         match vm.interpret(chunk) {
                             Ok(val) => {

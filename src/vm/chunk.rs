@@ -8,6 +8,7 @@ pub struct Chunk {
     pub constants: Vec<BxValue>,
     pub lines: Vec<usize>,
     pub filename: String,
+    pub source: String,
     #[serde(skip)]
     pub caches: Vec<Option<IcEntry>>,
 }
@@ -28,6 +29,7 @@ impl Chunk {
             constants: Vec::new(),
             lines: Vec::new(),
             filename: filename.to_string(),
+            source: String::new(),
             caches: Vec::new(),
         }
     }

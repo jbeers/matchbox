@@ -38,7 +38,8 @@ impl Compiler {
         }
     }
 
-    pub fn compile(mut self, ast: &[Statement]) -> Result<Chunk> {
+    pub fn compile(mut self, ast: &[Statement], source: &str) -> Result<Chunk> {
+        self.chunk.source = source.to_string();
         let len = ast.len();
         for (i, stmt) in ast.iter().enumerate() {
             let is_last = i == len - 1;
@@ -632,6 +633,7 @@ impl Compiler {
 
     fn compile_function(&mut self, name: &str, params: &[String], body: &FunctionBody) -> Result<BxCompiledFunction> {
         let mut sub_compiler = Compiler::new(&self.chunk.filename);
+        sub_compiler.chunk.source = self.chunk.source.clone();
         sub_compiler.scope_depth = 1;
         sub_compiler.is_class = self.is_class;
         sub_compiler.imports = self.imports.clone();
@@ -714,7 +716,7 @@ impl Compiler {
         sub_compiler.is_class = true; 
         sub_compiler.current_line = self.current_line;
         
-        let chunk = sub_compiler.compile(&ast)?;
+        let chunk = sub_compiler.compile(&ast, &source)?;
         
         for constant in chunk.constants {
             if let BxValue::Class(_) = constant {

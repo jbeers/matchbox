@@ -18,6 +18,7 @@ use self::chunk::{Chunk, IcEntry};
 use self::opcode::OpCode;
 use self::shape::ShapeRegistry;
 use self::gc::{Heap, GcObject, GcId};
+use web_time::{Instant, Duration};
 
 #[derive(Debug, Clone)]
 struct CallFrame {
@@ -32,7 +33,7 @@ pub struct BxFiber {
     stack: Vec<BxValue>,
     frames: Vec<CallFrame>,
     pub future_id: GcId,
-    pub wait_until: Option<std::time::Instant>,
+    pub wait_until: Option<Instant>,
     pub yield_requested: bool,
 }
 
@@ -49,6 +50,10 @@ impl BxVM for VM {
         self.spawn(func, args)
     }
 
+    fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String> {
+        self.call_function_value(func.clone(), args).map_err(|e| e.to_string())
+    }
+
     fn yield_fiber(&mut self) {
         if let Some(idx) = self.current_fiber_idx {
             self.fibers[idx].yield_requested = true;
@@ -57,7 +62,7 @@ impl BxVM for VM {
 
     fn sleep(&mut self, ms: u64) {
         if let Some(idx) = self.current_fiber_idx {
-            let until = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+            let until = Instant::now() + Duration::from_millis(ms);
             self.fibers[idx].wait_until = Some(until);
             self.fibers[idx].yield_requested = true;
         }
@@ -81,6 +86,12 @@ impl BxVM for VM {
         if let GcObject::Array(arr) = self.heap.get_mut(id) {
             arr.push(val);
         }
+    }
+
+    fn array_get(&self, id: usize, idx: usize) -> BxValue {
+        if let GcObject::Array(arr) = self.heap.get(id) {
+            arr.get(idx).cloned().unwrap_or(BxValue::Null)
+        } else { BxValue::Null }
     }
 
     fn array_new(&mut self) -> usize {
@@ -144,19 +155,24 @@ impl VM {
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
         match receiver {
             BxValue::String(_) => match method_name {
-                "len" => Some("len".to_string()),
-                "ucase" => Some("ucase".to_string()),
+                "len" | "length" => Some("len".to_string()),
+                "ucase" | "touppercase" => Some("ucase".to_string()),
+                "lcase" | "tolowercase" => Some("lcase".to_string()),
                 _ => None,
             },
             BxValue::Array(_) => match method_name {
-                "len" => Some("len".to_string()),
-                "append" => Some("arrayappend".to_string()),
+                "len" | "length" | "count" => Some("len".to_string()),
+                "append" | "add" => Some("arrayappend".to_string()),
+                "each" => Some("arrayeach".to_string()),
+                "map" => Some("arraymap".to_string()),
+                "reduce" => Some("arrayreduce".to_string()),
+                "filter" => Some("arrayfilter".to_string()),
                 _ => None,
             },
             BxValue::Struct(_) => match method_name {
-                "len" => Some("len".to_string()),
-                "exists" => Some("structkeyexists".to_string()),
-                "count" => Some("structcount".to_string()),
+                "len" | "count" => Some("len".to_string()),
+                "exists" | "keyexists" => Some("structkeyexists".to_string()),
+                "each" => Some("structeach".to_string()),
                 _ => None,
             },
             BxValue::Number(_) => match method_name {
@@ -195,9 +211,11 @@ impl VM {
         };
         
         self.fibers.push(fiber);
-        
-        self.run_all()
-    }
+        let res = self.run_all();
+        self.current_fiber_idx = None;
+        res
+        }
+
 
     pub fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue {
         let future_id = self.heap.alloc(GcObject::Future(BxFuture {
@@ -235,7 +253,7 @@ impl VM {
             let mut i = 0;
             let mut all_waiting = true;
             while i < self.fibers.len() {
-                let now = std::time::Instant::now();
+                let now = Instant::now();
                 if let Some(until) = self.fibers[i].wait_until {
                     if now < until {
                         i += 1;
@@ -307,6 +325,12 @@ impl VM {
 
     fn run_fiber(&mut self, fiber_idx: usize, quantum: usize) -> Result<Option<BxValue>> {
         for _ in 0..quantum {
+            if fiber_idx >= self.fibers.len() {
+                return Ok(None);
+            }
+            if self.fibers[fiber_idx].frames.is_empty() {
+                return Ok(Some(BxValue::Null));
+            }
             if self.fibers[fiber_idx].yield_requested {
                 self.fibers[fiber_idx].yield_requested = false;
                 return Ok(None);
@@ -1046,7 +1070,7 @@ impl VM {
                                     }
                                 }
                             }
-                            self.throw_error(fiber_idx, "Can only invoke methods on instances, structs, JS objects, and native objects.")?;
+                            self.throw_error(fiber_idx, &format!("Method {} not found or cannot be invoked on this type.", name))?;
                             continue;
                         }
                     }
@@ -1325,12 +1349,23 @@ impl VM {
     fn throw_value(&mut self, fiber_idx: usize, val: BxValue) -> Result<()> {
         let mut line = 0;
         let mut filename = "unknown".to_string();
+        let mut source_snippet = String::new();
+
         if !self.fibers[fiber_idx].frames.is_empty() {
             let frame = self.fibers[fiber_idx].frames.last().unwrap();
             let chunk = frame.function.chunk.borrow();
             filename = chunk.filename.clone();
             if frame.ip > 0 && frame.ip <= chunk.lines.len() {
                 line = chunk.lines[frame.ip - 1];
+                
+                // Extract source snippet
+                if !chunk.source.is_empty() && line > 0 {
+                    let lines: Vec<&str> = chunk.source.lines().collect();
+                    if line <= lines.len() {
+                        let code_line = lines[line - 1].trim();
+                        source_snippet = format!("\n\n  |  {}\n  |  {}", line, code_line);
+                    }
+                }
             }
         }
 
@@ -1347,13 +1382,18 @@ impl VM {
             }
             self.fibers[fiber_idx].frames.pop();
         }
-        bail!("VM Runtime Error: {} (at {} line {})", val, filename, line);
+        bail!("VM Runtime Error: {}{}\n(at {} line {})", val, source_snippet, filename, line);
     }
 
     pub fn call_function(&mut self, name: &str, args: Vec<BxValue>) -> Result<BxValue> {
-        let func = self.globals.get(name).cloned()
-            .ok_or_else(|| anyhow::anyhow!("Function {} not found", name))?;
-        
+        let func = self.globals.get(name).cloned();
+        if let Some(f) = func {
+            return self.call_function_value(f, args);
+        }
+        anyhow::bail!("Function {} not found", name)
+    }
+
+    pub fn call_function_value(&mut self, func: BxValue, args: Vec<BxValue>) -> Result<BxValue> {
         match func {
             BxValue::CompiledFunction(f) => {
                 if args.len() != f.arity {
@@ -1380,12 +1420,16 @@ impl VM {
                 };
                 self.fibers.push(fiber);
                 let fiber_idx = self.fibers.len() - 1;
-                match self.run_fiber(fiber_idx, 1000000)? {
+                self.current_fiber_idx = Some(fiber_idx);
+                let res = self.run_fiber(fiber_idx, 1000000);
+                self.current_fiber_idx = None;
+                
+                match res? {
                     Some(val) => Ok(val),
                     None => Ok(BxValue::Null),
                 }
             }
-            _ => anyhow::bail!("{} is not a callable function", name),
+            _ => anyhow::bail!("Value is not a callable function"),
         }
     }
 

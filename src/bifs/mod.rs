@@ -39,11 +39,50 @@ pub fn register_all() -> HashMap<String, BxValue> {
     // Core BIFs
     bifs.insert("createobject".to_string(), BxValue::NativeFunction(create_object));
     bifs.insert("ucase".to_string(), BxValue::NativeFunction(ucase));
+    bifs.insert("arraymap".to_string(), BxValue::NativeFunction(array_map));
+    bifs.insert("arrayeach".to_string(), BxValue::NativeFunction(array_each));
 
     bifs
 }
 
 // --- Implementation ---
+
+fn array_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("arrayMap() expects 2 arguments: (array, callback)".to_string()); }
+    let id = match &args[0] {
+        BxValue::Array(id) => *id,
+        _ => return Err("First argument to arrayMap must be an array".to_string()),
+    };
+    
+    let len = vm.array_len(id);
+    let new_id = vm.array_new();
+    
+    for i in 0..len {
+        let item = vm.array_get(id, i);
+        match vm.call_function_by_value(&args[1], vec![item]) {
+            Ok(res) => vm.array_push(new_id, res),
+            Err(e) => return Err(format!("Error in arrayMap callback: {}", e)),
+        }
+    }
+
+    Ok(BxValue::Array(new_id))
+}
+
+fn array_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("arrayEach() expects 2 arguments: (array, callback)".to_string()); }
+    let id = match &args[0] {
+        BxValue::Array(id) => *id,
+        _ => return Err("First argument to arrayEach must be an array".to_string()),
+    };
+    
+    let len = vm.array_len(id);
+    for i in 0..len {
+        let item = vm.array_get(id, i);
+        vm.call_function_by_value(&args[1], vec![item]).map_err(|e| format!("Error in arrayEach callback: {}", e))?;
+    }
+
+    Ok(BxValue::Null)
+}
 
 fn ucase(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 { return Err("ucase() expects exactly 1 argument".to_string()); }

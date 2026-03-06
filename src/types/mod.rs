@@ -27,12 +27,14 @@ pub enum BxValue {
 
 pub trait BxVM {
     fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue;
+    fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String>;
     fn yield_fiber(&mut self);
     fn sleep(&mut self, ms: u64);
     fn get_root_shape(&self) -> usize;
     fn get_shape_index(&self, shape_id: usize, field_name: &str) -> Option<usize>;
     fn array_len(&self, id: usize) -> usize;
     fn array_push(&mut self, id: usize, val: BxValue);
+    fn array_get(&self, id: usize, idx: usize) -> BxValue;
     fn array_new(&mut self) -> usize;
     fn struct_len(&self, id: usize) -> usize;
     fn struct_new(&mut self) -> usize;
