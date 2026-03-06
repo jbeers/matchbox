@@ -80,7 +80,8 @@ impl fmt::Display for BxValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxCompiledFunction {
     pub name: String,
-    pub arity: usize,
+    pub arity: usize,     // Total parameters
+    pub min_arity: usize, // Required parameters
     pub chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
 }
 

@@ -34,24 +34,26 @@ pub fn parse(source: &str) -> Result<Vec<Statement>> {
     Ok(ast)
 }
 
-fn parse_params(pair: pest::iterators::Pair<Rule>) -> Vec<crate::ast::FunctionParam> {
+fn parse_params(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::FunctionParam>> {
     let mut params = Vec::new();
     for param_decl in pair.into_inner() {
         let mut required = false;
         let mut type_name = None;
         let mut name = String::new();
+        let mut default_value = None;
         
         for inner in param_decl.into_inner() {
             match inner.as_rule() {
                 Rule::required_keyword => required = true,
                 Rule::type_name => type_name = Some(inner.as_str().to_string()),
                 Rule::identifier => name = inner.as_str().to_string(),
+                Rule::expression => default_value = Some(parse_expression(inner)?),
                 _ => {}
             }
         }
-        params.push(crate::ast::FunctionParam { name, type_name, required });
+        params.push(crate::ast::FunctionParam { name, type_name, required, default_value });
     }
-    params
+    Ok(params)
 }
 
 fn parse_init(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
@@ -159,7 +161,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             
             let mut next = inner_rules.next().unwrap();
             if next.as_rule() == Rule::params {
-                params = parse_params(next);
+                params = parse_params(next)?;
                 next = inner_rules.next().unwrap();
             }
             
@@ -557,11 +559,12 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                             let mut param_inner = first.clone().into_inner();
                             if let Some(param_rule) = param_inner.next() {
                                 match param_rule.as_rule() {
-                                    Rule::params => parse_params(param_rule),
+                                    Rule::params => parse_params(param_rule)?,
                                     Rule::identifier => vec![crate::ast::FunctionParam {
                                         name: param_rule.as_str().to_string(),
                                         type_name: None,
                                         required: false,
+                                        default_value: None,
                                     }],
                                     _ => vec![],
                                 }
@@ -575,7 +578,7 @@ fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
                         // first is function_keyword, next is params or block
                         let mut next = inner.next().unwrap();
                         let params = if next.as_rule() == Rule::params {
-                            let p = parse_params(next);
+                            let p = parse_params(next)?;
                             next = inner.next().unwrap();
                             p
                         } else {

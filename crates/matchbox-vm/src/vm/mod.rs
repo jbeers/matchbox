@@ -219,6 +219,7 @@ impl VM {
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
             arity: 0,
+            min_arity: 0,
             chunk: Rc::new(RefCell::new(chunk)),
         });
         
@@ -953,8 +954,8 @@ impl VM {
                             } else { method };
                             
                             if let Some(func) = method {
-                                if arg_count != func.arity {
-                                    self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                if arg_count < func.min_arity || arg_count > func.arity {
+                                    self.throw_error(fiber_idx, &format!("Expected {} to {} arguments but got {}.", func.min_arity, func.arity, arg_count))?;
                                     continue;
                                 } else {
                                     let mut args = Vec::with_capacity(arg_count);
@@ -963,11 +964,17 @@ impl VM {
                                     }
                                     args.reverse();
                                     
+                                    // Push actual args back
                                     for arg in args { self.fibers[fiber_idx].stack.push(arg); }
+                                    // Push Null for missing optional args
+                                    for _ in 0..(func.arity - arg_count) {
+                                        self.fibers[fiber_idx].stack.push(BxValue::Null);
+                                    }
+
                                     let frame = CallFrame {
-                                        function: func,
+                                        function: func.clone(),
                                         ip: 0,
-                                        stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
+                                        stack_base: self.fibers[fiber_idx].stack.len() - func.arity,
                                         receiver: Some(receiver_val),
                                         handlers: Vec::new(),
                                     };
@@ -1014,8 +1021,8 @@ impl VM {
                             } else { method };
 
                             if let Some(func) = method {
-                                if arg_count != func.arity {
-                                    self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                                if arg_count < func.min_arity || arg_count > func.arity {
+                                    self.throw_error(fiber_idx, &format!("Expected {} to {} arguments but got {}.", func.min_arity, func.arity, arg_count))?;
                                     continue;
                                 } else {
                                     let mut args = Vec::with_capacity(arg_count);
@@ -1024,11 +1031,17 @@ impl VM {
                                     }
                                     args.reverse();
                                     
+                                    // Push actual args back
                                     for arg in args { self.fibers[fiber_idx].stack.push(arg); }
+                                    // Push Null for missing optional args
+                                    for _ in 0..(func.arity - arg_count) {
+                                        self.fibers[fiber_idx].stack.push(BxValue::Null);
+                                    }
+
                                     let frame = CallFrame {
-                                        function: func,
+                                        function: func.clone(),
                                         ip: 0,
-                                        stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
+                                        stack_base: self.fibers[fiber_idx].stack.len() - func.arity,
                                         receiver: Some(receiver_val),
                                         handlers: Vec::new(),
                                     };
@@ -1153,14 +1166,19 @@ impl VM {
                     let func_val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count].clone();
                     match func_val {
                         BxValue::CompiledFunction(func) => {
-                            if arg_count != func.arity {
-                                self.throw_error(fiber_idx, &format!("Expected {} arguments but got {}.", func.arity, arg_count))?;
+                            if arg_count < func.min_arity || arg_count > func.arity {
+                                self.throw_error(fiber_idx, &format!("Expected {} to {} arguments but got {}.", func.min_arity, func.arity, arg_count))?;
                                 continue;
                             } else {
+                                // Push Null for missing optional args
+                                for _ in 0..(func.arity - arg_count) {
+                                    self.fibers[fiber_idx].stack.push(BxValue::Null);
+                                }
+
                                 let frame = CallFrame {
                                     function: Rc::clone(&func),
                                     ip: 0,
-                                    stack_base: self.fibers[fiber_idx].stack.len() - arg_count,
+                                    stack_base: self.fibers[fiber_idx].stack.len() - func.arity,
                                     receiver: self.fibers[fiber_idx].frames.last().unwrap().receiver.clone(),
                                     handlers: Vec::new(),
                                 };
@@ -1344,6 +1362,7 @@ impl VM {
                             function: Rc::new(BxCompiledFunction {
                                 name: format!("{}.constructor", class.borrow().name),
                                 arity: 0,
+                                min_arity: 0,
                                 chunk: Rc::new(RefCell::new(class.borrow().constructor.borrow().clone())),
                             }),
                             ip: 0,

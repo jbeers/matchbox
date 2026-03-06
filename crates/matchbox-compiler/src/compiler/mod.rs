@@ -112,6 +112,7 @@ impl Compiler {
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, getter_name),
                                 arity: 0,
+                                min_arity: 0,
                                 chunk: Rc::new(RefCell::new(getter_chunk)),
                             };
                             methods.insert(getter_name.to_lowercase(), Rc::new(func));
@@ -130,6 +131,7 @@ impl Compiler {
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, setter_name),
                                 arity: 1,
+                                min_arity: 1,
                                 chunk: Rc::new(RefCell::new(setter_chunk)),
                             };
                             methods.insert(setter_name.to_lowercase(), Rc::new(func));
@@ -684,12 +686,49 @@ impl Compiler {
         sub_compiler.imports = self.imports.clone();
         sub_compiler.current_line = self.current_line;
 
-        for param in params {
+        let mut min_arity = 0;
+        for (i, param) in params.iter().enumerate() {
+            if param.required {
+                min_arity = i + 1;
+            }
             sub_compiler.locals.push(Local {
                 name: param.name.clone(),
                 depth: 1,
             });
         }
+
+        // Emit default value logic at the beginning of the function
+        for (i, param) in params.iter().enumerate() {
+            if let Some(default_expr) = &param.default_value {
+                sub_compiler.chunk.write(OpCode::OpGetLocal(i), self.current_line);
+                let null_idx = sub_compiler.chunk.add_constant(BxValue::Null);
+                sub_compiler.chunk.write(OpCode::OpConstant(null_idx), self.current_line);
+                sub_compiler.chunk.write(OpCode::OpEqual, self.current_line);
+                
+                let jump_idx = sub_compiler.chunk.code.len();
+                sub_compiler.chunk.write(OpCode::OpJumpIfFalse(0), self.current_line);
+                
+                // True branch: value IS null
+                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop true
+                sub_compiler.compile_expression(default_expr)?;
+                sub_compiler.chunk.write(OpCode::OpSetLocal(i), self.current_line);
+                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop set value
+                
+                let end_jump_idx = sub_compiler.chunk.code.len();
+                sub_compiler.chunk.write(OpCode::OpJump(0), self.current_line);
+
+                // False target: value IS NOT null
+                let false_target = sub_compiler.chunk.code.len();
+                let offset = false_target - jump_idx - 1;
+                sub_compiler.chunk.code[jump_idx] = OpCode::OpJumpIfFalse(offset);
+                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop false
+
+                let end_target = sub_compiler.chunk.code.len();
+                let end_offset = end_target - end_jump_idx - 1;
+                sub_compiler.chunk.code[end_jump_idx] = OpCode::OpJump(end_offset);
+            }
+        }
+
         match body {
             FunctionBody::Block(stmts) => {
                 for stmt in stmts {
@@ -708,6 +747,7 @@ impl Compiler {
         Ok(BxCompiledFunction {
             name: name.to_string(),
             arity: params.len(),
+            min_arity,
             chunk: Rc::new(RefCell::new(sub_compiler.chunk)),
         })
     }

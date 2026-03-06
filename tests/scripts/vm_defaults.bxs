@@ -1,0 +1,14 @@
+function greet(name="Jacob", age=30) {
+    return "Hello, " & name & ". You are " & age & " years old.";
+}
+
+println(greet());
+println(greet("Luis"));
+println(greet("Brad", 40));
+
+function add(required a, b=10) {
+    return a + b;
+}
+
+println("Add(5): " & add(5));
+println("Add(5, 5): " & add(5, 5));

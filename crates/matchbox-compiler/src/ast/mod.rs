@@ -15,6 +15,7 @@ pub struct FunctionParam {
     pub name: String,
     pub type_name: Option<String>,
     pub required: bool,
+    pub default_value: Option<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

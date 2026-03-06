@@ -43,7 +43,7 @@ var_keyword = @{ "var" ~ !ASCII_ALPHANUMERIC }
 variable_decl = { var_keyword ~ assignment }
 
 required_keyword = @{ "required" ~ !ASCII_ALPHANUMERIC }
-param_decl = { required_keyword? ~ (type_name ~ identifier | identifier) }
+param_decl = { required_keyword? ~ (type_name ~ identifier | identifier) ~ ("=" ~ expression)? }
 params = { param_decl ~ ("," ~ param_decl)* }
 
 for_keyword = @{ "for" ~ !ASCII_ALPHANUMERIC }
