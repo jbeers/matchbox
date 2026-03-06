@@ -1,0 +1,11 @@
+class DynamicModel {
+    function onMissingMethod(methodName, args) {
+        println("Intercepted call to: " & methodName);
+        println("With arguments: " & args[1] & ", " & args[2]);
+        return "dynamic_result";
+    }
+}
+
+model = new DynamicModel();
+res = model.findUserByNameAndAge("Jacob", 30);
+println("Result: " & res);

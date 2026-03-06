@@ -981,6 +981,41 @@ impl VM {
                                     self.fibers[fiber_idx].frames.push(frame);
                                     continue;
                                 }
+                            } else if let Some(on_missing) = self.resolve_method(Rc::clone(&class), "onmissingmethod") {
+                                let mut original_args = Vec::with_capacity(arg_count);
+                                for _ in 0..arg_count {
+                                    original_args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                                }
+                                original_args.reverse();
+
+                                let args_array_id = self.heap.alloc(GcObject::Array(original_args));
+                                
+                                self.fibers[fiber_idx].stack.push(BxValue::String(name.clone()));
+                                self.fibers[fiber_idx].stack.push(BxValue::Array(args_array_id));
+
+                                let mut frame = CallFrame {
+                                    function: on_missing.clone(),
+                                    ip: 0,
+                                    stack_base: self.fibers[fiber_idx].stack.len() - 2,
+                                    receiver: Some(receiver_val),
+                                    handlers: Vec::new(),
+                                };
+                                
+                                // Adjust stack for missing arguments if onMissingMethod itself has optional arguments
+                                // Though typically it expects exactly 2: name and args array
+                                if 2 < on_missing.min_arity || 2 > on_missing.arity {
+                                    self.throw_error(fiber_idx, &format!("onMissingMethod must accept 2 arguments, but it expects {} to {}.", on_missing.min_arity, on_missing.arity))?;
+                                    continue;
+                                }
+                                for _ in 0..(on_missing.arity - 2) {
+                                    self.fibers[fiber_idx].stack.push(BxValue::Null);
+                                    frame.stack_base -= 1; // shift base back to account for extra nulls
+                                }
+                                // Recalculate stack base properly
+                                frame.stack_base = self.fibers[fiber_idx].stack.len() - on_missing.arity;
+
+                                self.fibers[fiber_idx].frames.push(frame);
+                                continue;
                             } else {
                                 self.throw_error(fiber_idx, &format!("Method {} not found.", name))?;
                                 continue;

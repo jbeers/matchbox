@@ -44,6 +44,7 @@ script_test!(vm_accessors, "vm_accessors.bxs");
 script_test!(vm_typed_functions, "vm_typed_functions.bxs");
 script_test!(vm_defaults, "vm_defaults.bxs");
 script_test!(vm_interfaces, "vm_interfaces.bxs");
+script_test!(vm_on_missing_method, "vm_on_missing_method.bxs");
 
 #[test]
 #[should_panic(expected = "must implement abstract method f")]
