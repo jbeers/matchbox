@@ -285,8 +285,12 @@ impl VM {
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
                             f.status = FutureStatus::Failed(e.to_string());
                         }
+                        
                         if self.fibers.is_empty() {
                             return Err(e);
+                        } else {
+                            // Detached/Async task failed, print to stderr since it won't be caught by main loop
+                            eprintln!("\n[Async Task Error] {}", e);
                         }
                     }
                 }
