@@ -6,10 +6,12 @@ A high-performance, native Rust implementation of the BoxLang programming langua
 
 - **Bytecode VM**: Fast, stack-based execution engine with support for nested call frames.
 - **Virtual Threading (Fibers)**: High-concurrency cooperative scheduler supporting `runAsync` and non-blocking `sleep`.
-- **OO Support**: Full support for Classes, Objects, `this` scope, and `variables` (private) scope.
-- **Modern Syntax**: Support for UDFs, Closures, Arrow functions (Lambdas), and String Interpolation.
+- **OO Support**: Full support for Classes, Inheritance (`extends`), Interfaces (`implements`), and magic methods like `onMissingMethod`.
+- **Trait-like Interfaces**: Support for default method implementations in interfaces.
+- **Implicit Accessors**: Automatically generated getter and setter methods for class properties.
+- **Modern Syntax**: Support for UDFs, Type Hints, Default Arguments, Closures, Arrow functions (Lambdas), and String Interpolation.
 - **JS Interop (WASM)**: Direct access to JavaScript APIs and DOM manipulation when running in the browser.
-- **Deployment**: Capability to produce standalone native and WASM binaries.
+- **Deployment**: Capability to produce ultra-lean (~500KB) standalone native and WASM binaries.
 
 ## Usage Guide
 
@@ -37,7 +39,7 @@ matchbox --build my_script.bxs
 ```
 
 ### 4. Producing Standalone Native Binaries
-Create a single executable file that contains both the BoxLang VM engine and your compiled code.
+Create a single executable file that contains both the BoxLang VM engine and your compiled code. This uses an embedded minimal runner stub to ensure the final binary is ultra-lean (~500KB).
 
 ```bash
 matchbox --target native my_script.bxs
@@ -76,73 +78,11 @@ matchbox --target wasm my_app.bxs
 # Produces: my_app.wasm
 ```
 
-**Deploy in the browser:**
-```html
-<script type="module">
-    import init, { run_boxlang_bytecode } from './pkg/matchbox.js';
-
-    async function deploy() {
-        // 1. Fetch the WASM binary containing your app
-        const response = await fetch('my_app.wasm');
-        const buffer = await response.arrayBuffer();
-        
-        // 2. Initialize the BoxLang engine using the fetched bytes
-        await init(buffer);
-        
-        // 3. Extract and run the embedded bytecode
-        const module = await WebAssembly.compile(buffer);
-        const sections = WebAssembly.Module.customSections(module, "boxlang_bytecode");
-        if (sections.length > 0) {
-            run_boxlang_bytecode(new Uint8Array(sections[0]));
-        }
-    }
-    
-    deploy();
-</script>
-```
-
 ### 3. JavaScript Module Generation
 You can compile BoxLang scripts into native JavaScript modules that run in the browser or Node.js via WASM:
 
 ```bash
 matchbox --target js my_lib.bxs
-```
-
-This produces a `my_lib.js` file that exports all top-level BoxLang functions as asynchronous JS functions:
-
-```javascript
-import { multiply } from './my_lib.js';
-
-const result = await multiply(10, 20);
-console.log(result); // 200
-```
-
-### 4. Native Fusion (Hybrid Builds)
-MatchBox allows you to mix Rust and BoxLang seamlessly. Any Rust files in a `native/` directory in your project will be compiled directly into the MatchBox engine.
-
-**Structure:**
-```text
-my-project/
-├── main.bxs
-└── native/
-    └── utils.rs
-```
-
-**`native/utils.rs`:**
-```rust
-pub fn register_bifs() -> HashMap<String, BxValue> {
-    let mut bifs = HashMap::new();
-    bifs.insert("rust_add".into(), BxValue::NativeFunction(add));
-    bifs
-}
-// ... implementation
-```
-
-**Build for any target:**
-```bash
-matchbox --target native main.bxs
-matchbox --target wasm main.bxs
-matchbox --target js main.bxs
 ```
 
 ## Language Support Matrix
@@ -155,16 +95,19 @@ matchbox --target js main.bxs
 | **Loops** | ✅ | `for (i=1; i<=10; i++)`, `for (item in arr)` |
 | **Arrays** | ✅ | `arr = [1, 2, "three"]`, `arr[1]` (1-indexed) |
 | **Structs** | ✅ | `s = { key: "val" }`, `s.key` (case-insensitive) |
-| **Functions** | ✅ | `function add(a,b) { return a+b }`, `(x) => x*2` |
+| **Functions** | ✅ | `public numeric function add(a=1, b=2) { return a+b }` |
 | **Strings** | ✅ | `"Hello #name#"`, `str1 & str2` |
-| **Classes** | ✅ | `class MyClass { property p; this.p = 1; }` |
+| **Classes** | ✅ | `class MyClass extends="Base" accessors="true" { ... }` |
+| **Interfaces**| ✅ | `interface I { function f(); }` |
 | **Exceptions**| ✅ | `try { throw "err"; } catch(e) { ... }` |
 | **Async** | ✅ | `f = runAsync(task); f.get(); sleep(100);` |
 | **JS Interop**| ✅ | `js.window.location.href`, `js.alert("Hi")` |
 
 ## Technical Architecture
 
-1. **Parser**: Built using [Pest](https://pest.rs/) (PEG Grammar).
-2. **Compiler**: Multi-stage compiler producing opcodes with line-number metadata.
-3. **VM**: Stack-based machine with a cooperative fiber scheduler.
-4. **Serialization**: Uses `bincode` for binary bytecode representation.
+1. **Workspace Structure**: Divided into `matchbox-vm` (runtime), `matchbox-compiler` (frontend), and `matchbox-runner` (minimal stub).
+2. **Parser**: Built using [Pest](https://pest.rs/) (PEG Grammar).
+3. **Compiler**: Multi-stage compiler producing opcodes with line-number metadata.
+4. **VM**: Stack-based machine with a cooperative fiber scheduler.
+5. **Serialization**: Uses `bincode` for binary bytecode representation.
+6. **Portability**: Native binaries are produced by appending bytecode to a pre-compiled architecture-specific runner stub.
