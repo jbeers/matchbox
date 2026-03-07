@@ -44,6 +44,12 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
       
+      - name: Install Cross-Compilers (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build Stubs
         shell: bash
         run: |
@@ -53,7 +59,14 @@ jobs:
           IFS=', ' read -r -a TGS <<< "${{ matrix.targets }}"
           for target in "${TGS[@]}"; do
             echo "Building stub for $target..."
-            cargo build --release --target "$target"
+            
+            # Setup linker for cross-compilation
+            CMD="cargo build --release --target $target"
+            if [[ "$target" == "aarch64-unknown-linux-gnu" ]]; then
+              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            fi
+            
+            $CMD
             
             # Determine source filename
             SRC_NAME="matchbox_runner"
