@@ -106,15 +106,15 @@ pub trait BxVM {
     fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String>;
     fn yield_fiber(&mut self);
     fn sleep(&mut self, ms: u64);
-    fn get_root_shape(&self) -> usize;
-    fn get_shape_index(&self, shape_id: usize, field_name: &str) -> Option<usize>;
+    fn get_root_shape(&self) -> u32;
+    fn get_shape_index(&self, shape_id: u32, field_name: &str) -> Option<u32>;
     fn array_len(&self, id: usize) -> usize;
     fn array_push(&mut self, id: usize, val: BxValue);
     fn array_get(&self, id: usize, idx: usize) -> BxValue;
     fn array_new(&mut self) -> usize;
     fn struct_len(&self, id: usize) -> usize;
     fn struct_new(&mut self) -> usize;
-    fn struct_get_shape(&self, id: usize) -> usize;
+    fn struct_get_shape(&self, id: usize) -> u32;
     fn future_on_error(&mut self, id: usize, handler: BxValue);
     fn string_new(&mut self, s: String) -> usize;
     fn to_string(&self, val: BxValue) -> String;
@@ -175,8 +175,8 @@ pub enum Constant {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxCompiledFunction {
     pub name: String,
-    pub arity: usize,     // Total parameters
-    pub min_arity: usize, // Required parameters
+    pub arity: u32,     // Total parameters
+    pub min_arity: u32, // Required parameters
     pub params: Vec<String>, // Parameter names
     pub chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
     #[serde(skip)]
@@ -200,14 +200,14 @@ pub struct BxInterface {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxStruct {
-    pub shape_id: usize,
+    pub shape_id: u32,
     pub properties: Vec<BxValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxInstance {
     pub class: Rc<RefCell<BxClass>>,
-    pub shape_id: usize,
+    pub shape_id: u32,
     pub properties: Vec<BxValue>,
     pub variables: Rc<RefCell<HashMap<String, BxValue>>>, 
 }

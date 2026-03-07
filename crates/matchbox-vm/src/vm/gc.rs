@@ -16,7 +16,7 @@ pub enum GcObject {
     Class(Rc<RefCell<BxClass>>),
     Interface(Rc<RefCell<BxInterface>>),
     NativeObject(Rc<RefCell<dyn BxNativeObject>>),
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "js"))]
     JsValue(wasm_bindgen::JsValue),
 }
 
@@ -78,7 +78,7 @@ impl Heap {
 
             let children = match self.objects[id].as_ref().unwrap() {
                 GcObject::String(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::NativeObject(_) => Vec::new(),
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(all(target_arch = "wasm32", feature = "js"))]
                 GcObject::JsValue(_) => Vec::new(),
                 GcObject::Array(arr) => arr.clone(),
                 GcObject::Struct(s) => s.properties.clone(),

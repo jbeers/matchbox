@@ -1,11 +1,11 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct Statement {
     pub kind: StatementKind,
-    pub line: usize,
+    pub line: u32,
 }
 
 impl Statement {
-    pub fn new(kind: StatementKind, line: usize) -> Self {
+    pub fn new(kind: StatementKind, line: u32) -> Self {
         Self { kind, line }
     }
 }
@@ -85,11 +85,11 @@ pub enum ClassMember {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expression {
     pub kind: ExpressionKind,
-    pub line: usize,
+    pub line: u32,
 }
 
 impl Expression {
-    pub fn new(kind: ExpressionKind, line: usize) -> Self {
+    pub fn new(kind: ExpressionKind, line: u32) -> Self {
         Self { kind, line }
     }
 }

@@ -14,7 +14,6 @@ const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
 const NATIVE_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_native");
 const WASI_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_wasip1.wasm");
-const WASM32_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_wasm32.wasm");
 const JS_GLUE_TEMPLATE: &str = include_str!("../stubs/js_bundle_template.js");
 
 #[cfg(target_arch = "wasm32")]
@@ -208,9 +207,9 @@ fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement]) 
     let bytecode = bincode::serialize(chunk)?;
     let b64_bytecode = base64_simd::STANDARD.encode_to_string(&bytecode);
     
-    let wasm_bytes = WASM32_RUNNER_STUB.to_vec();
+    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
     if wasm_bytes.is_empty() {
-        bail!("WASM32 runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-unknown-unknown target installed.");
+        bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }
     let b64_wasm = base64_simd::STANDARD.encode_to_string(&wasm_bytes);
 
@@ -561,9 +560,9 @@ fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
 }
 
 fn produce_wasm_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let wasm_bytes = WASM32_RUNNER_STUB.to_vec();
+    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
     if wasm_bytes.is_empty() {
-        bail!("WASM32 runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-unknown-unknown target installed.");
+        bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }
     let chunk_bytes = bincode::serialize(chunk)?;
     

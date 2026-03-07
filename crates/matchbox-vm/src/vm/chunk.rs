@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: Vec<Constant>,
-    pub lines: Vec<usize>,
+    pub lines: Vec<u32>,
     pub filename: String,
     pub source: String,
     #[serde(skip)]
@@ -37,15 +37,15 @@ impl Chunk {
         }
     }
 
-    pub fn write(&mut self, opcode: OpCode, line: usize) {
+    pub fn write(&mut self, opcode: OpCode, line: u32) {
         self.code.push(opcode);
         self.lines.push(line);
         self.caches.push(None);
     }
 
-    pub fn add_constant(&mut self, value: Constant) -> usize {
+    pub fn add_constant(&mut self, value: Constant) -> u32 {
         self.constants.push(value);
-        self.constants.len() - 1
+        (self.constants.len() - 1) as u32
     }
 
     pub fn ensure_caches(&mut self) {

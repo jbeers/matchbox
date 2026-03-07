@@ -46,13 +46,6 @@ fn main() {
     let build_stub = |target: Option<&str>, dest_name: &str, src_name: &str| {
         let dest_path = stub_dest_dir.join(dest_name);
         
-        // ONLY build if the stub doesn't exist. 
-        // We rely on 'cargo:rerun-if-changed' for invalidation during development,
-        // but for normal users, they should just use the embedded ones.
-        if dest_path.exists() && fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0) > 0 {
-            return;
-        }
-
         let mut cmd = Command::new(&cargo);
         cmd.arg("build").arg("--release")
            .current_dir(&runner_dir)
@@ -102,5 +95,4 @@ fn main() {
     let native_src_name = if cfg!(windows) { "matchbox_runner.exe" } else { "matchbox_runner" };
     build_stub(None, "runner_stub_native", native_src_name);
     build_stub(Some("wasm32-wasip1"), "runner_stub_wasip1.wasm", "matchbox_runner.wasm");
-    build_stub(Some("wasm32-unknown-unknown"), "runner_stub_wasm32.wasm", "matchbox_runner.wasm");
 }

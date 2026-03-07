@@ -409,6 +409,7 @@ dependencies = [
  "js-sys",
  "rand",
  "serde",
+ "serde_json",
  "wasm-bindgen",
  "web-sys",
  "web-time",

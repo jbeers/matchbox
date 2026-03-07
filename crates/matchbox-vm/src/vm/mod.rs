@@ -15,9 +15,9 @@ use std::cell::RefCell;
 use std::time::{Instant, Duration};
 use std::vec;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
 use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
 use js_sys::{Array, Function, Reflect};
 
 pub struct CallFrame {
@@ -68,11 +68,11 @@ impl BxVM for VM {
         }
     }
 
-    fn get_root_shape(&self) -> usize {
+    fn get_root_shape(&self) -> u32 {
         self.shapes.get_root()
     }
 
-    fn get_shape_index(&self, shape_id: usize, field_name: &str) -> Option<usize> {
+    fn get_shape_index(&self, shape_id: u32, field_name: &str) -> Option<u32> {
         self.shapes.get_index(shape_id, field_name)
     }
 
@@ -111,7 +111,7 @@ impl BxVM for VM {
         }))
     }
 
-    fn struct_get_shape(&self, id: usize) -> usize {
+    fn struct_get_shape(&self, id: usize) -> u32 {
         if let GcObject::Struct(s) = self.heap.get(id) {
             s.shape_id
         } else { 0 }
@@ -163,7 +163,7 @@ impl VM {
                 GcObject::Class(c) => format!("<class {}>", c.borrow().name),
                 GcObject::Interface(i) => format!("<interface {}>", i.borrow().name),
                 GcObject::NativeObject(o) => format!("<native object {:?}>", o.borrow()),
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(all(target_arch = "wasm32", feature = "js"))]
                 GcObject::JsValue(js) => format!("<js value {:?}>", js),
             }
         } else {
@@ -197,7 +197,7 @@ impl VM {
             heap: Heap::new(),
         };
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", feature = "js"))]
         {
             if let Some(window) = web_sys::window() {
                 let id = vm.heap.alloc(GcObject::JsValue(window.into()));
@@ -469,11 +469,11 @@ impl VM {
                 // --- Hot Loop / Specialized Opcodes ---
                 OpCode::OpIncLocal(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
+                    let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     if val.is_number() {
-                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_number(val.as_number() + 1.0);
+                        self.fibers[fiber_idx].stack[base + slot as usize] = BxValue::new_number(val.as_number() + 1.0);
                     } else if val.is_int() {
-                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_int(val.as_int() + 1);
+                        self.fibers[fiber_idx].stack[base + slot as usize] = BxValue::new_int(val.as_int() + 1);
                     } else {
                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
                         continue;
@@ -481,25 +481,25 @@ impl VM {
                 }
                 OpCode::OpLocalCompareJump(slot, const_idx, offset) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
-                    let limit = self.read_constant(fiber_idx, const_idx);
+                    let val = self.fibers[fiber_idx].stack[base + slot as usize];
+                    let limit = self.read_constant(fiber_idx, const_idx as usize);
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                         }
                     } else if val.is_int() && limit.is_int() {
                         if val.as_int() < limit.as_int() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                         }
                     }
                 }
                 OpCode::OpCompareJump(const_idx, offset) => {
-                    let limit = self.read_constant(fiber_idx, const_idx);
+                    let limit = self.read_constant(fiber_idx, const_idx as usize);
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                         }
                     } else {
                         self.throw_error(fiber_idx, "OpCompareJump expects numeric operands")?;
@@ -523,7 +523,7 @@ impl VM {
                         }
                     } else {
                         // Slow path: resolve global and update IC
-                        let name = self.read_string_constant(fiber_idx, idx);
+                        let name = self.read_string_constant(fiber_idx, idx as usize);
                         let name_lower = name.to_lowercase();
                         if let Some(&global_idx) = self.global_names.get(&name_lower) {
                             let val = self.global_values[global_idx];
@@ -552,7 +552,7 @@ impl VM {
                     let val = if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index]
                     } else {
-                        let name = self.read_string_constant(fiber_idx, name_idx);
+                        let name = self.read_string_constant(fiber_idx, name_idx as usize);
                         let name_lower = name.to_lowercase();
                         if let Some(&global_idx) = self.global_names.get(&name_lower) {
                             let v = self.global_values[global_idx];
@@ -565,10 +565,10 @@ impl VM {
                         }
                     };
 
-                    let limit = self.read_constant(fiber_idx, const_idx);
+                    let limit = self.read_constant(fiber_idx, const_idx as usize);
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                         }
                     }
                 }
@@ -576,21 +576,21 @@ impl VM {
                 // --- Basic Hot Opcodes ---
                 OpCode::OpGetLocal(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
+                    let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     self.fibers[fiber_idx].stack.push(val);
                 }
                 OpCode::OpSetLocal(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
-                    self.fibers[fiber_idx].stack[base + slot] = val;
+                    self.fibers[fiber_idx].stack[base + slot as usize] = val;
                 }
                 OpCode::OpSetLocalPop(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack[base + slot] = val;
+                    self.fibers[fiber_idx].stack[base + slot as usize] = val;
                 }
                 OpCode::OpConstant(idx) => {
-                    let constant = self.read_constant(fiber_idx, idx);
+                    let constant = self.read_constant(fiber_idx, idx as usize);
                     self.fibers[fiber_idx].stack.push(constant);
                 }
                 OpCode::OpAddInt => {
@@ -678,14 +678,14 @@ impl VM {
                 }
                 OpCode::OpJumpIfFalse(offset) => {
                     if !self.is_truthy(*self.fibers[fiber_idx].stack.last().unwrap()) {
-                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                     }
                 }
                 OpCode::OpJump(offset) => {
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                 }
                 OpCode::OpLoop(offset) => {
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                 }
                 OpCode::OpReturn => {
                     let fiber = &mut self.fibers[fiber_idx];
@@ -726,7 +726,7 @@ impl VM {
                         let val = self.global_values[index];
                         self.fibers[fiber_idx].stack.push(val);
                     } else {
-                        let name = self.read_string_constant(fiber_idx, idx);
+                        let name = self.read_string_constant(fiber_idx, idx as usize);
                         let name_lower = name.to_lowercase();
                         if let Some(&global_idx) = self.global_names.get(&name_lower) {
                             let val = self.global_values[global_idx];
@@ -752,7 +752,7 @@ impl VM {
                     if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index] = val;
                     } else {
-                        let name = self.read_string_constant(fiber_idx, idx);
+                        let name = self.read_string_constant(fiber_idx, idx as usize);
                         let name_lower = name.to_lowercase();
                         if let Some(&global_idx) = self.global_names.get(&name_lower) {
                             self.global_values[global_idx] = val;
@@ -782,7 +782,7 @@ impl VM {
                     if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index] = val;
                     } else {
-                        let name = self.read_string_constant(fiber_idx, idx);
+                        let name = self.read_string_constant(fiber_idx, idx as usize);
                         let name_lower = name.to_lowercase();
                         if let Some(&global_idx) = self.global_names.get(&name_lower) {
                             self.global_values[global_idx] = val;
@@ -801,12 +801,12 @@ impl VM {
                     }
                 }
                 OpCode::OpDefineGlobal(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx);
+                    let name = self.read_string_constant(fiber_idx, idx as usize);
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.insert_global(name, val);
                 }
                 OpCode::OpGetPrivate(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
                     let val = if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
                         if let Some(id) = receiver.as_gc_id() {
                             if name == "this" {
@@ -840,7 +840,7 @@ impl VM {
                     }
                 }
                 OpCode::OpSetPrivate(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
                     if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
                         if let Some(id) = receiver.as_gc_id() {
@@ -894,7 +894,7 @@ impl VM {
 
                 // --- Data Structures ---
                 OpCode::OpArray(count) => {
-                    let mut items = Vec::with_capacity(count);
+                    let mut items = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         items.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
@@ -904,9 +904,9 @@ impl VM {
                 }
                 OpCode::OpStruct(count) => {
                     let mut shape_id = self.shapes.get_root();
-                    let mut props = Vec::with_capacity(count);
+                    let mut props = Vec::with_capacity(count as usize);
                     
-                    let mut kv_pairs = Vec::with_capacity(count);
+                    let mut kv_pairs = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         let value = self.fibers[fiber_idx].stack.pop().unwrap();
                         let key_val = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -945,7 +945,7 @@ impl VM {
                             GcObject::Struct(s) => {
                                 let key = self.to_string(index_val).to_lowercase();
                                 if let Some(idx) = self.shapes.get_index(s.shape_id, &key) {
-                                    self.fibers[fiber_idx].stack.push(s.properties[idx]);
+                                    self.fibers[fiber_idx].stack.push(s.properties[idx as usize]);
                                 } else {
                                     self.fibers[fiber_idx].stack.push(BxValue::new_null());
                                 }
@@ -988,7 +988,7 @@ impl VM {
                             GcObject::Struct(s) => {
                                 let key = key.unwrap();
                                 if let Some(idx) = self.shapes.get_index(s.shape_id, &key) {
-                                    s.properties[idx] = val;
+                                    s.properties[idx as usize] = val;
                                 } else {
                                     s.shape_id = self.shapes.transition(s.shape_id, &key);
                                     s.properties.push(val);
@@ -998,7 +998,7 @@ impl VM {
                             GcObject::Instance(inst) => {
                                 let key = key.unwrap();
                                 if let Some(idx) = self.shapes.get_index(inst.shape_id, &key) {
-                                    inst.properties[idx] = val;
+                                    inst.properties[idx as usize] = val;
                                 } else {
                                     inst.shape_id = self.shapes.transition(inst.shape_id, &key);
                                     inst.properties.push(val);
@@ -1013,11 +1013,11 @@ impl VM {
                     }
                 }
                 OpCode::OpMember(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     if let Some(id) = base_val.as_gc_id() {
-                        #[cfg(target_arch = "wasm32")]
+                        #[cfg(all(target_arch = "wasm32", feature = "js"))]
                         if let GcObject::JsValue(js) = self.heap.get(id) {
                             let js = js.clone();
                             let prop = JsValue::from_str(&name);
@@ -1044,8 +1044,8 @@ impl VM {
                                 };
 
                                 if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id {
-                                        let val = unsafe { &*properties_ptr }[index];
+                                    if cached_shape == shape_id as usize {
+                                        let val = unsafe { &*properties_ptr }[index as usize];
                                         self.fibers[fiber_idx].stack.push(val);
                                         continue;
                                     }
@@ -1056,9 +1056,9 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                     }
-                                    let val = unsafe { &*properties_ptr }[idx];
+                                    let val = unsafe { &*properties_ptr }[idx as usize];
                                     self.fibers[fiber_idx].stack.push(val);
                                 } else {
                                     self.fibers[fiber_idx].stack.push(BxValue::new_null());
@@ -1077,8 +1077,8 @@ impl VM {
                                 };
 
                                 if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id {
-                                        let val = unsafe { &*properties_ptr }[index];
+                                    if cached_shape == shape_id as usize {
+                                        let val = unsafe { &*properties_ptr }[index as usize];
                                         self.fibers[fiber_idx].stack.push(val);
                                         continue;
                                     }
@@ -1089,9 +1089,9 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                     }
-                                    let val = unsafe { &*properties_ptr }[idx];
+                                    let val = unsafe { &*properties_ptr }[idx as usize];
                                     self.fibers[fiber_idx].stack.push(val);
                                 } else if let Some(method) = self.resolve_method(Rc::clone(&class), &name) {
                                     let m_id = self.heap.alloc(GcObject::CompiledFunction(method));
@@ -1112,12 +1112,12 @@ impl VM {
                     }
                 }
                 OpCode::OpSetMember(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     if let Some(id) = base_val.as_gc_id() {
-                        #[cfg(target_arch = "wasm32")]
+                        #[cfg(all(target_arch = "wasm32", feature = "js"))]
                         if let GcObject::JsValue(js) = self.heap.get(id) {
                             let js = js.clone();
                             let prop = JsValue::from_str(&name);
@@ -1138,8 +1138,8 @@ impl VM {
                                 };
 
                                 if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id {
-                                        s.properties[index] = val;
+                                    if cached_shape == shape_id as usize {
+                                        s.properties[index as usize] = val;
                                         self.fibers[fiber_idx].stack.push(val);
                                         continue;
                                     }
@@ -1150,9 +1150,9 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                     }
-                                    s.properties[idx] = val;
+                                    s.properties[idx as usize] = val;
                                 } else {
                                     s.shape_id = self.shapes.transition(shape_id, &name);
                                     s.properties.push(val);
@@ -1169,8 +1169,8 @@ impl VM {
                                 };
 
                                 if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id {
-                                        inst.properties[index] = val;
+                                    if cached_shape == shape_id as usize {
+                                        inst.properties[index as usize] = val;
                                         self.fibers[fiber_idx].stack.push(val);
                                         continue;
                                     }
@@ -1181,9 +1181,9 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                     }
-                                    inst.properties[idx] = val;
+                                    inst.properties[idx as usize] = val;
                                 } else {
                                     inst.shape_id = self.shapes.transition(shape_id, &name);
                                     inst.properties.push(val);
@@ -1202,7 +1202,7 @@ impl VM {
                     }
                 }
                 OpCode::OpIncMember(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
                     if let Some(id) = base_val.as_gc_id() {
@@ -1217,10 +1217,10 @@ impl VM {
                                 };
 
                                 let index = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id { Some(index) } else { None }
+                                    if cached_shape == shape_id as usize { Some(index as usize) } else { None }
                                 } else { None };
 
-                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, &name)) {
+                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, &name).map(|i| i as usize)) {
                                     let old_val = s.properties[idx];
                                     if old_val.is_number() {
                                         let new_val = BxValue::new_number(old_val.as_number() + 1.0);
@@ -1231,7 +1231,7 @@ impl VM {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
-                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                         }
                                     } else {
                                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
@@ -1252,10 +1252,10 @@ impl VM {
                                 };
 
                                 let index = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id { Some(index) } else { None }
+                                    if cached_shape == shape_id as usize { Some(index as usize) } else { None }
                                 } else { None };
 
-                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, &name)) {
+                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, &name).map(|i| i as usize)) {
                                     let old_val = inst.properties[idx];
                                     if old_val.is_number() {
                                         let new_val = BxValue::new_number(old_val.as_number() + 1.0);
@@ -1266,7 +1266,7 @@ impl VM {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
-                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                         }
                                     } else {
                                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
@@ -1298,10 +1298,10 @@ impl VM {
 
                 // --- Calls / Invocations ---
                 OpCode::OpCall(arg_count) => {
-                    self.execute_call(fiber_idx, arg_count, None)?;
+                    self.execute_call(fiber_idx, arg_count as usize, None)?;
                 }
                 OpCode::OpCallNamed(total_count, names_idx) => {
-                    let names = match self.read_constant(fiber_idx, names_idx) {
+                    let names = match self.read_constant(fiber_idx, names_idx as usize) {
                         v if v.is_ptr() => {
                             if let GcObject::Array(arr) = self.heap.get(v.as_gc_id().unwrap()) {
                                 arr.iter().map(|v| self.to_string(*v)).collect::<Vec<_>>()
@@ -1311,15 +1311,15 @@ impl VM {
                         }
                         _ => bail!("Internal VM error: names constant is not a StringArray"),
                     };
-                    self.execute_call(fiber_idx, total_count, Some(names))?;
+                    self.execute_call(fiber_idx, total_count as usize, Some(names))?;
                 }
                 OpCode::OpInvoke(idx, arg_count) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
-                    self.execute_invoke(fiber_idx, name, arg_count, None, ip_at_start)?;
+                    let name = self.read_string_constant(fiber_idx, idx as usize).to_lowercase();
+                    self.execute_invoke(fiber_idx, name, arg_count as usize, None, ip_at_start)?;
                 }
                 OpCode::OpInvokeNamed(name_idx, total_count, names_idx) => {
-                    let name = self.read_string_constant(fiber_idx, name_idx).to_lowercase();
-                    let names = match self.read_constant(fiber_idx, names_idx) {
+                    let name = self.read_string_constant(fiber_idx, name_idx as usize).to_lowercase();
+                    let names = match self.read_constant(fiber_idx, names_idx as usize) {
                         v if v.is_ptr() => {
                             if let GcObject::Array(arr) = self.heap.get(v.as_gc_id().unwrap()) {
                                 arr.iter().map(|v| self.to_string(*v)).collect::<Vec<_>>()
@@ -1329,10 +1329,10 @@ impl VM {
                         }
                         _ => bail!("Internal VM error: names constant is not a StringArray"),
                     };
-                    self.execute_invoke(fiber_idx, name, total_count, Some(names), ip_at_start)?;
+                    self.execute_invoke(fiber_idx, name, total_count as usize, Some(names), ip_at_start)?;
                 }
                 OpCode::OpNew(arg_count) => {
-                    let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
+                    let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
                     let class_val = self.fibers[fiber_idx].stack[class_idx];
                     if let Some(id) = class_val.as_gc_id() {
                         let class = if let GcObject::Class(c) = self.heap.get(id) {
@@ -1355,7 +1355,7 @@ impl VM {
                             let frame = CallFrame {
                                 function: Rc::clone(&class.borrow().constructor),
                                 ip: 0,
-                                stack_base: class_idx + 1 + arg_count,
+                                stack_base: class_idx + 1 + arg_count as usize,
                                 receiver: Some(instance_val),
                                 handlers: Vec::new(),
                             };
@@ -1427,8 +1427,8 @@ impl VM {
                 // --- Control Flow / Misc ---
                 OpCode::OpIterNext(collection_slot, cursor_slot, offset, push_index) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let collection_idx = base + collection_slot;
-                    let cursor_idx = base + cursor_slot;
+                    let collection_idx = base + collection_slot as usize;
+                    let cursor_idx = base + cursor_slot as usize;
                     
                     let (is_done, next_val, next_idx) = {
                         let cursor_val = if self.fibers[fiber_idx].stack[cursor_idx].is_number() {
@@ -1452,7 +1452,7 @@ impl VM {
                                 GcObject::Struct(s) => {
                                     let keys = {
                                         let mut k = Vec::new();
-                                        let shape = &self.shapes.shapes[s.shape_id];
+                                        let shape = &self.shapes.shapes[s.shape_id as usize];
                                         for key in shape.fields.keys() {
                                             k.push(key.clone());
                                         }
@@ -1462,7 +1462,7 @@ impl VM {
                                     if cursor_val < keys.len() {
                                         let key = &keys[cursor_val];
                                         let idx = self.shapes.get_index(s.shape_id, key).unwrap();
-                                        let val = s.properties[idx];
+                                        let val = s.properties[idx as usize];
                                         let key_id = self.heap.alloc(GcObject::String(BoxString::new(key)));                                        (false, Some(BxValue::new_ptr(key_id)), Some(val))
                                     } else {
                                         (true, None, None)
@@ -1480,7 +1480,7 @@ impl VM {
                     };
 
                     if is_done {
-                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                     } else {
                         let current_cursor = self.fibers[fiber_idx].stack[cursor_idx];
                         let next_cursor_val = if current_cursor.is_int() { BxValue::new_int(current_cursor.as_int() + 1) } else { BxValue::new_number(current_cursor.as_number() + 1.0) };
@@ -1493,14 +1493,14 @@ impl VM {
                 }
                 OpCode::OpLocalJumpIfNeConst(slot, const_idx, offset) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
-                    let constant = self.read_constant(fiber_idx, const_idx);
+                    let val = self.fibers[fiber_idx].stack[base + slot as usize];
+                    let constant = self.read_constant(fiber_idx, const_idx as usize);
                     if val != constant {
-                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                     }
                 }
                 OpCode::OpPushHandler(offset) => {
-                    let target_ip = self.fibers[fiber_idx].frames.last().unwrap().ip + offset;
+                    let target_ip = self.fibers[fiber_idx].frames.last().unwrap().ip + offset as usize;
                     self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.push(target_ip);
                 }
                 OpCode::OpPopHandler => {
@@ -1511,7 +1511,7 @@ impl VM {
                     self.throw_value(fiber_idx, val)?;
                 }
                 OpCode::OpPrint(count) => {
-                    let mut args = Vec::with_capacity(count);
+                    let mut args = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
@@ -1520,7 +1520,7 @@ impl VM {
                     print!("{}", out);
                 }
                 OpCode::OpPrintln(count) => {
-                    let mut args = Vec::with_capacity(count);
+                    let mut args = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
@@ -1554,8 +1554,8 @@ impl VM {
                 // Extract source snippet
                 if !chunk.source.is_empty() && line > 0 {
                     let lines: Vec<&str> = chunk.source.lines().collect();
-                    if line <= lines.len() {
-                        let code_line = lines[line - 1].trim();
+                    if line as usize <= lines.len() {
+                        let code_line = lines[line as usize - 1].trim();
                         source_snippet = format!("\n\n  |  {}\n  |  {}", line, code_line);
                     }
                 }
@@ -1590,7 +1590,7 @@ impl VM {
             match self.heap.get(id) {
                 GcObject::CompiledFunction(f) => {
                     let f = Rc::clone(f);
-                    if args.len() < f.min_arity || args.len() > f.arity {
+                    if args.len() < f.min_arity as usize || args.len() > f.arity as usize {
                         anyhow::bail!("Expected {}-{} arguments but got {}", f.min_arity, f.arity, args.len());
                     }
                     
@@ -1600,12 +1600,12 @@ impl VM {
                         error_handler: None,
                     }));
 
-                    let mut stack = Vec::with_capacity(f.arity + 1);
+                    let mut stack = Vec::with_capacity(f.arity as usize + 1);
                     stack.push(func); // function itself at base
                     for arg in args {
                         stack.push(arg);
                     }
-                    while stack.len() < f.arity + 1 {
+                    while stack.len() < (f.arity + 1) as usize {
                         stack.push(BxValue::new_null());
                     }
 
@@ -1714,7 +1714,7 @@ impl VM {
         let func_val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count];
         
         if let Some(id) = func_val.as_gc_id() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_arch = "wasm32", feature = "js"))]
             if let GcObject::JsValue(js) = self.heap.get(id) {
                 let js = js.clone();
                 if let Ok(func) = js.clone().dyn_into::<Function>() {
@@ -1755,7 +1755,7 @@ impl VM {
                         self.reorder_arguments(args, names_list, &func.params)
                     } else {
                         let mut a = args;
-                        for _ in 0..(func.arity - arg_count) {
+                        for _ in 0..(func.arity as usize - arg_count) {
                             a.push(BxValue::new_null());
                         }
                         a
@@ -1776,7 +1776,7 @@ impl VM {
                         handlers: Vec::new(),
                     };
                     // Let's be consistent: stack_base is where first arg is. Function is at stack_base - 1.
-                    frame.stack_base = self.fibers[fiber_idx].stack.len() - func.arity;
+                    frame.stack_base = self.fibers[fiber_idx].stack.len() - func.arity as usize;
                     self.fibers[fiber_idx].frames.push(frame);
                     Ok(())
                 }
@@ -1805,11 +1805,11 @@ impl VM {
     }
 
     fn execute_invoke(&mut self, fiber_idx: usize, name: String, arg_count: usize, names: Option<Vec<String>>, ip_at_start: usize) -> Result<()> {
-        let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
+        let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
         let receiver_val = self.fibers[fiber_idx].stack[receiver_idx];
         
         if let Some(id) = receiver_val.as_gc_id() {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_arch = "wasm32", feature = "js"))]
             if let GcObject::JsValue(js) = self.heap.get(id) {
                 let js = js.clone();
                 let prop = JsValue::from_str(&name);
@@ -1877,8 +1877,8 @@ impl VM {
                     };
 
                     let method = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                        if cached_shape == shape_id {
-                            let method_val = inst.properties[index];
+                        if cached_shape == shape_id as usize {
+                            let method_val = inst.properties[index as usize];
                             if let Some(m_id) = method_val.as_gc_id() {
                                 if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
                                     Some(Rc::clone(f))
@@ -1889,14 +1889,14 @@ impl VM {
 
                     let method = if method.is_none() {
                         if let Some(idx) = self.shapes.get_index(shape_id, &name) {
-                            let method_val = inst.properties[idx];
+                            let method_val = inst.properties[idx as usize];
                             if let Some(m_id) = method_val.as_gc_id() {
                                 if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
                                     {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id, index: idx });
+                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
                                     }
                                     Some(Rc::clone(f))
                                 } else { None }
@@ -1919,7 +1919,7 @@ impl VM {
                             self.reorder_arguments(args, names_list, &func.params)
                         } else {
                             let mut a = args;
-                            for _ in 0..(func.arity - arg_count) {
+                            for _ in 0..(func.arity as usize - arg_count) {
                                 a.push(BxValue::new_null());
                             }
                             a
@@ -1935,7 +1935,7 @@ impl VM {
                         let frame = CallFrame {
                             function: func.clone(),
                             ip: 0,
-                            stack_base: self.fibers[fiber_idx].stack.len() - func.arity,
+                            stack_base: self.fibers[fiber_idx].stack.len() - func.arity as usize,
                             receiver: Some(receiver_val),
                             handlers: Vec::new(),
                         };
@@ -1966,7 +1966,7 @@ impl VM {
                         for _ in 0..(on_missing.arity - 2) {
                             self.fibers[fiber_idx].stack.push(BxValue::new_null());
                         }
-                        frame.stack_base = self.fibers[fiber_idx].stack.len() - on_missing.arity;
+                        frame.stack_base = self.fibers[fiber_idx].stack.len() - on_missing.arity as usize;
 
                         self.fibers[fiber_idx].frames.push(frame);
                         return Ok(());
@@ -2013,14 +2013,21 @@ impl VM {
     }
 
     fn read_constant(&mut self, fiber_idx: usize, idx: usize) -> BxValue {
-        {
+        let val = {
             let fiber = &self.fibers[fiber_idx];
             let frame = fiber.frames.last().unwrap();
             let function = &frame.function;
-
-            if let Some(val) = function.promoted_constants.borrow()[idx] {
-                return val;
+            
+            let mut promoted = function.promoted_constants.borrow_mut();
+            if promoted.len() <= idx {
+                let chunk_len = function.chunk.borrow().constants.len();
+                promoted.resize(chunk_len, None);
             }
+            promoted[idx]
+        };
+
+        if let Some(v) = val {
+            return v;
         }
 
         let constant = {
@@ -2056,7 +2063,12 @@ impl VM {
                 let id = self.heap.alloc(GcObject::Array(values));
                 BxValue::new_ptr(id)
             }
-            Constant::CompiledFunction(f) => BxValue::new_ptr(self.heap.alloc(GcObject::CompiledFunction(Rc::new(f)))),
+            Constant::CompiledFunction(f) => {
+                let mut f = f;
+                let count = f.chunk.borrow().constants.len();
+                f.promoted_constants = RefCell::new(vec![None; count]);
+                BxValue::new_ptr(self.heap.alloc(GcObject::CompiledFunction(Rc::new(f))))
+            }
             Constant::Class(c) => BxValue::new_ptr(self.heap.alloc(GcObject::Class(Rc::new(RefCell::new(c))))),
             Constant::Interface(i) => BxValue::new_ptr(self.heap.alloc(GcObject::Interface(Rc::new(RefCell::new(i))))),
         }
@@ -2072,7 +2084,7 @@ impl VM {
         panic!("Constant at index {} is not a string: {:?}", idx, val)
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "js"))]
     pub fn bx_to_js(&self, val: &BxValue) -> JsValue {
         if val.is_number() {
             JsValue::from_f64(val.as_number())
@@ -2097,7 +2109,7 @@ impl VM {
                 }
                 GcObject::Struct(s) => {
                     let js_obj = js_sys::Object::new();
-                    let shape = &self.shapes.shapes[s.shape_id];
+                    let shape = &self.shapes.shapes[s.shape_id as usize];
                     for (k, &idx) in shape.fields.iter() {
                         Reflect::set(&js_obj, &JsValue::from_str(k), &self.bx_to_js(&s.properties[idx])).ok();
                     }
@@ -2111,7 +2123,7 @@ impl VM {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", feature = "js"))]
     pub fn js_to_bx(&mut self, val: JsValue) -> BxValue {
         if val.is_string() {
             let id = self.heap.alloc(GcObject::String(BoxString::new(&val.as_string().unwrap())));
@@ -2153,5 +2165,77 @@ impl VM {
         roots.extend(self.global_values.iter().cloned());
 
         self.heap.collect(&roots);
+    }
+
+    pub fn bx_to_json(&self, val: &BxValue) -> serde_json::Value {
+        if val.is_number() {
+            serde_json::Number::from_f64(val.as_number())
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)
+        } else if val.is_int() {
+            serde_json::Value::Number(val.as_int().into())
+        } else if val.is_bool() {
+            serde_json::Value::Bool(val.as_bool())
+        } else if val.is_null() {
+            serde_json::Value::Null
+        } else if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::String(s) => serde_json::Value::String(s.to_string()),
+                GcObject::Array(arr) => {
+                    let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| self.bx_to_json(v)).collect();
+                    serde_json::Value::Array(json_arr)
+                }
+                GcObject::Struct(s) => {
+                    let mut map = serde_json::Map::new();
+                    let shape = &self.shapes.shapes[s.shape_id as usize];
+                    for (k, &idx) in shape.fields.iter() {
+                        if let Some(v) = s.properties.get(idx as usize) {
+                            map.insert(k.clone(), self.bx_to_json(v));
+                        }
+                    }
+                    serde_json::Value::Object(map)
+                }
+                _ => serde_json::Value::String(format!("<ptr {}>", id)),
+            }
+        } else {
+            serde_json::Value::Null
+        }
+    }
+
+    pub fn json_to_bx(&mut self, val: serde_json::Value) -> BxValue {
+        match val {
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    BxValue::new_int(i as i32)
+                } else {
+                    BxValue::new_number(n.as_f64().unwrap_or(0.0))
+                }
+            }
+            serde_json::Value::Bool(b) => BxValue::new_bool(b),
+            serde_json::Value::String(s) => {
+                let id = self.heap.alloc(GcObject::String(BoxString::new(&s)));
+                BxValue::new_ptr(id)
+            }
+            serde_json::Value::Array(arr) => {
+                let bx_arr: Vec<BxValue> = arr.into_iter().map(|v| self.json_to_bx(v)).collect();
+                let id = self.heap.alloc(GcObject::Array(bx_arr));
+                BxValue::new_ptr(id)
+            }
+            serde_json::Value::Object(obj) => {
+                let mut bx_struct = BxStruct {
+                    shape_id: self.shapes.get_root(),
+                    properties: Vec::new(),
+                };
+                for (name, val) in obj {
+                    let bx_val = self.json_to_bx(val);
+                    let shape_id = bx_struct.shape_id;
+                    bx_struct.shape_id = self.shapes.transition(shape_id, &name);
+                    bx_struct.properties.push(bx_val);
+                }
+                let id = self.heap.alloc(GcObject::Struct(bx_struct));
+                BxValue::new_ptr(id)
+            }
+            serde_json::Value::Null => BxValue::new_null(),
+        }
     }
 }

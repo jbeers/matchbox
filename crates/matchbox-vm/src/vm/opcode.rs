@@ -3,17 +3,17 @@ use serde::{Serialize, Deserialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum OpCode {
     // Hot Loop / Specialized Opcodes
-    OpIncLocal(usize),
-    OpLocalCompareJump(usize, usize, usize),
-    OpCompareJump(usize, usize),
-    OpIncGlobal(usize),
-    OpGlobalCompareJump(usize, usize, usize),
+    OpIncLocal(u32),
+    OpLocalCompareJump(u32, u32, u32),
+    OpCompareJump(u32, u32),
+    OpIncGlobal(u32),
+    OpGlobalCompareJump(u32, u32, u32),
 
     // Basic Hot Opcodes
-    OpGetLocal(usize),
-    OpSetLocal(usize),
-    OpSetLocalPop(usize),
-    OpConstant(usize),
+    OpGetLocal(u32),
+    OpSetLocal(u32),
+    OpSetLocalPop(u32),
+    OpConstant(u32),
     OpAddInt,
     OpAddFloat,
     OpAdd,
@@ -26,18 +26,18 @@ pub enum OpCode {
     OpDivide,
     OpDivFloat,
     OpPop,
-    OpJumpIfFalse(usize),
-    OpJump(usize),
-    OpLoop(usize),
+    OpJumpIfFalse(u32),
+    OpJump(u32),
+    OpLoop(u32),
     OpReturn,
 
     // Global / Scope Opcodes
-    OpGetGlobal(usize),
-    OpSetGlobal(usize),
-    OpSetGlobalPop(usize),
-    OpDefineGlobal(usize),
-    OpGetPrivate(usize),
-    OpSetPrivate(usize),
+    OpGetGlobal(u32),
+    OpSetGlobal(u32),
+    OpSetGlobalPop(u32),
+    OpDefineGlobal(u32),
+    OpGetPrivate(u32),
+    OpSetPrivate(u32),
 
     // Stack Manipulation
     OpDup,
@@ -47,21 +47,21 @@ pub enum OpCode {
     OpDec,
 
     // Data Structures
-    OpArray(usize),
-    OpStruct(usize),
+    OpArray(u32),
+    OpStruct(u32),
     OpIndex,
     OpSetIndex,
-    OpMember(usize),
-    OpSetMember(usize),
-    OpIncMember(usize),
+    OpMember(u32),
+    OpSetMember(u32),
+    OpIncMember(u32),
     OpStringConcat,
 
     // Calls / Invocations
-    OpCall(usize),
-    OpCallNamed(usize, usize),
-    OpInvoke(usize, usize),
-    OpInvokeNamed(usize, usize, usize),
-    OpNew(usize),
+    OpCall(u32),
+    OpCallNamed(u32, u32),
+    OpInvoke(u32, u32),
+    OpInvokeNamed(u32, u32, u32),
+    OpNew(u32),
 
     // Comparison
     OpEqual,
@@ -72,11 +72,11 @@ pub enum OpCode {
     OpGreaterEqual,
 
     // Control Flow / Misc
-    OpIterNext(usize, usize, usize, bool),
-    OpLocalJumpIfNeConst(usize, usize, usize),
-    OpPushHandler(usize),
+    OpIterNext(u32, u32, u32, bool),
+    OpLocalJumpIfNeConst(u32, u32, u32),
+    OpPushHandler(u32),
     OpPopHandler,
     OpThrow,
-    OpPrint(usize),
-    OpPrintln(usize),
+    OpPrint(u32),
+    OpPrintln(u32),
 }

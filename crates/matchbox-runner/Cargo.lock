@@ -147,13 +147,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi",
  "rand_core",
  "wasip2",
  "wasip3",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -309,6 +307,8 @@ dependencies = [
  "anyhow",
  "bincode",
  "matchbox_vm",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -320,11 +320,9 @@ dependencies = [
  "chrono",
  "getrandom",
  "jni",
- "js-sys",
  "rand",
  "serde",
- "wasm-bindgen",
- "web-sys",
+ "serde_json",
  "web-time",
 ]
 
@@ -618,16 +616,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
-]
-
-[[package]]
-name = "web-sys"
-version = "0.3.91"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "854ba17bb104abfb26ba36da9729addc7ce7f06f5c0f90f3c391f8461cca21f9"
-dependencies = [
- "js-sys",
- "wasm-bindgen",
 ]
 
 [[package]]

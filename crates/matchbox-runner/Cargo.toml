@@ -1,7 +1,7 @@
 [package]
 name = "matchbox_runner"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [workspace]
 
@@ -9,10 +9,8 @@ edition = "2024"
 matchbox_vm = { path = "../matchbox-vm" }
 bincode = "1.3.3"
 anyhow = "1.0.102"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "0.2.100"
-js-sys = "0.3.77"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 
 [profile.release]
 opt-level = "z"

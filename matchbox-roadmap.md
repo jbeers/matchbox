@@ -108,3 +108,6 @@ Do we want to just make this a strong separation of concerns or do we want to cr
 # More Ideas
 
 Make BIFs excludeable from runtime
+Add a --production flag that will remove debug info and tree-shake
+Can the BIFs be implemented in BoxLang?
+    If we implment things as BIFs they can be registered after the vm code and before the app code so we don't have to cross compile them at the rust level and can exclude them when compiling a BoxLang app

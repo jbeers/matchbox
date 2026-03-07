@@ -14,7 +14,7 @@ pub fn parse(source: &str) -> Result<Vec<Statement>> {
     for pair in pairs {
         if pair.as_rule() == Rule::program {
             for inner_pair in pair.into_inner() {
-                let line = inner_pair.as_span().start_pos().line_col().0;
+                let line = inner_pair.as_span().start_pos().line_col().0 as u32 as u32;
                 match inner_pair.as_rule() {
                     Rule::EOI => break,
                     Rule::import_stmt => {
@@ -83,7 +83,7 @@ fn parse_args(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::Argum
                     let value = parse_expression(value_pair)?;
                     args.push(crate::ast::Argument { name, value });
                 } else {
-                    let value = Expression::new(ExpressionKind::Identifier(first.as_str().to_string()), first.as_span().start_pos().line_col().0);
+                    let value = Expression::new(ExpressionKind::Identifier(first.as_str().to_string()), first.as_span().start_pos().line_col().0 as u32);
                     args.push(crate::ast::Argument { name: None, value });
                 }
             }
@@ -98,7 +98,7 @@ fn parse_args(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::Argum
 }
 
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
-    let line = pair.as_span().start_pos().line_col().0;
+    let line = pair.as_span().start_pos().line_col().0 as u32;
     let rule = pair.as_rule();
     match rule {
         Rule::statement => {
@@ -368,7 +368,7 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
 }
 
 fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let line = pair.as_span().start_pos().line_col().0;
+    let line = pair.as_span().start_pos().line_col().0 as u32;
     let rule = pair.as_rule();
     match rule {
         Rule::expression | Rule::init | Rule::condition | Rule::update => {
@@ -417,7 +417,7 @@ fn parse_target(pair: pest::iterators::Pair<Rule>) -> Result<AssignmentTarget> {
 
     for i in 0..accessors.len()-1 {
         let postfix = &accessors[i];
-        let postfix_line = postfix.as_span().start_pos().line_col().0;
+        let postfix_line = postfix.as_span().start_pos().line_col().0 as u32;
         match postfix.as_rule() {
             Rule::array_access => {
                 let index_expr = parse_expression(postfix.clone().into_inner().next().unwrap())?;
@@ -463,7 +463,7 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
     let mut expr = parse_atom(atom_pair)?;
 
     for postfix in inner {
-        let postfix_line = postfix.as_span().start_pos().line_col().0;
+        let postfix_line = postfix.as_span().start_pos().line_col().0 as u32;
         match postfix.as_rule() {
             Rule::function_call_args => {
                 let mut args = Vec::new();
@@ -503,7 +503,7 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
 }
 
 fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let line = pair.as_span().start_pos().line_col().0;
+    let line = pair.as_span().start_pos().line_col().0 as u32;
     let rule = pair.as_rule();
     match rule {
         Rule::atom => {
