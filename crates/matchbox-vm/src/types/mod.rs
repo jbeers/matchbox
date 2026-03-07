@@ -8,6 +8,8 @@ use std::cell::RefCell;
 use serde::{Serialize, Deserialize};
 use std::ffi::c_void;
 
+use self::box_string::BoxString;
+
 #[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxValue(u64);
 
@@ -108,6 +110,7 @@ pub trait BxVM {
     fn future_on_error(&mut self, id: usize, handler: BxValue);
     fn string_new(&mut self, s: String) -> usize;
     fn to_string(&self, val: BxValue) -> String;
+    fn to_box_string(&self, val: BxValue) -> BoxString;
 }
 
 pub type BxNativeFunction = fn(&mut dyn BxVM, &[BxValue]) -> Result<BxValue, String>;
@@ -152,7 +155,7 @@ impl fmt::Debug for BxValue {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Constant {
     Number(f64),
-    String(String),
+    String(BoxString),
     Boolean(bool),
     Null,
     CompiledFunction(BxCompiledFunction),

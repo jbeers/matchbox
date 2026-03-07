@@ -1,4 +1,4 @@
-use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject};
+use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject, box_string::BoxString};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -6,7 +6,7 @@ pub type GcId = usize;
 
 #[derive(Debug, Clone)]
 pub enum GcObject {
-    String(String),
+    String(BoxString),
     Array(Vec<BxValue>),
     Struct(BxStruct),
     Instance(BxInstance),

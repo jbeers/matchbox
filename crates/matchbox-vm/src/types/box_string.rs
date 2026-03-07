@@ -1,6 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use serde::{Serialize, Serializer, Deserialize, Deserializer};
 
 pub const SSO_CAPACITY: usize = 22;
 
@@ -241,6 +242,25 @@ impl fmt::Display for BoxString {
                 write!(f, "{}", rope.right)
             }
         }
+    }
+}
+
+impl Serialize for BoxString {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for BoxString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(BoxString::new(&s))
     }
 }
 

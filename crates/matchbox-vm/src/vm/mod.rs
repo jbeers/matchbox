@@ -3,7 +3,7 @@ pub mod opcode;
 pub mod gc;
 pub mod shape;
 
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct};
+use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, box_string::BoxString};
 use self::chunk::{Chunk, IcEntry};
 use self::opcode::OpCode;
 use self::gc::{Heap, GcObject};
@@ -124,11 +124,20 @@ impl BxVM for VM {
     }
 
     fn string_new(&mut self, s: String) -> usize {
-        self.heap.alloc(GcObject::String(s))
+        self.heap.alloc(GcObject::String(BoxString::new(&s)))
     }
 
     fn to_string(&self, val: BxValue) -> String {
         self.to_string_internal(val)
+    }
+
+    fn to_box_string(&self, val: BxValue) -> BoxString {
+        if let Some(id) = val.as_gc_id() {
+            if let GcObject::String(s) = self.heap.get(id) {
+                return s.clone();
+            }
+        }
+        BoxString::new(&self.to_string_internal(val))
     }
 }
 
@@ -144,7 +153,7 @@ impl VM {
             "null".to_string()
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(s) => s.clone(),
+                GcObject::String(s) => s.to_string(),
                 GcObject::Array(_) => format!("<array id:{}>", id),
                 GcObject::Struct(_) => format!("<struct id:{}>", id),
                 GcObject::Instance(inst) => format!("<instance of {}>", inst.class.borrow().name),
@@ -492,9 +501,9 @@ impl VM {
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() + b.as_number()));
                     } else {
-                        let a_s = self.to_string(a);
-                        let b_s = self.to_string(b);
-                        let res_id = self.heap.alloc(GcObject::String(format!("{}{}", a_s, b_s)));
+                        let a_s = self.to_box_string(a);
+                        let b_s = self.to_box_string(b);
+                        let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
                     }
                 }
@@ -533,9 +542,9 @@ impl VM {
                 OpCode::OpStringConcat => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a_s = self.to_string(a);
-                    let b_s = self.to_string(b);
-                    let res_id = self.heap.alloc(GcObject::String(format!("{}{}", a_s, b_s)));
+                    let a_s = self.to_box_string(a);
+                    let b_s = self.to_box_string(b);
+                    let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
                 }
                 OpCode::OpPrint(count) => {
@@ -1102,8 +1111,7 @@ impl VM {
                                         let key = &keys[cursor_val];
                                         let idx = self.shapes.get_index(s.shape_id, key).unwrap();
                                         let val = s.properties[idx];
-                                        let key_id = self.heap.alloc(GcObject::String(key.clone()));
-                                        (false, Some(BxValue::new_ptr(key_id)), Some(val))
+                                        let key_id = self.heap.alloc(GcObject::String(BoxString::new(key)));                                        (false, Some(BxValue::new_ptr(key_id)), Some(val))
                                     } else {
                                         (true, None, None)
                                     }
@@ -1234,7 +1242,7 @@ impl VM {
     }
 
     fn throw_error(&mut self, fiber_idx: usize, msg: &str) -> Result<()> {
-        let msg_id = self.heap.alloc(GcObject::String(msg.to_string()));
+        let msg_id = self.heap.alloc(GcObject::String(BoxString::new(msg)));
         let val = BxValue::new_ptr(msg_id);
         self.throw_value(fiber_idx, val)
     }
@@ -1355,7 +1363,7 @@ impl VM {
             false
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(s) => !s.is_empty() && s.to_lowercase() != "false",
+                GcObject::String(s) => !s.is_empty() && s.to_string().to_lowercase() != "false",
                 _ => true,
             }
         } else {
@@ -1393,7 +1401,7 @@ impl VM {
     }
 
     fn spawn_error_handler(&mut self, handler: BxValue, error_msg: String) {
-        let err_id = self.heap.alloc(GcObject::String(error_msg));
+        let err_id = self.heap.alloc(GcObject::String(BoxString::new(&error_msg)));
         let err_val = BxValue::new_ptr(err_id);
         
         if let Some(id) = handler.as_gc_id() {
@@ -1617,10 +1625,9 @@ impl VM {
                         self.fibers[fiber_idx].stack.pop(); // receiver
 
                         let args_array_id = self.heap.alloc(GcObject::Array(original_args));
-                        let name_id = self.heap.alloc(GcObject::String(name));
-                        
-                        self.fibers[fiber_idx].stack.push(receiver_val); // receiver at base
-                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(name_id));
+                        let name_id = self.heap.alloc(GcObject::String(BoxString::new(&name)));
+
+                        self.fibers[fiber_idx].stack.push(receiver_val); // receiver at base                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(name_id));
                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(args_array_id));
 
                         let mut frame = CallFrame {
@@ -1747,7 +1754,7 @@ impl VM {
             Constant::StringArray(arr) => {
                 let mut values = Vec::with_capacity(arr.len());
                 for s in arr {
-                    let id = self.heap.alloc(GcObject::String(s));
+                    let id = self.heap.alloc(GcObject::String(BoxString::new(&s)));
                     values.push(BxValue::new_ptr(id));
                 }
                 let id = self.heap.alloc(GcObject::Array(values));
@@ -1763,7 +1770,7 @@ impl VM {
         let val = self.read_constant(fiber_idx, idx);
         if let Some(id) = val.as_gc_id() {
             if let GcObject::String(s) = self.heap.get(id) {
-                return s.clone();
+                return s.to_string();
             }
         }
         panic!("Constant at index {} is not a string: {:?}", idx, val)
@@ -1781,7 +1788,10 @@ impl VM {
             JsValue::NULL
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(s) => JsValue::from_str(s),
+                GcObject::String(s) => {
+                    let mut s_flat = s.clone();
+                    JsValue::from_str(s_flat.flatten())
+                }
                 GcObject::Array(arr) => {
                     let js_arr = Array::new();
                     for item in arr {
