@@ -1017,6 +1017,20 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     if let Some(id) = base_val.as_gc_id() {
+                        #[cfg(target_arch = "wasm32")]
+                        if let GcObject::JsValue(js) = self.heap.get(id) {
+                            let js = js.clone();
+                            let prop = JsValue::from_str(&name);
+                            match Reflect::get(&js, &prop) {
+                                Ok(val) => {
+                                    let bx_val = self.js_to_bx(val);
+                                    self.fibers[fiber_idx].stack.push(bx_val);
+                                }
+                                Err(_) => self.fibers[fiber_idx].stack.push(BxValue::new_null()),
+                            }
+                            continue;
+                        }
+
                         match self.heap.get(id) {
                             GcObject::Struct(s) => {
                                 let shape_id = s.shape_id;
@@ -1086,17 +1100,6 @@ impl VM {
                                     self.fibers[fiber_idx].stack.push(BxValue::new_null());
                                 }
                             }
-                            #[cfg(target_arch = "wasm32")]
-                            GcObject::JsValue(js) => {
-                                let prop = JsValue::from_str(&name);
-                                match Reflect::get(&js, &prop) {
-                                    Ok(val) => {
-                                        let bx_val = self.js_to_bx(val);
-                                        self.fibers[fiber_idx].stack.push(bx_val);
-                                    }
-                                    Err(_) => self.fibers[fiber_idx].stack.push(BxValue::new_null()),
-                                }
-                            }
                             GcObject::NativeObject(obj) => {
                                 let val = obj.borrow().get_property(&name);
                                 self.fibers[fiber_idx].stack.push(val);
@@ -1114,6 +1117,16 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     
                     if let Some(id) = base_val.as_gc_id() {
+                        #[cfg(target_arch = "wasm32")]
+                        if let GcObject::JsValue(js) = self.heap.get(id) {
+                            let js = js.clone();
+                            let prop = JsValue::from_str(&name);
+                            let js_val = self.bx_to_js(&val);
+                            Reflect::set(&js, &prop, &js_val).ok();
+                            self.fibers[fiber_idx].stack.push(val);
+                            continue;
+                        }
+
                         match self.heap.get_mut(id) {
                             GcObject::Struct(s) => {
                                 let shape_id = s.shape_id;
@@ -1175,13 +1188,6 @@ impl VM {
                                     inst.shape_id = self.shapes.transition(shape_id, &name);
                                     inst.properties.push(val);
                                 }
-                                self.fibers[fiber_idx].stack.push(val);
-                            }
-                            #[cfg(target_arch = "wasm32")]
-                            GcObject::JsValue(js) => {
-                                let prop = JsValue::from_str(&name);
-                                let js_val = self.bx_to_js(&val);
-                                Reflect::set(&js, &prop, &js_val).ok();
                                 self.fibers[fiber_idx].stack.push(val);
                             }
                             GcObject::NativeObject(obj) => {
@@ -1708,6 +1714,33 @@ impl VM {
         let func_val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count];
         
         if let Some(id) = func_val.as_gc_id() {
+            #[cfg(target_arch = "wasm32")]
+            if let GcObject::JsValue(js) = self.heap.get(id) {
+                let js = js.clone();
+                if let Ok(func) = js.clone().dyn_into::<Function>() {
+                    let js_args = Array::new();
+                    let mut args = Vec::new();
+                    for _ in 0..arg_count {
+                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                    }
+                    args.reverse();
+                    for arg in args {
+                        js_args.push(&self.bx_to_js(&arg));
+                    }
+                    self.fibers[fiber_idx].stack.pop(); // Pop the function
+                    match Reflect::apply(&func, &JsValue::UNDEFINED, &js_args) {
+                        Ok(val) => {
+                            let bx_val = self.js_to_bx(val);
+                            self.fibers[fiber_idx].stack.push(bx_val);
+                            return Ok(());
+                        }
+                        Err(e) => return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
+                    }
+                } else {
+                    return self.throw_error(fiber_idx, "Can only call JS functions.");
+                }
+            }
+
             match self.heap.get(id) {
                 GcObject::CompiledFunction(func) => {
                     let func = Rc::clone(func);
@@ -1764,31 +1797,6 @@ impl VM {
                         Err(e) => self.throw_error(fiber_idx, &e),
                     }
                 }
-                #[cfg(target_arch = "wasm32")]
-                GcObject::JsValue(js) => {
-                    if let Ok(func) = js.clone().dyn_into::<Function>() {
-                        let js_args = Array::new();
-                        let mut args = Vec::new();
-                        for _ in 0..arg_count {
-                            args.push(self.fibers[fiber_idx].stack.pop().unwrap());
-                        }
-                        args.reverse();
-                        for arg in args {
-                            js_args.push(&self.bx_to_js(&arg));
-                        }
-                        self.fibers[fiber_idx].stack.pop(); // Pop the function
-                        match Reflect::apply(&func, &JsValue::UNDEFINED, &js_args) {
-                            Ok(val) => {
-                                let bx_val = self.js_to_bx(val);
-                                self.fibers[fiber_idx].stack.push(bx_val);
-                                Ok(())
-                            }
-                            Err(e) => self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
-                        }
-                    } else {
-                        self.throw_error(fiber_idx, "Can only call JS functions.")
-                    }
-                }
                 _ => self.throw_error(fiber_idx, "Can only call functions."),
             }
         } else {
@@ -1801,6 +1809,37 @@ impl VM {
         let receiver_val = self.fibers[fiber_idx].stack[receiver_idx];
         
         if let Some(id) = receiver_val.as_gc_id() {
+            #[cfg(target_arch = "wasm32")]
+            if let GcObject::JsValue(js) = self.heap.get(id) {
+                let js = js.clone();
+                let prop = JsValue::from_str(&name);
+                match Reflect::get(&js, &prop) {
+                    Ok(val) => {
+                        if let Ok(func) = val.clone().dyn_into::<Function>() {
+                            let js_args = Array::new();
+                            let mut args = Vec::new();
+                            for _ in 0..arg_count {
+                                args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                            }
+                            args.reverse();
+                            for arg in args {
+                                js_args.push(&self.bx_to_js(&arg));
+                            }
+                            self.fibers[fiber_idx].stack.pop(); // Pop the receiver
+                            match Reflect::apply(&func, &js, &js_args) {
+                                Ok(val) => {
+                                    let bx_val = self.js_to_bx(val);
+                                    self.fibers[fiber_idx].stack.push(bx_val);
+                                    return Ok(());
+                                }
+                                Err(e) => return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+
             match self.heap.get(id) {
                 GcObject::Future(f) => {
                     let (status, value) = (f.status.clone(), f.value);
@@ -1931,35 +1970,6 @@ impl VM {
 
                         self.fibers[fiber_idx].frames.push(frame);
                         return Ok(());
-                    }
-                }
-                #[cfg(target_arch = "wasm32")]
-                GcObject::JsValue(js) => {
-                    let prop = JsValue::from_str(&name);
-                    match Reflect::get(&js, &prop) {
-                        Ok(val) => {
-                            if let Ok(func) = val.clone().dyn_into::<Function>() {
-                                let js_args = Array::new();
-                                let mut args = Vec::new();
-                                for _ in 0..arg_count {
-                                    args.push(self.fibers[fiber_idx].stack.pop().unwrap());
-                                }
-                                args.reverse();
-                                for arg in args {
-                                    js_args.push(&self.bx_to_js(&arg));
-                                }
-                                self.fibers[fiber_idx].stack.pop(); // Pop the receiver
-                                match Reflect::apply(&func, js, &js_args) {
-                                    Ok(val) => {
-                                        let bx_val = self.js_to_bx(val);
-                                        self.fibers[fiber_idx].stack.push(bx_val);
-                                        return Ok(());
-                                    }
-                                    Err(e) => return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
-                                }
-                            }
-                        }
-                        Err(_) => {}
                     }
                 }
                 _ => {}
@@ -2104,7 +2114,7 @@ impl VM {
     #[cfg(target_arch = "wasm32")]
     pub fn js_to_bx(&mut self, val: JsValue) -> BxValue {
         if val.is_string() {
-            let id = self.heap.alloc(GcObject::String(val.as_string().unwrap()));
+            let id = self.heap.alloc(GcObject::String(BoxString::new(&val.as_string().unwrap())));
             BxValue::new_ptr(id)
         } else if let Some(n) = val.as_f64() {
             BxValue::new_number(n)

@@ -7,9 +7,10 @@ use jni::{
 use std::sync::{Arc, OnceLock};
 
 use crate::types::BxValue;
+use crate::types::BxVM;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::types::{BxNativeObject, BxVM};
+use crate::types::BxNativeObject;
 
 #[cfg(not(target_arch = "wasm32"))]
 static JVM: OnceLock<Result<Arc<JavaVM>, String>> = OnceLock::new();

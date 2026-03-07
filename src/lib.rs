@@ -13,6 +13,8 @@ use wasm_bindgen::prelude::*;
 const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
 const NATIVE_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_native");
+const WASI_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_wasip1.wasm");
+const WASM32_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_wasm32.wasm");
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -119,7 +121,7 @@ pub fn run() -> Result<()> {
     };
 
     let filename = args.iter().skip(1)
-        .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm" && *a != "js");
+        .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm" && *a != "wasi" && *a != "js");
 
     match filename {
         Some(name) => {
@@ -148,7 +150,8 @@ fn print_usage() {
     println!("  -v, --version       Show version information");
     println!("  --build             Compile to bytecode (.bxb)");
     println!("  --target <native>   Produce a standalone native binary");
-    println!("  --target <wasm>     Produce a standalone WASM binary");
+    println!("  --target <wasi>     Produce a standalone WASI container binary");
+    println!("  --target <wasm>     Produce a standalone WASM binary (Web)");
     println!("  --target <js>       Produce a JavaScript module wrapper");
     println!("\nIf no file is provided, matchbox starts in REPL mode.");
 }
@@ -188,6 +191,7 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>) -> Result
 
             match t {
                 "native" => produce_native_binary(&chunk, path)?,
+                "wasi" => produce_wasi_binary(&chunk, path)?,
                 "wasm" => produce_wasm_binary(&chunk, path)?,
                 "js" => produce_js_bundle(&chunk, path, &ast)?,
                 _ => bail!("Unknown target: {}", t),
@@ -359,6 +363,7 @@ fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path,
     fs::create_dir_all(&build_dir.join("src"))?;
 
     let is_wasm = target == "wasm" || target == "js";
+    let is_wasi = target == "wasi";
 
     // 1. Generate Cargo.toml
     let vm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/matchbox-vm");
@@ -481,6 +486,8 @@ impl BoxLangVM {
     
     if is_wasm {
         cmd.arg("--target").arg("wasm32-unknown-unknown");
+    } else if is_wasi {
+        cmd.arg("--target").arg("wasm32-wasip1");
     }
 
     let status = cmd.status()?;
@@ -495,6 +502,11 @@ impl BoxLangVM {
         let out_path = source_path.with_extension("");
         fs::copy(artifact, &out_path)?;
         println!("Native Fusion binary produced: {}", out_path.display());
+    } else if target == "wasi" {
+        let artifact = build_dir.join("target").join("wasm32-wasip1").join("release").join("fusion_build.wasm");
+        let out_path = source_path.with_extension("wasm");
+        fs::copy(artifact, &out_path)?;
+        println!("WASI Fusion binary produced: {}", out_path.display());
     } else if target == "wasm" {
         let artifact = build_dir.join("target").join("wasm32-unknown-unknown").join("release").join("fusion_build.wasm");
         let out_path = source_path.with_extension("wasm");
@@ -515,17 +527,35 @@ impl BoxLangVM {
     Ok(())
 }
 
+fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
+    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
+    if wasm_bytes.is_empty() {
+        bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
+    }
+    let chunk_bytes = bincode::serialize(chunk)?;
+    
+    let mut out_bytes = wasm_bytes;
+    use wasm_encoder::Encode;
+    let custom_section = wasm_encoder::CustomSection {
+        name: "boxlang_bytecode".into(),
+        data: (&chunk_bytes).into(),
+    };
+    let mut section_bytes = Vec::new();
+    custom_section.encode(&mut section_bytes);
+    out_bytes.extend_from_slice(&section_bytes);
+    
+    let out_path = source_path.with_extension("wasm");
+    fs::write(&out_path, out_bytes)?;
+    
+    println!("WASI container binary produced: {}", out_path.display());
+    Ok(())
+}
+
 fn produce_wasm_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let mut wasm_runner_path = Path::new("target/wasm32-unknown-unknown/release/matchbox.wasm");
-    if !wasm_runner_path.exists() {
-        wasm_runner_path = Path::new("target/wasm32-wasip1/debug/matchbox.wasm");
+    let wasm_bytes = WASM32_RUNNER_STUB.to_vec();
+    if wasm_bytes.is_empty() {
+        bail!("WASM32 runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-unknown-unknown target installed.");
     }
-    
-    if !wasm_runner_path.exists() {
-        bail!("WASM runner not found. Please run 'cargo build --target wasm32-unknown-unknown --release' first.");
-    }
-    
-    let wasm_bytes = fs::read(wasm_runner_path)?;
     let chunk_bytes = bincode::serialize(chunk)?;
     
     let mut out_bytes = wasm_bytes;

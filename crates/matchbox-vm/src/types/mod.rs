@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use serde::{Serialize, Deserialize};
-use std::ffi::c_void;
 
 use self::box_string::BoxString;
 
