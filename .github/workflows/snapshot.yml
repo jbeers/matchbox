@@ -32,7 +32,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            targets: x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, wasm32-wasip1
+            targets: x86_64-unknown-linux-gnu, i686-unknown-linux-gnu, aarch64-unknown-linux-gnu, armv7-unknown-linux-gnueabihf, wasm32-wasip1
           - os: macos-latest
             targets: x86_64-apple-darwin, aarch64-apple-darwin
           - os: windows-latest
@@ -48,7 +48,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-multilib
 
       - name: Build Stubs
         shell: bash
@@ -64,6 +64,8 @@ jobs:
             CMD="cargo build --release --target $target"
             if [[ "$target" == "aarch64-unknown-linux-gnu" ]]; then
               export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            elif [[ "$target" == "armv7-unknown-linux-gnueabihf" ]]; then
+              export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
             fi
             
             $CMD
@@ -108,17 +110,48 @@ jobs:
           path: all-stubs/*
 
   build-clis:
-    name: Build Fat CLI - ${{ matrix.os }}
+    name: Build Fat CLI - ${{ matrix.target }}
     needs: aggregate-stubs
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            output_name: matchbox-linux-x64
+          - os: ubuntu-latest
+            target: i686-unknown-linux-gnu
+            output_name: matchbox-linux-x86
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            output_name: matchbox-linux-arm64
+          - os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            output_name: matchbox-linux-armv7
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            output_name: matchbox-macos-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            output_name: matchbox-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            output_name: matchbox-windows-x64.exe
+
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       
+      - name: Install Cross-Compilers (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-multilib
+
       - name: Download Aggregated Stubs
         uses: actions/download-artifact@v4
         with:
@@ -126,24 +159,27 @@ jobs:
           path: stubs
 
       - name: Build Fat CLI
-        run: cargo build --release --features cross-compile
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          elif [[ "${{ matrix.target }}" == "armv7-unknown-linux-gnueabihf" ]]; then
+            export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
+          fi
+          cargo build --release --features cross-compile --target ${{ matrix.target }}
 
       - name: Prepare Artifact
         shell: bash
         run: |
           mkdir -p dist
-          if [[ "${{ matrix.os }}" == *"ubuntu"* ]]; then
-            cp target/release/matchbox dist/matchbox-linux-fat
-          elif [[ "${{ matrix.os }}" == *"macos"* ]]; then
-            cp target/release/matchbox dist/matchbox-macos-fat
-          elif [[ "${{ matrix.os }}" == *"windows"* ]]; then
-            cp target/release/matchbox.exe dist/matchbox-windows-fat.exe
-          fi
+          SRC_PATH="target/${{ matrix.target }}/release/matchbox"
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then SRC_PATH="$SRC_PATH.exe"; fi
+          cp "$SRC_PATH" "dist/${{ matrix.output_name }}"
       
       - name: Upload Fat CLI
         uses: actions/upload-artifact@v4
         with:
-          name: matchbox-${{ matrix.os }}-fat
+          name: ${{ matrix.output_name }}
           path: dist/*
 
   publish:

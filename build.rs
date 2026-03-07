@@ -116,7 +116,9 @@ fn main() {
     if cfg!(feature = "cross-compile") {
         let targets = vec![
             ("x86_64-unknown-linux-gnu", "runner_stub_x86_64-unknown-linux-gnu", "matchbox_runner"),
+            ("i686-unknown-linux-gnu", "runner_stub_i686-unknown-linux-gnu", "matchbox_runner"),
             ("aarch64-unknown-linux-gnu", "runner_stub_aarch64-unknown-linux-gnu", "matchbox_runner"),
+            ("armv7-unknown-linux-gnueabihf", "runner_stub_armv7-unknown-linux-gnueabihf", "matchbox_runner"),
             ("x86_64-apple-darwin", "runner_stub_x86_64-apple-darwin", "matchbox_runner"),
             ("aarch64-apple-darwin", "runner_stub_aarch64-apple-darwin", "matchbox_runner"),
             ("x86_64-pc-windows-msvc", "runner_stub_x86_64-pc-windows-msvc.exe", "matchbox_runner.exe"),
