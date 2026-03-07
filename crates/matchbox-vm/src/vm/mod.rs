@@ -466,6 +466,46 @@ impl VM {
             self.fibers[fiber_idx].frames.last_mut().unwrap().ip += 1;
 
             match instruction {
+                // --- Hot Loop / Specialized Opcodes ---
+                OpCode::OpIncLocal(slot) => {
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack[base + slot];
+                    if val.is_number() {
+                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_number(val.as_number() + 1.0);
+                    } else if val.is_int() {
+                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_int(val.as_int() + 1);
+                    } else {
+                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
+                        continue;
+                    }
+                }
+                OpCode::OpLocalCompareJump(slot, const_idx, offset) => {
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack[base + slot];
+                    let limit = self.read_constant(fiber_idx, const_idx);
+                    if val.is_number() && limit.is_number() {
+                        if val.as_number() < limit.as_number() {
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                        }
+                    } else if val.is_int() && limit.is_int() {
+                        if val.as_int() < limit.as_int() {
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                        }
+                    }
+                }
+                OpCode::OpCompareJump(const_idx, offset) => {
+                    let limit = self.read_constant(fiber_idx, const_idx);
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    
+                    if val.is_number() && limit.is_number() {
+                        if val.as_number() < limit.as_number() {
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                        }
+                    } else {
+                        self.throw_error(fiber_idx, "OpCompareJump expects numeric operands")?;
+                        continue;
+                    }
+                }
                 OpCode::OpIncGlobal(idx) => {
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
@@ -502,19 +542,6 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpCompareJump(const_idx, offset) => {
-                    let limit = self.read_constant(fiber_idx, const_idx);
-                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    
-                    if val.is_number() && limit.is_number() {
-                        if val.as_number() < limit.as_number() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
-                        }
-                    } else {
-                        self.throw_error(fiber_idx, "OpCompareJump expects numeric operands")?;
-                        continue;
-                    }
-                }
                 OpCode::OpGlobalCompareJump(name_idx, const_idx, offset) => {
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
@@ -545,61 +572,37 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpIncLocal(slot) => {
+
+                // --- Basic Hot Opcodes ---
+                OpCode::OpGetLocal(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack[base + slot];
-                    if val.is_number() {
-                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_number(val.as_number() + 1.0);
-                    } else if val.is_int() {
-                        self.fibers[fiber_idx].stack[base + slot] = BxValue::new_int(val.as_int() + 1);
-                    } else {
-                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                        continue;
-                    }
+                    self.fibers[fiber_idx].stack.push(val);
                 }
-                OpCode::OpLocalCompareJump(slot, const_idx, offset) => {
+                OpCode::OpSetLocal(slot) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
-                    let limit = self.read_constant(fiber_idx, const_idx);
-                    if val.is_number() && limit.is_number() {
-                        if val.as_number() < limit.as_number() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
-                        }
-                    } else if val.is_int() && limit.is_int() {
-                        if val.as_int() < limit.as_int() {
-                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
-                        }
-                    }
+                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
+                    self.fibers[fiber_idx].stack[base + slot] = val;
                 }
-                OpCode::OpReturn => {
-                    let fiber = &mut self.fibers[fiber_idx];
-                    let frame = fiber.frames.pop().unwrap();
-                    let result = if fiber.stack.len() > frame.stack_base {
-                        fiber.stack.pop().unwrap()
-                    } else {
-                        BxValue::new_null()
-                    };
-                    
-                    if fiber.frames.is_empty() {
-                        return Ok(Some(result));
-                    }
-                    
-                    fiber.stack.truncate(frame.stack_base);
-                    
-                    if frame.function.name.ends_with(".constructor") {
-                        let instance = fiber.stack.pop().unwrap();
-                        fiber.stack.push(instance);
-                    } else {
-                        // For regular function calls, the function itself was at stack_base - 1
-                        if frame.stack_base > 0 {
-                            fiber.stack.pop();
-                        }
-                        fiber.stack.push(result);
-                    }
+                OpCode::OpSetLocalPop(slot) => {
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack[base + slot] = val;
                 }
                 OpCode::OpConstant(idx) => {
                     let constant = self.read_constant(fiber_idx, idx);
                     self.fibers[fiber_idx].stack.push(constant);
+                }
+                OpCode::OpAddInt => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    // In NaN-boxing, we can just do raw add if we know they are ints
+                    self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_int() + b.as_int()));
+                }
+                OpCode::OpAddFloat => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() + b.as_number()));
                 }
                 OpCode::OpAdd => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -612,17 +615,6 @@ impl VM {
                         let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
                     }
-                }
-                OpCode::OpAddInt => {
-                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    // In NaN-boxing, we can just do raw add if we know they are ints
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_int() + b.as_int()));
-                }
-                OpCode::OpAddFloat => {
-                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() + b.as_number()));
                 }
                 OpCode::OpSubtract => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -681,76 +673,48 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() / b.as_number()));
                 }
-                OpCode::OpStringConcat => {
-                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a_s = self.to_box_string(a);
-                    let b_s = self.to_box_string(b);
-                    let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
-                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
-                }
-                OpCode::OpPrint(count) => {
-                    let mut args = Vec::with_capacity(count);
-                    for _ in 0..count {
-                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
-                    }
-                    args.reverse();
-                    let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
-                    print!("{}", out);
-                }
-                OpCode::OpPrintln(count) => {
-                    let mut args = Vec::with_capacity(count);
-                    for _ in 0..count {
-                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
-                    }
-                    args.reverse();
-                    let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
-                    println!("{}", out);
-                }
                 OpCode::OpPop => {
                     self.fibers[fiber_idx].stack.pop();
                 }
-                OpCode::OpDup => {
-                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
-                    self.fibers[fiber_idx].stack.push(val);
-                }
-                OpCode::OpSwap => {
-                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(b);
-                    self.fibers[fiber_idx].stack.push(a);
-                }
-                OpCode::OpOver => {
-                    let val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 2];
-                    self.fibers[fiber_idx].stack.push(val);
-                }
-                OpCode::OpInc => {
-                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if val.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() + 1.0));
-                    } else if val.is_int() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() + 1));
-                    } else {
-                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                        continue;
+                OpCode::OpJumpIfFalse(offset) => {
+                    if !self.is_truthy(*self.fibers[fiber_idx].stack.last().unwrap()) {
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
                     }
                 }
-                OpCode::OpDec => {
-                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if val.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() - 1.0));
-                    } else if val.is_int() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() - 1));
+                OpCode::OpJump(offset) => {
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
+                }
+                OpCode::OpLoop(offset) => {
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                }
+                OpCode::OpReturn => {
+                    let fiber = &mut self.fibers[fiber_idx];
+                    let frame = fiber.frames.pop().unwrap();
+                    let result = if fiber.stack.len() > frame.stack_base {
+                        fiber.stack.pop().unwrap()
                     } else {
-                        self.throw_error(fiber_idx, "Decrement operand must be a number")?;
-                        continue;
+                        BxValue::new_null()
+                    };
+                    
+                    if fiber.frames.is_empty() {
+                        return Ok(Some(result));
+                    }
+                    
+                    fiber.stack.truncate(frame.stack_base);
+                    
+                    if frame.function.name.ends_with(".constructor") {
+                        let instance = fiber.stack.pop().unwrap();
+                        fiber.stack.push(instance);
+                    } else {
+                        // For regular function calls, the function itself was at stack_base - 1
+                        if frame.stack_base > 0 {
+                            fiber.stack.pop();
+                        }
+                        fiber.stack.push(result);
                     }
                 }
-                OpCode::OpDefineGlobal(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx);
-                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.insert_global(name, val);
-                }
+
+                // --- Global / Scope Opcodes ---
                 OpCode::OpGetGlobal(idx) => {
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
@@ -836,21 +800,99 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpGetLocal(slot) => {
-                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
+                OpCode::OpDefineGlobal(idx) => {
+                    let name = self.read_string_constant(fiber_idx, idx);
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.insert_global(name, val);
+                }
+                OpCode::OpGetPrivate(idx) => {
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let val = if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
+                        if let Some(id) = receiver.as_gc_id() {
+                            if name == "this" {
+                                Some(receiver)
+                            } else if name == "variables" {
+                                if let GcObject::Instance(inst) = self.heap.get(id) {
+                                    let _vars = Rc::clone(&inst.variables);
+                                    // Should we return the actual variables scope as a struct/native object?
+                                    // For now just return a virtual struct that points to it.
+                                    Some(BxValue::new_ptr(self.heap.alloc(GcObject::Struct(BxStruct {
+                                        shape_id: self.shapes.get_root(),
+                                        properties: Vec::new(),
+                                    }))))
+                                } else { None }
+                            } else {
+                                if let GcObject::Instance(inst) = self.heap.get(id) {
+                                    let val = inst.variables.borrow().get(&name).copied().unwrap_or(BxValue::new_null());
+                                    Some(val)
+                                } else { None }
+                            }
+                        } else { None }
+                    } else {
+                        None
+                    };
+
+                    if let Some(v) = val {
+                        self.fibers[fiber_idx].stack.push(v);
+                    } else {
+                        self.throw_error(fiber_idx, &format!("'variables' scope only available in classes. Tried to access '{}'", name))?;
+                        continue;
+                    }
+                }
+                OpCode::OpSetPrivate(idx) => {
+                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
+                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
+                    if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
+                        if let Some(id) = receiver.as_gc_id() {
+                            if let GcObject::Instance(inst) = self.heap.get_mut(id) {
+                                inst.variables.borrow_mut().insert(name, val);
+                            }
+                        }
+                    } else {
+                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
+                        continue;
+                    }
+                }
+
+                // --- Stack Manipulation ---
+                OpCode::OpDup => {
+                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
                     self.fibers[fiber_idx].stack.push(val);
                 }
-                OpCode::OpSetLocal(slot) => {
-                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
-                    self.fibers[fiber_idx].stack[base + slot] = val;
+                OpCode::OpSwap => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    self.fibers[fiber_idx].stack.push(b);
+                    self.fibers[fiber_idx].stack.push(a);
                 }
-                OpCode::OpSetLocalPop(slot) => {
-                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                OpCode::OpOver => {
+                    let val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 2];
+                    self.fibers[fiber_idx].stack.push(val);
+                }
+                OpCode::OpInc => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack[base + slot] = val;
+                    if val.is_number() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() + 1.0));
+                    } else if val.is_int() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() + 1));
+                    } else {
+                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
+                        continue;
+                    }
                 }
+                OpCode::OpDec => {
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if val.is_number() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() - 1.0));
+                    } else if val.is_int() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() - 1));
+                    } else {
+                        self.throw_error(fiber_idx, "Decrement operand must be a number")?;
+                        continue;
+                    }
+                }
+
+                // --- Data Structures ---
                 OpCode::OpArray(count) => {
                     let mut items = Vec::with_capacity(count);
                     for _ in 0..count {
@@ -1239,6 +1281,16 @@ impl VM {
                         continue;
                     }
                 }
+                OpCode::OpStringConcat => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a_s = self.to_box_string(a);
+                    let b_s = self.to_box_string(b);
+                    let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
+                }
+
+                // --- Calls / Invocations ---
                 OpCode::OpCall(arg_count) => {
                     self.execute_call(fiber_idx, arg_count, None)?;
                 }
@@ -1273,6 +1325,46 @@ impl VM {
                     };
                     self.execute_invoke(fiber_idx, name, total_count, Some(names), ip_at_start)?;
                 }
+                OpCode::OpNew(arg_count) => {
+                    let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
+                    let class_val = self.fibers[fiber_idx].stack[class_idx];
+                    if let Some(id) = class_val.as_gc_id() {
+                        let class = if let GcObject::Class(c) = self.heap.get(id) {
+                            Some(Rc::clone(c))
+                        } else { None };
+
+                        if let Some(class) = class {
+                            let variables_scope = Rc::new(RefCell::new(HashMap::new()));
+                            
+                            let inst_id = self.heap.alloc(GcObject::Instance(BxInstance {
+                                class: Rc::clone(&class),
+                                shape_id: self.shapes.get_root(),
+                                properties: Vec::new(),
+                                variables: variables_scope.clone(),
+                            }));
+                            
+                            let instance_val = BxValue::new_ptr(inst_id);
+                            self.fibers[fiber_idx].stack[class_idx] = instance_val;
+
+                            let frame = CallFrame {
+                                function: Rc::clone(&class.borrow().constructor),
+                                ip: 0,
+                                stack_base: class_idx + 1 + arg_count,
+                                receiver: Some(instance_val),
+                                handlers: Vec::new(),
+                            };
+                            self.fibers[fiber_idx].frames.push(frame);
+                        } else {
+                            self.throw_error(fiber_idx, "Can only instantiate classes.")?;
+                            continue;
+                        }
+                    } else {
+                        self.throw_error(fiber_idx, "Can only instantiate classes.")?;
+                        continue;
+                    }
+                }
+
+                // --- Comparison ---
                 OpCode::OpEqual => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -1325,25 +1417,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpJump(offset) => {
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
-                }
-                OpCode::OpJumpIfFalse(offset) => {
-                    if !self.is_truthy(*self.fibers[fiber_idx].stack.last().unwrap()) {
-                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
-                    }
-                }
-                OpCode::OpLocalJumpIfNeConst(slot, const_idx, offset) => {
-                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
-                    let val = self.fibers[fiber_idx].stack[base + slot];
-                    let constant = self.read_constant(fiber_idx, const_idx);
-                    if val != constant {
-                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
-                    }
-                }
-                OpCode::OpLoop(offset) => {
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
-                }
+
+                // --- Control Flow / Misc ---
                 OpCode::OpIterNext(collection_slot, cursor_slot, offset, push_index) => {
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let collection_idx = base + collection_slot;
@@ -1410,90 +1485,12 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpNew(arg_count) => {
-                    let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
-                    let class_val = self.fibers[fiber_idx].stack[class_idx];
-                    if let Some(id) = class_val.as_gc_id() {
-                        let class = if let GcObject::Class(c) = self.heap.get(id) {
-                            Some(Rc::clone(c))
-                        } else { None };
-
-                        if let Some(class) = class {
-                            let variables_scope = Rc::new(RefCell::new(HashMap::new()));
-                            
-                            let inst_id = self.heap.alloc(GcObject::Instance(BxInstance {
-                                class: Rc::clone(&class),
-                                shape_id: self.shapes.get_root(),
-                                properties: Vec::new(),
-                                variables: variables_scope.clone(),
-                            }));
-                            
-                            let instance_val = BxValue::new_ptr(inst_id);
-                            self.fibers[fiber_idx].stack[class_idx] = instance_val;
-
-                            let frame = CallFrame {
-                                function: Rc::clone(&class.borrow().constructor),
-                                ip: 0,
-                                stack_base: class_idx + 1 + arg_count,
-                                receiver: Some(instance_val),
-                                handlers: Vec::new(),
-                            };
-                            self.fibers[fiber_idx].frames.push(frame);
-                        } else {
-                            self.throw_error(fiber_idx, "Can only instantiate classes.")?;
-                            continue;
-                        }
-                    } else {
-                        self.throw_error(fiber_idx, "Can only instantiate classes.")?;
-                        continue;
-                    }
-                }
-                OpCode::OpGetPrivate(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
-                    let val = if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
-                        if let Some(id) = receiver.as_gc_id() {
-                            if name == "this" {
-                                Some(receiver)
-                            } else if name == "variables" {
-                                if let GcObject::Instance(inst) = self.heap.get(id) {
-                                    let _vars = Rc::clone(&inst.variables);
-                                    // Should we return the actual variables scope as a struct/native object?
-                                    // For now just return a virtual struct that points to it.
-                                    Some(BxValue::new_ptr(self.heap.alloc(GcObject::Struct(BxStruct {
-                                        shape_id: self.shapes.get_root(),
-                                        properties: Vec::new(),
-                                    }))))
-                                } else { None }
-                            } else {
-                                if let GcObject::Instance(inst) = self.heap.get(id) {
-                                    let val = inst.variables.borrow().get(&name).copied().unwrap_or(BxValue::new_null());
-                                    Some(val)
-                                } else { None }
-                            }
-                        } else { None }
-                    } else {
-                        None
-                    };
-
-                    if let Some(v) = val {
-                        self.fibers[fiber_idx].stack.push(v);
-                    } else {
-                        self.throw_error(fiber_idx, &format!("'variables' scope only available in classes. Tried to access '{}'", name))?;
-                        continue;
-                    }
-                }
-                OpCode::OpSetPrivate(idx) => {
-                    let name = self.read_string_constant(fiber_idx, idx).to_lowercase();
-                    let val = *self.fibers[fiber_idx].stack.last().unwrap();
-                    if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
-                        if let Some(id) = receiver.as_gc_id() {
-                            if let GcObject::Instance(inst) = self.heap.get_mut(id) {
-                                inst.variables.borrow_mut().insert(name, val);
-                            }
-                        }
-                    } else {
-                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
-                        continue;
+                OpCode::OpLocalJumpIfNeConst(slot, const_idx, offset) => {
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack[base + slot];
+                    let constant = self.read_constant(fiber_idx, const_idx);
+                    if val != constant {
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset;
                     }
                 }
                 OpCode::OpPushHandler(offset) => {
@@ -1506,6 +1503,24 @@ impl VM {
                 OpCode::OpThrow => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.throw_value(fiber_idx, val)?;
+                }
+                OpCode::OpPrint(count) => {
+                    let mut args = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                    }
+                    args.reverse();
+                    let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
+                    print!("{}", out);
+                }
+                OpCode::OpPrintln(count) => {
+                    let mut args = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                    }
+                    args.reverse();
+                    let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
+                    println!("{}", out);
                 }
             }
         }

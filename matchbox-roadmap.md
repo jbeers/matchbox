@@ -47,7 +47,7 @@ javaInterop         ✅
 rustInterop         ✅
 imports
 includes?           
-named arguments
+named arguments     ✅
 argumentCollection
 
 ## Undecided
