@@ -106,6 +106,11 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
+    if args.contains(&"--version".to_string()) || args.contains(&"-v".to_string()) {
+        print_version();
+        return Ok(());
+    }
+
     let is_build = args.contains(&"--build".to_string());
     let target = if let Some(idx) = args.iter().position(|a| a == "--target") {
         args.get(idx + 1).map(|s| s.as_str())
@@ -140,11 +145,21 @@ fn print_usage() {
     println!("Usage: matchbox [options] [file.bxs|file.bxb|directory]");
     println!("\nOptions:");
     println!("  -h, --help          Show this help message");
+    println!("  -v, --version       Show version information");
     println!("  --build             Compile to bytecode (.bxb)");
     println!("  --target <native>   Produce a standalone native binary");
     println!("  --target <wasm>     Produce a standalone WASM binary");
     println!("  --target <js>       Produce a JavaScript module wrapper");
     println!("\nIf no file is provided, matchbox starts in REPL mode.");
+}
+
+fn print_version() {
+    let commit = env!("GIT_COMMIT");
+    let date = env!("BUILD_DATE");
+    let version = env!("CARGO_PKG_VERSION");
+    println!("matchbox version {}", version);
+    println!("commit: {}", commit);
+    println!("built on: {}", date);
 }
 
 pub fn process_file(path: &Path, is_build: bool, target: Option<&str>) -> Result<()> {
