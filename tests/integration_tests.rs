@@ -9,7 +9,7 @@ macro_rules! script_test {
             path.push("tests/scripts");
             path.push($file);
             
-            if let Err(e) = process_file(&path, false, None) {
+            if let Err(e) = process_file(&path, false, None, Vec::new(), false, false) {
                 panic!("Script {} failed: {}", $file, e);
             }
         }
@@ -51,5 +51,5 @@ script_test!(vm_on_missing_method, "vm_on_missing_method.bxs");
 fn vm_interface_fail() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/scripts/vm_interface_fail.bxs");
-    process_file(&path, false, None).unwrap();
+    process_file(&path, false, None, Vec::new(), false, false).unwrap();
 }
