@@ -1,3 +1,4 @@
+pub mod box_string;
 pub mod value;
 
 use std::fmt;
