@@ -47,5 +47,8 @@ pub enum OpCode {
     OpJump(usize),         // offset to jump forward
     OpJumpIfFalse(usize),  // offset to jump forward if top of stack is falsey
     OpLoop(usize),         // offset to jump backward
+    OpIncGlobal(usize),    // index in global_values (via IC)
+    OpCompareJump(usize, usize), // constant index (limit), jump offset if less than
+    OpGlobalCompareJump(usize, usize, usize), // name index, limit index, jump offset
     OpReturn,
 }

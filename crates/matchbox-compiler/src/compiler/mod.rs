@@ -361,28 +361,77 @@ impl Compiler {
                 }
 
                 let loop_start = self.chunk.code.len();
-
                 let mut exit_jump = None;
+                let mut optimized_condition = None;
+
                 if let Some(cond_expr) = condition {
-                    self.compile_expression(cond_expr)?;
-                    let jump_idx = self.chunk.code.len();
-                    self.chunk.write(OpCode::OpJumpIfFalse(0), stmt.line);
-                    self.chunk.write(OpCode::OpPop, stmt.line);
-                    exit_jump = Some(jump_idx);
+                    // Try to optimize i < CONST
+                    let mut handled = false;
+                    if let ExpressionKind::Binary { left, operator, right } = &cond_expr.kind {
+                        if *operator == "<" {
+                            if let (ExpressionKind::Identifier(name), ExpressionKind::Literal(Literal::Number(_))) = (&left.kind, &right.kind) {
+                                if self.resolve_local(name).is_none() && !self.is_class {
+                                    let name_lower = name.to_lowercase();
+                                    let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name_lower)));
+                                    let const_idx = if let ExpressionKind::Literal(Literal::Number(n)) = &right.kind {
+                                        self.chunk.add_constant(Constant::Number(*n))
+                                    } else { unreachable!() };
+                                    // Initial check (standard instructions)
+                                    self.compile_expression(cond_expr)?;
+                                    let jump_idx = self.chunk.code.len();
+                                    self.chunk.write(OpCode::OpJumpIfFalse(0), cond_expr.line);
+                                    self.chunk.write(OpCode::OpPop, cond_expr.line);
+                                    exit_jump = Some(jump_idx);
+                                    optimized_condition = Some((name_idx, const_idx));
+                                    handled = true;
+                                }
+                            }
+                        }
+                    }
+
+                    if !handled {
+                        self.compile_expression(cond_expr)?;
+                        let jump_idx = self.chunk.code.len();
+                        self.chunk.write(OpCode::OpJumpIfFalse(0), stmt.line);
+                        self.chunk.write(OpCode::OpPop, stmt.line);
+                        exit_jump = Some(jump_idx);
+                    }
                 }
+
+                let body_start = self.chunk.code.len();
 
                 for stmt in body {
                     self.compile_statement(stmt, false)?;
                 }
 
                 if let Some(update_expr) = update {
-                    self.compile_expression(update_expr)?;
-                    self.chunk.write(OpCode::OpPop, stmt.line);
+                    let mut optimized_update = false;
+                    if let ExpressionKind::Postfix { base, operator } = &update_expr.kind {
+                        if *operator == "++" {
+                            if let ExpressionKind::Identifier(name) = &base.kind {
+                                if self.resolve_local(name).is_none() && !self.is_class {
+                                    let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
+                                    self.chunk.write(OpCode::OpIncGlobal(name_idx), update_expr.line);
+                                    optimized_update = true;
+                                }
+                            }
+                        }
+                    }
+                    
+                    if !optimized_update {
+                        self.compile_expression(update_expr)?;
+                        self.chunk.write(OpCode::OpPop, stmt.line);
+                    }
                 }
 
-                let loop_end = self.chunk.code.len();
-                let offset = loop_end - loop_start + 1;
-                self.chunk.write(OpCode::OpLoop(offset), stmt.line);
+                if let Some((name_idx, const_idx)) = optimized_condition {
+                    let offset = self.chunk.code.len() - body_start + 1; // +1 for OpGlobalCompareJump itself
+                    self.chunk.write(OpCode::OpGlobalCompareJump(name_idx, const_idx, offset), stmt.line);
+                } else {
+                    let loop_end = self.chunk.code.len();
+                    let offset = loop_end - loop_start + 1;
+                    self.chunk.write(OpCode::OpLoop(offset), stmt.line);
+                }
 
                 if let Some(idx) = exit_jump {
                     let exit_target = self.chunk.code.len();

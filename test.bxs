@@ -8,4 +8,5 @@ for( i = 0; i < 10000000; i++ ) {
 timer = getTickCount() - timer
 
 println( "done")
+println( "final i: " & i )
 println( timer / 10000 & " seconds" )

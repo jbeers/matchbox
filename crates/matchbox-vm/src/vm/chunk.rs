@@ -47,4 +47,10 @@ impl Chunk {
         self.constants.push(value);
         self.constants.len() - 1
     }
+
+    pub fn ensure_caches(&mut self) {
+        if self.caches.len() < self.code.len() {
+            self.caches.resize(self.code.len(), None);
+        }
+    }
 }

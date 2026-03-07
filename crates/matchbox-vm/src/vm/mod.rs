@@ -304,7 +304,8 @@ impl VM {
         }
     }
 
-    pub fn interpret(&mut self, chunk: Chunk) -> Result<BxValue> {
+    pub fn interpret(&mut self, mut chunk: Chunk) -> Result<BxValue> {
+        chunk.ensure_caches();
         let constant_count = chunk.constants.len();
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
@@ -465,6 +466,85 @@ impl VM {
             self.fibers[fiber_idx].frames.last_mut().unwrap().ip += 1;
 
             match instruction {
+                OpCode::OpIncGlobal(idx) => {
+                    let ic = {
+                        let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                        let chunk = frame.function.chunk.borrow();
+                        chunk.caches[ip_at_start].clone()
+                    };
+
+                    if let Some(IcEntry::Global { index }) = ic {
+                        let val = self.global_values[index];
+                        if val.is_number() {
+                            self.global_values[index] = BxValue::new_number(val.as_number() + 1.0);
+                        } else {
+                            self.throw_error(fiber_idx, "Operand of increment must be a number")?;
+                            continue;
+                        }
+                    } else {
+                        // Slow path: resolve global and update IC
+                        let name = self.read_string_constant(fiber_idx, idx);
+                        let name_lower = name.to_lowercase();
+                        if let Some(&global_idx) = self.global_names.get(&name_lower) {
+                            let val = self.global_values[global_idx];
+                            if val.is_number() {
+                                self.global_values[global_idx] = BxValue::new_number(val.as_number() + 1.0);
+                                let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                                let mut chunk = frame.function.chunk.borrow_mut();
+                                chunk.caches[ip_at_start] = Some(IcEntry::Global { index: global_idx });
+                            } else {
+                                self.throw_error(fiber_idx, "Operand of increment must be a number")?;
+                                continue;
+                            }
+                        } else {
+                            self.throw_error(fiber_idx, &format!("Global {} not found", name))?;
+                            continue;
+                        }
+                    }
+                }
+                OpCode::OpCompareJump(const_idx, offset) => {
+                    let limit = self.read_constant(fiber_idx, const_idx);
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    
+                    if val.is_number() && limit.is_number() {
+                        if val.as_number() < limit.as_number() {
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                        }
+                    } else {
+                        self.throw_error(fiber_idx, "OpCompareJump expects numeric operands")?;
+                        continue;
+                    }
+                }
+                OpCode::OpGlobalCompareJump(name_idx, const_idx, offset) => {
+                    let ic = {
+                        let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                        let chunk = frame.function.chunk.borrow();
+                        chunk.caches[ip_at_start].clone()
+                    };
+
+                    let val = if let Some(IcEntry::Global { index }) = ic {
+                        self.global_values[index]
+                    } else {
+                        let name = self.read_string_constant(fiber_idx, name_idx);
+                        let name_lower = name.to_lowercase();
+                        if let Some(&global_idx) = self.global_names.get(&name_lower) {
+                            let v = self.global_values[global_idx];
+                            let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                            let mut chunk = frame.function.chunk.borrow_mut();
+                            chunk.caches[ip_at_start] = Some(IcEntry::Global { index: global_idx });
+                            v
+                        } else {
+                            BxValue::new_null()
+                        }
+                    };
+
+                    let limit = self.read_constant(fiber_idx, const_idx);
+                    if val.is_number() && limit.is_number() {
+                        if val.as_number() < limit.as_number() {
+                            self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset;
+                        }
+                    }
+                }
                 OpCode::OpReturn => {
                     let fiber = &mut self.fibers[fiber_idx];
                     let frame = fiber.frames.pop().unwrap();
