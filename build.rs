@@ -117,6 +117,7 @@ fn main() {
             ("aarch64-apple-darwin", "runner_stub_aarch64-apple-darwin", "matchbox_runner"),
             ("x86_64-pc-windows-msvc", "runner_stub_x86_64-pc-windows-msvc.exe", "matchbox_runner.exe"),
             ("aarch64-pc-windows-msvc", "runner_stub_aarch64-pc-windows-msvc.exe", "matchbox_runner.exe"),
+            ("x86_64-pc-windows-gnu", "runner_stub_x86_64-pc-windows-gnu.exe", "matchbox_runner.exe"),
         ];
 
         for (target, dest, src) in targets {
