@@ -31,6 +31,8 @@ fn main() {
     let stub_dest_dir = Path::new(&root_dir).join("stubs");
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not found");
     let stub_target_dir = Path::new(&out_dir).join("runner_target");
+    let src_dir = Path::new(&root_dir).join("src");
+    let stubs_rs_path = src_dir.join("stubs.rs");
 
     // Ensure stubs directory exists
     if !stub_dest_dir.exists() {
@@ -41,9 +43,14 @@ fn main() {
     
     println!("cargo:rerun-if-changed=crates/matchbox-runner/src/main.rs");
     println!("cargo:rerun-if-changed=crates/matchbox-runner/Cargo.toml");
+    println!("cargo:rerun-if-changed=build.rs");
+
+    let mut stubs_rs_content = String::from("use std::collections::HashMap;\n\n");
+    stubs_rs_content.push_str("pub fn get_stub(target: &str) -> Option<&'static [u8]> {\n");
+    stubs_rs_content.push_str("    let mut stubs: HashMap<&str, &[u8]> = HashMap::new();\n");
 
     // Helper closure to build and copy a stub
-    let build_stub = |target: Option<&str>, dest_name: &str, src_name: &str| {
+    let mut build_stub = |target: Option<&str>, dest_name: &str, src_name: &str, alias: &str, stubs_rs: &mut String| {
         let dest_path = stub_dest_dir.join(dest_name);
         
         let mut cmd = Command::new(&cargo);
@@ -90,9 +97,43 @@ fn main() {
                 let _ = fs::write(&dest_path, b"");
             }
         }
+        
+        stubs_rs.push_str(&format!("    stubs.insert(\"{}\", include_bytes!(\"../stubs/{}\"));\n", alias, dest_name));
+        if let Some(t) = target {
+            stubs_rs.push_str(&format!("    stubs.insert(\"{}\", include_bytes!(\"../stubs/{}\"));\n", t, dest_name));
+        }
     };
 
-    let native_src_name = if cfg!(windows) { "matchbox_runner.exe" } else { "matchbox_runner" };
-    build_stub(None, "runner_stub_native", native_src_name);
-    build_stub(Some("wasm32-wasip1"), "runner_stub_wasip1.wasm", "matchbox_runner.wasm");
+    let host = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
+    
+    // Always build WASI if possible
+    build_stub(Some("wasm32-wasip1"), "runner_stub_wasip1.wasm", "matchbox_runner.wasm", "wasi", &mut stubs_rs_content);
+
+    if cfg!(feature = "cross-compile") {
+        let targets = vec![
+            ("x86_64-unknown-linux-gnu", "runner_stub_x86_64-unknown-linux-gnu", "matchbox_runner"),
+            ("aarch64-unknown-linux-gnu", "runner_stub_aarch64-unknown-linux-gnu", "matchbox_runner"),
+            ("x86_64-apple-darwin", "runner_stub_x86_64-apple-darwin", "matchbox_runner"),
+            ("aarch64-apple-darwin", "runner_stub_aarch64-apple-darwin", "matchbox_runner"),
+            ("x86_64-pc-windows-msvc", "runner_stub_x86_64-pc-windows-msvc.exe", "matchbox_runner.exe"),
+            ("aarch64-pc-windows-msvc", "runner_stub_aarch64-pc-windows-msvc.exe", "matchbox_runner.exe"),
+        ];
+
+        for (target, dest, src) in targets {
+            build_stub(Some(target), dest, src, target, &mut stubs_rs_content);
+            if target == host {
+                stubs_rs_content.push_str(&format!("    stubs.insert(\"host\", include_bytes!(\"../stubs/{}\"));\n", dest));
+            }
+        }
+    } else {
+        let native_src_name = if cfg!(windows) { "matchbox_runner.exe" } else { "matchbox_runner" };
+        let dest_name = format!("runner_stub_{}", host);
+        build_stub(None, &dest_name, native_src_name, "host", &mut stubs_rs_content);
+        stubs_rs_content.push_str(&format!("    stubs.insert(\"{}\", include_bytes!(\"../stubs/{}\"));\n", host, dest_name));
+    }
+
+    stubs_rs_content.push_str("    stubs.get(target).copied()\n");
+    stubs_rs_content.push_str("}\n");
+
+    fs::write(&stubs_rs_path, stubs_rs_content).expect("Failed to write src/stubs.rs");
 }

@@ -12,8 +12,8 @@ use wasm_bindgen::prelude::*;
 
 const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
-const NATIVE_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_native");
-const WASI_RUNNER_STUB: &[u8] = include_bytes!("../stubs/runner_stub_wasip1.wasm");
+mod stubs;
+
 const JS_GLUE_TEMPLATE: &str = include_str!("../stubs/js_bundle_template.js");
 
 #[cfg(target_arch = "wasm32")]
@@ -205,11 +205,10 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
             }
 
             match t {
-                "native" => produce_native_binary(&chunk, path)?,
                 "wasi" => produce_wasi_binary(&chunk, path)?,
                 "wasm" => produce_wasm_binary(&chunk, path)?,
                 "js" => produce_js_bundle(&chunk, path, &ast)?,
-                _ => bail!("Unknown target: {}", t),
+                target => produce_native_binary(&chunk, path, target)?,
             }
         } else {
             run_chunk(chunk)?;
@@ -222,7 +221,7 @@ fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement]) 
     let bytecode = bincode::serialize(chunk)?;
     let b64_bytecode = base64_simd::STANDARD.encode_to_string(&bytecode);
     
-    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
+    let wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }
@@ -362,8 +361,13 @@ fn load_wasm_custom_section() -> Result<Chunk> {
     bail!("Custom section loading requires host support in this POC")
 }
 
-fn produce_native_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let mut binary_bytes = NATIVE_RUNNER_STUB.to_vec();
+fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str) -> Result<()> {
+    let stub_key = if target == "native" { "host" } else { target };
+    let native_bytes = stubs::get_stub(stub_key).unwrap_or(&[]);
+    if native_bytes.is_empty() {
+        bail!("Runner stub for target '{}' is missing. Please ensure the cross-compile feature is enabled and the target is supported.", target);
+    }
+    let mut binary_bytes = native_bytes.to_vec();
     let chunk_bytes = bincode::serialize(chunk)?;
     let chunk_len = chunk_bytes.len() as u64;
     binary_bytes.extend_from_slice(&chunk_bytes);
@@ -557,7 +561,7 @@ impl BoxLangVM {
 }
 
 fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
+    let wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }
@@ -581,7 +585,7 @@ fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
 }
 
 fn produce_wasm_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let wasm_bytes = WASI_RUNNER_STUB.to_vec();
+    let wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }

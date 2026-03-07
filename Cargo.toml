@@ -23,6 +23,10 @@ base64-simd = "0.8.0"
 wasm-bindgen = "0.2.100"
 js-sys = "0.3.77"
 
+[features]
+default = []
+cross-compile = []
+
 [profile.release]
 opt-level = "z"     # Optimize for size
 lto = true          # Enable Link Time Optimization
