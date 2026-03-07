@@ -1,2 +1,14 @@
-/target
-/stubs
+target/
+**/target/
+/stubs/
+*.wasm
+*.bxb
+.DS_Store
+**/.DS_Store
+/test
+/test_fn
+/test.js
+/test.wasm
+/pkg/
+/Dockerfile
+/fusion_build/

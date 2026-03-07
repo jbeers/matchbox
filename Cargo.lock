@@ -398,15 +398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "matchbox_runner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "matchbox_vm",
-]
-
-[[package]]
 name = "matchbox_vm"
 version = "0.1.0"
 dependencies = [
