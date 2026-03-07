@@ -50,6 +50,20 @@ impl BxVM for VM {
         self.spawn(func, args)
     }
 
+    fn spawn_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String> {
+        if let Some(id) = func.as_gc_id() {
+            let obj = self.heap.get(id);
+            if let GcObject::CompiledFunction(f) = obj {
+                let f = Rc::clone(f);
+                Ok(self.spawn(f, args))
+            } else {
+                Err("Value is not a callable function".to_string())
+            }
+        } else {
+            Err("Value is not a callable function".to_string())
+        }
+    }
+
     fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String> {
         self.call_function_value(*func, args).map_err(|e| e.to_string())
     }
@@ -237,8 +251,9 @@ impl VM {
 
 
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
+        let name = method_name.to_lowercase();
         if receiver.is_number() {
-            return match method_name {
+            return match name.as_str() {
                 "abs" => Some("abs".to_string()),
                 "round" => Some("round".to_string()),
                 _ => None,
@@ -247,13 +262,13 @@ impl VM {
 
         if let Some(id) = receiver.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(_) => match method_name {
+                GcObject::String(_) => match name.as_str() {
                     "len" | "length" => Some("len".to_string()),
                     "ucase" | "touppercase" => Some("ucase".to_string()),
                     "lcase" | "tolowercase" => Some("lcase".to_string()),
                     _ => None,
                 },
-                GcObject::Array(_) => match method_name {
+                GcObject::Array(_) => match name.as_str() {
                     "len" | "length" | "count" => Some("len".to_string()),
                     "append" | "add" => Some("arrayappend".to_string()),
                     "each" => Some("arrayeach".to_string()),
@@ -263,13 +278,13 @@ impl VM {
                     "tolist" => Some("arraytolist".to_string()),
                     _ => None,
                 },
-                GcObject::Struct(_) => match method_name {
+                GcObject::Struct(_) => match name.as_str() {
                     "len" | "count" => Some("len".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
                     "each" => Some("structeach".to_string()),
                     _ => None,
                 },
-                GcObject::Future(_) => match method_name {
+                GcObject::Future(_) => match name.as_str() {
                     "onerror" => Some("futureonerror".to_string()),
                     _ => None,
                 },
@@ -1575,7 +1590,8 @@ impl VM {
             }
             self.fibers[fiber_idx].frames.pop();
         }
-        bail!("VM Runtime Error: {}{}\n(at {} line {})", val, source_snippet, filename, line);
+        let val_str = self.to_string(val);
+        bail!("VM Runtime Error: {}{}\n(at {} line {})", val_str, source_snippet, filename, line);
     }
 
     pub fn call_function(&mut self, name: &str, args: Vec<BxValue>) -> Result<BxValue> {

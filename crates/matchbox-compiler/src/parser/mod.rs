@@ -97,6 +97,22 @@ fn parse_args(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::Argum
     Ok(args)
 }
 
+fn parse_variable_decl_core(pair: pest::iterators::Pair<Rule>, line: u32) -> Result<Statement> {
+    let mut inner_rules = pair.into_inner();
+    let _kw = inner_rules.next().unwrap(); // var_keyword
+    let assignment_rule = inner_rules.next().unwrap();
+    let mut assignment_inner = assignment_rule.into_inner();
+    let target_rule = assignment_inner.next().unwrap();
+    let target = parse_target(target_rule)?;
+    let value = parse_expression(assignment_inner.next().unwrap())?;
+    
+    if let AssignmentTarget::Identifier(name) = target {
+        Ok(Statement::new(StatementKind::VariableDecl { name, value }, line))
+    } else {
+        bail!("'var' only supported for simple identifiers");
+    }
+}
+
 fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
     let line = pair.as_span().start_pos().line_col().0 as u32;
     let rule = pair.as_rule();
@@ -341,19 +357,11 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             Ok(Statement::new(StatementKind::Throw(expr), line))
         }
         Rule::variable_decl => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // var_keyword
-            let assignment_rule = inner_rules.next().unwrap();
-            let mut assignment_inner = assignment_rule.into_inner();
-            let target_rule = assignment_inner.next().unwrap();
-            let target = parse_target(target_rule)?;
-            let value = parse_expression(assignment_inner.next().unwrap())?;
-            
-            if let AssignmentTarget::Identifier(name) = target {
-                Ok(Statement::new(StatementKind::VariableDecl { name, value }, line))
-            } else {
-                bail!("'var' only supported for simple identifiers");
-            }
+            let inner = pair.into_inner().next().unwrap(); // variable_decl_core
+            parse_variable_decl_core(inner, line)
+        }
+        Rule::variable_decl_core => {
+            parse_variable_decl_core(pair, line)
         }
         Rule::assignment => {
             let expr = parse_expression(pair)?;

@@ -46,7 +46,8 @@ return_keyword = @{ "return" ~ !ASCII_ALPHANUMERIC }
 return_stmt = { return_keyword ~ expression? ~ ";"? }
 
 var_keyword = @{ "var" ~ !ASCII_ALPHANUMERIC }
-variable_decl = { var_keyword ~ assignment ~ ";"? }
+variable_decl_core = { var_keyword ~ assignment }
+variable_decl = { variable_decl_core ~ ";"? }
 
 required_keyword = @{ "required" ~ !ASCII_ALPHANUMERIC }
 param_decl = { required_keyword? ~ (type_name ~ identifier | identifier) ~ ("=" ~ expression)? }
@@ -58,7 +59,7 @@ for_loop = { for_keyword ~ "(" ~ (for_in | for_classic) ~ ")" ~ block }
 in_keyword = @{ "in" ~ !ASCII_ALPHANUMERIC }
 for_in = { identifier ~ ("," ~ identifier)? ~ in_keyword ~ expression }
 for_classic = { init? ~ ";" ~ condition? ~ ";" ~ update? }
-init = { variable_decl | assignment | expression }
+init = { variable_decl_core | assignment | expression }
 condition = { expression }
 update = { expression }
 

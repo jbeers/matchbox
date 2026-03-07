@@ -103,6 +103,7 @@ impl BxValue {
 
 pub trait BxVM {
     fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue;
+    fn spawn_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String>;
     fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>) -> Result<BxValue, String>;
     fn yield_fiber(&mut self);
     fn sleep(&mut self, ms: u64);

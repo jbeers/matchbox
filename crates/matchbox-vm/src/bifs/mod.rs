@@ -237,10 +237,9 @@ fn bx_yield(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_null())
 }
 
-fn run_async(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn run_async(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Err("runAsync() expects at least 1 argument".to_string()); }
-    // Needs access to Rc<BxCompiledFunction> from BxValue ptr
-    Err("runAsync not yet implemented for NaN-boxing".to_string())
+    vm.spawn_by_value(&args[0], Vec::new())
 }
 
 fn create_object(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
