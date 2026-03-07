@@ -14,7 +14,7 @@ const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
 mod stubs;
 
-const JS_GLUE_TEMPLATE: &str = include_str!("../stubs/js_bundle_template.js");
+const JS_GLUE_TEMPLATE: &str = include_str!("js_bundle_template.js");
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

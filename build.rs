@@ -50,7 +50,7 @@ fn main() {
     stubs_rs_content.push_str("    let mut stubs: HashMap<&str, &[u8]> = HashMap::new();\n");
 
     // Helper closure to build and copy a stub
-    let mut build_stub = |target: Option<&str>, dest_name: &str, src_name: &str, alias: &str, stubs_rs: &mut String| {
+    let build_stub = |target: Option<&str>, dest_name: &str, src_name: &str, alias: &str, stubs_rs: &mut String| {
         let dest_path = stub_dest_dir.join(dest_name);
         
         if !dest_path.exists() {
