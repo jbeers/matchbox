@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use crate::ast::{Expression, ExpressionKind, Literal, Statement, StatementKind, StringPart, FunctionBody, ClassMember};
-use matchbox_vm::types::{BxValue, BxCompiledFunction, BxClass, BxInterface};
+use matchbox_vm::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, Constant};
 use matchbox_vm::Chunk;
 use matchbox_vm::vm::opcode::OpCode;
 use std::rc::Rc;
@@ -71,9 +71,9 @@ impl Compiler {
                     match member {
                         ClassMember::Property(prop_name) => {
                             properties.push(prop_name.clone());
-                            let null_idx = constructor_compiler.chunk.add_constant(BxValue::Null);
+                            let null_idx = constructor_compiler.chunk.add_constant(Constant::Null);
                             constructor_compiler.chunk.write(OpCode::OpConstant(null_idx), stmt.line);
-                            let name_idx = constructor_compiler.chunk.add_constant(BxValue::String(prop_name.clone()));
+                            let name_idx = constructor_compiler.chunk.add_constant(Constant::String(prop_name.clone()));
                             constructor_compiler.chunk.write(OpCode::OpSetPrivate(name_idx), stmt.line);
                             constructor_compiler.chunk.write(OpCode::OpPop, stmt.line);
                         }
@@ -108,16 +108,18 @@ impl Compiler {
                         if !methods.contains_key(&getter_name.to_lowercase()) {
                             let mut getter_chunk = Chunk::default();
                             getter_chunk.filename = self.chunk.filename.clone();
-                            let name_idx = getter_chunk.add_constant(BxValue::String(prop.clone()));
+                            let name_idx = getter_chunk.add_constant(Constant::String(prop.clone()));
                             getter_chunk.write(OpCode::OpGetPrivate(name_idx), stmt.line);
                             getter_chunk.write(OpCode::OpReturn, stmt.line);
                             
+                            let constant_count = getter_chunk.constants.len();
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, getter_name),
                                 arity: 0,
                                 min_arity: 0,
                                 params: Vec::new(),
                                 chunk: Rc::new(RefCell::new(getter_chunk)),
+                                promoted_constants: RefCell::new(vec![None; constant_count]),
                             };
                             methods.insert(getter_name.to_lowercase(), Rc::new(func));
                         }
@@ -128,16 +130,18 @@ impl Compiler {
                             let mut setter_chunk = Chunk::default();
                             setter_chunk.filename = self.chunk.filename.clone();
                             setter_chunk.write(OpCode::OpGetLocal(0), stmt.line);
-                            let name_idx = setter_chunk.add_constant(BxValue::String(prop.clone()));
+                            let name_idx = setter_chunk.add_constant(Constant::String(prop.clone()));
                             setter_chunk.write(OpCode::OpSetPrivate(name_idx), stmt.line);
                             setter_chunk.write(OpCode::OpReturn, stmt.line);
                             
+                            let constant_count = setter_chunk.constants.len();
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, setter_name),
                                 arity: 1,
                                 min_arity: 1,
                                 params: vec!["val".to_string()],
                                 chunk: Rc::new(RefCell::new(setter_chunk)),
+                                promoted_constants: RefCell::new(vec![None; constant_count]),
                             };
                             methods.insert(setter_name.to_lowercase(), Rc::new(func));
                         }
@@ -153,23 +157,22 @@ impl Compiler {
                         // Look in local/global scope
                         // This POC assumes interfaces are in globals if not qualified
                         self.chunk.constants.iter().find_map(|c| {
-                            if let BxValue::Interface(i) = c {
-                                if i.borrow().name.to_lowercase() == iface_name.to_lowercase() {
-                                    return Some(BxValue::Interface(Rc::clone(i)));
+                            if let Constant::Interface(i) = c {
+                                if i.name.to_lowercase() == iface_name.to_lowercase() {
+                                    return Some(Constant::Interface(i.clone()));
                                 }
                             }
                             None
                         }).ok_or_else(|| anyhow::anyhow!("Interface {} not found", iface_name))?
                     };
 
-                    if let BxValue::Interface(iface) = iface_val {
-                        let iface_ref = iface.borrow();
-                        for (method_name, method_opt) in &iface_ref.methods {
+                    if let Constant::Interface(iface) = iface_val {
+                        for (method_name, method_opt) in &iface.methods {
                             if !methods.contains_key(method_name) {
                                 if let Some(default_impl) = method_opt {
                                     methods.insert(method_name.clone(), Rc::clone(default_impl));
                                 } else {
-                                    bail!("Class {} must implement abstract method {} from interface {}", name, method_name, iface_ref.name);
+                                    bail!("Class {} must implement abstract method {} from interface {}", name, method_name, iface.name);
                                 }
                             }
                         }
@@ -178,21 +181,30 @@ impl Compiler {
                 
                 constructor_compiler.chunk.write(OpCode::OpReturn, stmt.line);
                 
+                let constructor_constant_count = constructor_compiler.chunk.constants.len();
+                let constructor = BxCompiledFunction {
+                    name: format!("{}.constructor", name),
+                    arity: 0,
+                    min_arity: 0,
+                    params: Vec::new(),
+                    chunk: Rc::new(RefCell::new(constructor_compiler.chunk)),
+                    promoted_constants: RefCell::new(vec![None; constructor_constant_count]),
+                };
+
                 let class = BxClass {
                     name: name.clone(),
-                    extends: extends.clone(),
-                    implements: implements.clone(),
-                    constructor: Rc::new(RefCell::new(constructor_compiler.chunk)),
+                    extends: extends.as_ref().map(|s| s.to_lowercase()),
+                    implements: implements.iter().map(|s| s.to_lowercase()).collect(),
+                    constructor: Rc::new(constructor),
                     methods,
                 };
-                
-                let class_idx = self.chunk.add_constant(BxValue::Class(Rc::new(RefCell::new(class))));
+
+                let class_idx = self.chunk.add_constant(Constant::Class(class));
                 self.chunk.write(OpCode::OpConstant(class_idx), stmt.line);
-                let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                 self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 Ok(())
-            }
-            StatementKind::InterfaceDecl { name, members } => {
+                }            StatementKind::InterfaceDecl { name, members } => {
                 let mut methods = HashMap::new();
                 for member in members {
                     if let StatementKind::FunctionDecl { name: func_name, access_modifier: _, return_type: _, params, body } = &member.kind {
@@ -215,9 +227,9 @@ impl Compiler {
                     name: name.clone(),
                     methods,
                 };
-                let iface_idx = self.chunk.add_constant(BxValue::Interface(Rc::new(RefCell::new(iface))));
+                let iface_idx = self.chunk.add_constant(Constant::Interface(iface));
                 self.chunk.write(OpCode::OpConstant(iface_idx), stmt.line);
-                let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                 self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 Ok(())
             }
@@ -232,7 +244,7 @@ impl Compiler {
                 if let Some(e) = expr {
                     self.compile_expression(e)?;
                 } else {
-                    let null_idx = self.chunk.add_constant(BxValue::Null);
+                    let null_idx = self.chunk.add_constant(Constant::Null);
                     self.chunk.write(OpCode::OpConstant(null_idx), stmt.line);
                 }
                 self.chunk.write(OpCode::OpReturn, stmt.line);
@@ -242,7 +254,7 @@ impl Compiler {
                 if let Some(e) = expr {
                     self.compile_expression(e)?;
                 } else {
-                    let null_idx = self.chunk.add_constant(BxValue::Null);
+                    let null_idx = self.chunk.add_constant(Constant::Null);
                     self.chunk.write(OpCode::OpConstant(null_idx), stmt.line);
                 }
                 self.chunk.write(OpCode::OpThrow, stmt.line);
@@ -301,7 +313,7 @@ impl Compiler {
                     if self.is_repl && is_last {
                         self.chunk.write(OpCode::OpDup, stmt.line);
                     }
-                    let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                    let name_idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                     self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 }
                 Ok(())
@@ -385,12 +397,12 @@ impl Compiler {
             StatementKind::FunctionDecl { name, access_modifier: _, return_type: _, params, body } => {
                 let func = self.compile_function(&name, &params, &body)?;
                 if self.is_repl && is_last {
-                    let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func.clone())));
+                    let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func.clone()));
                     self.chunk.write(OpCode::OpConstant(func_idx), stmt.line);
                 }
-                let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func)));
+                let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                 self.chunk.write(OpCode::OpConstant(func_idx), stmt.line);
-                let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                 self.chunk.write(OpCode::OpDefineGlobal(name_idx), stmt.line);
                 Ok(())
             }
@@ -401,7 +413,7 @@ impl Compiler {
                 let collection_slot = self.locals.len();
                 self.locals.push(Local { name: "$collection".to_string(), depth: self.scope_depth });
 
-                let zero_idx = self.chunk.add_constant(BxValue::Number(0.0));
+                let zero_idx = self.chunk.add_constant(Constant::Number(0.0));
                 self.chunk.write(OpCode::OpConstant(zero_idx), stmt.line);
                 let cursor_slot = self.locals.len();
                 self.locals.push(Local { name: "$cursor".to_string(), depth: self.scope_depth });
@@ -454,7 +466,7 @@ impl Compiler {
                     let class_idx = self.chunk.add_constant(class_val);
                     self.chunk.write(OpCode::OpConstant(class_idx), expr.line);
                 } else {
-                    let class_idx = self.chunk.add_constant(BxValue::String(resolved_path));
+                    let class_idx = self.chunk.add_constant(Constant::String(resolved_path));
                     self.chunk.write(OpCode::OpGetGlobal(class_idx), expr.line);
                 }
                 
@@ -476,9 +488,9 @@ impl Compiler {
                 
                 // Automatically call init() if args were passed
                 if !args.is_empty() {
-                    let name_idx = self.chunk.add_constant(BxValue::String("init".to_string()));
+                    let name_idx = self.chunk.add_constant(Constant::String("init".to_string()));
                     if has_named {
-                        let names_idx = self.chunk.add_constant(BxValue::StringArray(arg_names));
+                        let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                         self.chunk.write(OpCode::OpInvokeNamed(name_idx, args.len(), names_idx), expr.line);
                     } else {
                         self.chunk.write(OpCode::OpInvoke(name_idx, args.len()), expr.line);
@@ -489,13 +501,13 @@ impl Compiler {
             }
             ExpressionKind::Literal(lit) => match lit {
                 Literal::Number(n) => {
-                    let idx = self.chunk.add_constant(BxValue::Number(*n));
+                    let idx = self.chunk.add_constant(Constant::Number(*n));
                     self.chunk.write(OpCode::OpConstant(idx), expr.line);
                     Ok(())
                 }
                 Literal::String(parts) => {
                     if parts.is_empty() {
-                        let idx = self.chunk.add_constant(BxValue::String("".to_string()));
+                        let idx = self.chunk.add_constant(Constant::String("".to_string()));
                         self.chunk.write(OpCode::OpConstant(idx), expr.line);
                         return Ok(());
                     }
@@ -507,12 +519,12 @@ impl Compiler {
                     Ok(())
                 }
                 Literal::Boolean(b) => {
-                    let idx = self.chunk.add_constant(BxValue::Boolean(*b));
+                    let idx = self.chunk.add_constant(Constant::Boolean(*b));
                     self.chunk.write(OpCode::OpConstant(idx), expr.line);
                     Ok(())
                 }
                 Literal::Null => {
-                    let idx = self.chunk.add_constant(BxValue::Null);
+                    let idx = self.chunk.add_constant(Constant::Null);
                     self.chunk.write(OpCode::OpConstant(idx), expr.line);
                     Ok(())
                 }
@@ -527,7 +539,7 @@ impl Compiler {
                     for (key_expr, val_expr) in members {
                         match &key_expr.kind {
                             ExpressionKind::Identifier(name) => {
-                                let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                                let idx = self.chunk.add_constant(Constant::String(name.clone()));
                                 self.chunk.write(OpCode::OpConstant(idx), expr.line);
                             }
                             _ => self.compile_expression(key_expr)?,
@@ -539,7 +551,7 @@ impl Compiler {
                 }
                 Literal::Function { params, body } => {
                     let func = self.compile_function("anonymous", &params, &body)?;
-                    let func_idx = self.chunk.add_constant(BxValue::CompiledFunction(Rc::new(func)));
+                    let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                     self.chunk.write(OpCode::OpConstant(func_idx), expr.line);
                     Ok(())
                 }
@@ -566,18 +578,18 @@ impl Compiler {
             ExpressionKind::Identifier(name) => {
                 let lower_name = name.to_lowercase();
                 if lower_name == "this" {
-                    let idx = self.chunk.add_constant(BxValue::String("this".to_string()));
+                    let idx = self.chunk.add_constant(Constant::String("this".to_string()));
                     self.chunk.write(OpCode::OpGetPrivate(idx), expr.line);
                 } else if lower_name == "variables" {
-                    let idx = self.chunk.add_constant(BxValue::String("variables".to_string()));
+                    let idx = self.chunk.add_constant(Constant::String("variables".to_string()));
                     self.chunk.write(OpCode::OpGetPrivate(idx), expr.line);
-                } else if let Some(slot) = self.resolve_local(name) {
+                } else if let Some(slot) = self.resolve_local(&name) {
                     self.chunk.write(OpCode::OpGetLocal(slot), expr.line);
                 } else if self.is_class {
-                    let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                    let idx = self.chunk.add_constant(Constant::String(lower_name));
                     self.chunk.write(OpCode::OpGetPrivate(idx), expr.line);
                 } else {
-                    let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                    let idx = self.chunk.add_constant(Constant::String(lower_name));
                     self.chunk.write(OpCode::OpGetGlobal(idx), expr.line);
                 }
                 Ok(())
@@ -590,20 +602,20 @@ impl Compiler {
                             bail!("Cannot assign to the 'variables' scope directly");
                         }
                         self.compile_expression(value)?;
-                        if let Some(slot) = self.resolve_local(name) {
+                        if let Some(slot) = self.resolve_local(&name) {
                             self.chunk.write(OpCode::OpSetLocal(slot), expr.line);
                         } else if self.is_class {
-                            let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let name_idx = self.chunk.add_constant(Constant::String(lower_name));
                             self.chunk.write(OpCode::OpSetPrivate(name_idx), expr.line);
                         } else {
-                            let name_idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let name_idx = self.chunk.add_constant(Constant::String(lower_name));
                             self.chunk.write(OpCode::OpSetGlobal(name_idx), expr.line);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base, member } => {
                         self.compile_expression(base)?;
                         self.compile_expression(value)?;
-                        let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                        let name_idx = self.chunk.add_constant(Constant::String(member.to_lowercase()));
                         self.chunk.write(OpCode::OpSetMember(name_idx), expr.line);
                     }
                     crate::ast::AssignmentTarget::Index { base, index } => {
@@ -621,7 +633,7 @@ impl Compiler {
                 
                 for arg in args {
                     if let Some(name) = &arg.name {
-                        arg_names.push(name.clone());
+                        arg_names.push(name.to_lowercase());
                         has_named = true;
                     } else {
                         arg_names.push("".to_string());
@@ -635,7 +647,7 @@ impl Compiler {
                             self.compile_expression(&arg.value)?;
                         }
                         self.chunk.write(OpCode::OpPrintln(args.len()), expr.line);
-                        let null_idx = self.chunk.add_constant(BxValue::Null);
+                        let null_idx = self.chunk.add_constant(Constant::Null);
                         self.chunk.write(OpCode::OpConstant(null_idx), expr.line);
                         return Ok(());
                     }
@@ -644,7 +656,7 @@ impl Compiler {
                             self.compile_expression(&arg.value)?;
                         }
                         self.chunk.write(OpCode::OpPrint(args.len()), expr.line);
-                        let null_idx = self.chunk.add_constant(BxValue::Null);
+                        let null_idx = self.chunk.add_constant(Constant::Null);
                         self.chunk.write(OpCode::OpConstant(null_idx), expr.line);
                         return Ok(());
                     }
@@ -655,9 +667,9 @@ impl Compiler {
                     for arg in args {
                         self.compile_expression(&arg.value)?;
                     }
-                    let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                    let name_idx = self.chunk.add_constant(Constant::String(member.to_lowercase()));
                     if has_named {
-                        let names_idx = self.chunk.add_constant(BxValue::StringArray(arg_names));
+                        let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                         self.chunk.write(OpCode::OpInvokeNamed(name_idx, args.len(), names_idx), expr.line);
                     } else {
                         self.chunk.write(OpCode::OpInvoke(name_idx, args.len()), expr.line);
@@ -670,7 +682,7 @@ impl Compiler {
                     self.compile_expression(&arg.value)?;
                 }
                 if has_named {
-                    let names_idx = self.chunk.add_constant(BxValue::StringArray(arg_names));
+                    let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                     self.chunk.write(OpCode::OpCallNamed(args.len(), names_idx), expr.line);
                 } else {
                     self.chunk.write(OpCode::OpCall(args.len()), expr.line);
@@ -685,7 +697,7 @@ impl Compiler {
             }
             ExpressionKind::MemberAccess { base, member } => {
                 self.compile_expression(base)?;
-                let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                let name_idx = self.chunk.add_constant(Constant::String(member.to_lowercase()));
                 self.chunk.write(OpCode::OpMember(name_idx), expr.line);
                 Ok(())
             }
@@ -698,20 +710,20 @@ impl Compiler {
                         } else {
                             self.chunk.write(OpCode::OpDec, expr.line);
                         }
-                        if let Some(slot) = self.resolve_local(name) {
+                        if let Some(slot) = self.resolve_local(&name) {
                             self.chunk.write(OpCode::OpSetLocal(slot), expr.line);
                         } else if self.is_class {
-                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                             self.chunk.write(OpCode::OpSetPrivate(idx), expr.line);
                         } else {
-                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                             self.chunk.write(OpCode::OpSetGlobal(idx), expr.line);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base, member } => {
                         self.compile_expression(base)?;
                         self.chunk.write(OpCode::OpDup, expr.line);
-                        let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                        let name_idx = self.chunk.add_constant(Constant::String(member.to_lowercase()));
                         self.chunk.write(OpCode::OpMember(name_idx), expr.line);
                         if operator == "++" {
                             self.chunk.write(OpCode::OpInc, expr.line);
@@ -736,13 +748,13 @@ impl Compiler {
                         } else {
                             self.chunk.write(OpCode::OpDec, expr.line);
                         }
-                        if let Some(slot) = self.resolve_local(name) {
+                        if let Some(slot) = self.resolve_local(&name) {
                             self.chunk.write(OpCode::OpSetLocal(slot), expr.line);
                         } else if self.is_class {
-                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                             self.chunk.write(OpCode::OpSetPrivate(idx), expr.line);
                         } else {
-                            let idx = self.chunk.add_constant(BxValue::String(name.clone()));
+                            let idx = self.chunk.add_constant(Constant::String(name.to_lowercase()));
                             self.chunk.write(OpCode::OpSetGlobal(idx), expr.line);
                         }
                         self.chunk.write(OpCode::OpPop, expr.line);
@@ -750,7 +762,7 @@ impl Compiler {
                     ExpressionKind::MemberAccess { base: member_base, member } => {
                         self.compile_expression(member_base)?;
                         self.chunk.write(OpCode::OpDup, expr.line);
-                        let name_idx = self.chunk.add_constant(BxValue::String(member.clone()));
+                        let name_idx = self.chunk.add_constant(Constant::String(member.to_lowercase()));
                         self.chunk.write(OpCode::OpMember(name_idx), expr.line);
                         self.chunk.write(OpCode::OpSwap, expr.line);
                         self.chunk.write(OpCode::OpOver, expr.line);
@@ -772,7 +784,7 @@ impl Compiler {
     fn compile_string_part(&mut self, part: &StringPart) -> Result<()> {
         match part {
             StringPart::Text(t) => {
-                let idx = self.chunk.add_constant(BxValue::String(t.clone()));
+                let idx = self.chunk.add_constant(Constant::String(t.clone()));
                 self.chunk.write(OpCode::OpConstant(idx), self.current_line);
                 Ok(())
             }
@@ -803,7 +815,7 @@ impl Compiler {
         for (i, param) in params.iter().enumerate() {
             if let Some(default_expr) = &param.default_value {
                 sub_compiler.chunk.write(OpCode::OpGetLocal(i), self.current_line);
-                let null_idx = sub_compiler.chunk.add_constant(BxValue::Null);
+                let null_idx = sub_compiler.chunk.add_constant(Constant::Null);
                 sub_compiler.chunk.write(OpCode::OpConstant(null_idx), self.current_line);
                 sub_compiler.chunk.write(OpCode::OpEqual, self.current_line);
                 
@@ -836,7 +848,7 @@ impl Compiler {
                 for stmt in stmts {
                     sub_compiler.compile_statement(stmt, false)?;
                 }
-                let null_idx = sub_compiler.chunk.add_constant(BxValue::Null);
+                let null_idx = sub_compiler.chunk.add_constant(Constant::Null);
                 sub_compiler.chunk.write(OpCode::OpConstant(null_idx), sub_compiler.current_line);
                 sub_compiler.chunk.write(OpCode::OpReturn, sub_compiler.current_line);
             }
@@ -849,18 +861,21 @@ impl Compiler {
             }
         }
 
+        let constant_count = sub_compiler.chunk.constants.len();
         Ok(BxCompiledFunction {
             name: name.to_string(),
             arity: params.len(),
             min_arity,
-            params: params.iter().map(|p| p.name.clone()).collect(),
+            params: params.iter().map(|p| p.name.to_lowercase()).collect(),
             chunk: Rc::new(RefCell::new(sub_compiler.chunk)),
+            promoted_constants: RefCell::new(vec![None; constant_count]),
         })
     }
 
     fn resolve_local(&self, name: &str) -> Option<usize> {
+        let lower_name = name.to_lowercase();
         for (i, local) in self.locals.iter().enumerate().rev() {
-            if local.name.to_lowercase() == name.to_lowercase() {
+            if local.name == lower_name {
                 return Some(i);
             }
         }
@@ -869,7 +884,7 @@ impl Compiler {
 
     fn add_local(&mut self, name: String) {
         self.locals.push(Local {
-            name,
+            name: name.to_lowercase(),
             depth: self.scope_depth,
         });
     }
@@ -890,7 +905,7 @@ impl Compiler {
         }
     }
 
-    fn load_class_from_path(&mut self, class_path: &str) -> Result<BxValue> {
+    fn load_class_from_path(&mut self, class_path: &str) -> Result<Constant> {
         let rel_path = class_path.replace('.', "/") + ".bxs";
         let path = Path::new(&rel_path);
         
@@ -909,7 +924,7 @@ impl Compiler {
         let chunk = sub_compiler.compile(&ast, &source)?;
         
         for constant in chunk.constants {
-            if let BxValue::Class(_) = constant {
+            if let Constant::Class(_) = constant {
                 return Ok(constant);
             }
         }
@@ -917,7 +932,7 @@ impl Compiler {
         bail!("No class declaration found in {}", path.display());
     }
 
-    fn load_interface_from_path(&mut self, iface_path: &str) -> Result<BxValue> {
+    fn load_interface_from_path(&mut self, iface_path: &str) -> Result<Constant> {
         let rel_path = iface_path.replace('.', "/") + ".bxs";
         let path = Path::new(&rel_path);
         
@@ -936,7 +951,7 @@ impl Compiler {
         let chunk = sub_compiler.compile(&ast, &source)?;
         
         for constant in chunk.constants {
-            if let BxValue::Interface(_) = constant {
+            if let Constant::Interface(_) = constant {
                 return Ok(constant);
             }
         }

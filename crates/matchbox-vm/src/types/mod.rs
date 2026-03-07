@@ -6,29 +6,90 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
 use serde::{Serialize, Deserialize};
+use std::ffi::c_void;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum BxValue {
-    String(String),
-    Number(f64),
-    Boolean(bool),
-    Null,
-    Array(usize), // GcId
-    Struct(usize), // GcId
-    StringArray(Vec<String>),
-    CompiledFunction(Rc<BxCompiledFunction>),
-    #[serde(skip)]
-    NativeFunction(BxNativeFunction),
-    Class(Rc<RefCell<BxClass>>),
-    Interface(Rc<RefCell<BxInterface>>),
-    Instance(usize), // GcId
-    Future(usize), // GcId
-    #[cfg(target_arch = "wasm32")]
-    #[serde(skip)]
-    JsValue(wasm_bindgen::JsValue),
-    #[serde(skip)]
-    NativeObject(Rc<RefCell<dyn BxNativeObject>>),
+#[derive(Copy, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BxValue(u64);
+
+impl BxValue {
+    // ------------------------------------------------------------------------
+    // Constants & Masks (NaN-Boxing)
+    // ------------------------------------------------------------------------
+    const TAGGED_BASE: u64 = 0xFFF0000000000000;
+    const TAG_SHIFT: u64 = 48;
+    const PAYLOAD_MASK: u64 = 0x0000FFFFFFFFFFFF;
+    
+    const TAG_INT: u64  = 0x8;
+    const TAG_BOOL: u64 = 0x9;
+    const TAG_NULL: u64 = 0xA;
+    const TAG_PTR: u64  = 0xB;
+
+    #[inline(always)]
+    fn tag(tag: u64, payload: u64) -> u64 {
+        Self::TAGGED_BASE | (tag << Self::TAG_SHIFT) | payload
+    }
+
+    // ------------------------------------------------------------------------
+    // Constructors
+    // ------------------------------------------------------------------------
+    #[inline]
+    pub fn new_number(f: f64) -> Self {
+        let bits = f.to_bits();
+        if bits >= 0xFFF8000000000000 {
+            Self(0x7FF8000000000000)
+        } else {
+            Self(bits)
+        }
+    }
+
+    #[inline]
+    pub fn new_int(i: i32) -> Self {
+        Self(Self::tag(Self::TAG_INT, (i as u32) as u64))
+    }
+
+    #[inline]
+    pub fn new_bool(b: bool) -> Self {
+        Self(Self::tag(Self::TAG_BOOL, b as u64))
+    }
+
+    #[inline]
+    pub fn new_null() -> Self {
+        Self(Self::tag(Self::TAG_NULL, 0))
+    }
+
+    #[inline]
+    pub fn new_ptr(id: usize) -> Self {
+        debug_assert!(id as u64 <= Self::PAYLOAD_MASK);
+        Self(Self::tag(Self::TAG_PTR, id as u64))
+    }
+
+    // ------------------------------------------------------------------------
+    // Predicates
+    // ------------------------------------------------------------------------
+    #[inline] pub fn is_number(&self) -> bool { self.0 < 0xFFF8000000000000 }
+    #[inline] pub fn is_int(&self) -> bool { (self.0 & !Self::PAYLOAD_MASK) == Self::tag(Self::TAG_INT, 0) }
+    #[inline] pub fn is_bool(&self) -> bool { (self.0 & !Self::PAYLOAD_MASK) == Self::tag(Self::TAG_BOOL, 0) }
+    #[inline] pub fn is_null(&self) -> bool { (self.0 & !Self::PAYLOAD_MASK) == Self::tag(Self::TAG_NULL, 0) }
+    #[inline] pub fn is_ptr(&self) -> bool { (self.0 & !Self::PAYLOAD_MASK) == Self::tag(Self::TAG_PTR, 0) }
+
+    // ------------------------------------------------------------------------
+    // Extractors
+    // ------------------------------------------------------------------------
+    #[inline] pub fn as_number(&self) -> f64 { f64::from_bits(self.0) }
+    #[inline] pub fn as_int(&self) -> i32 { self.0 as i32 }
+    #[inline] pub fn as_bool(&self) -> bool { (self.0 & Self::PAYLOAD_MASK) != 0 }
+    #[inline] pub fn as_gc_id(&self) -> Option<usize> {
+        if self.is_ptr() {
+            Some((self.0 & Self::PAYLOAD_MASK) as usize)
+        } else {
+            None
+        }
+    }
 }
+
+// ------------------------------------------------------------------------
+// Interfaces
+// ------------------------------------------------------------------------
 
 pub trait BxVM {
     fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>) -> BxValue;
@@ -45,6 +106,8 @@ pub trait BxVM {
     fn struct_new(&mut self) -> usize;
     fn struct_get_shape(&self, id: usize) -> usize;
     fn future_on_error(&mut self, id: usize, handler: BxValue);
+    fn string_new(&mut self, s: String) -> usize;
+    fn to_string(&self, val: BxValue) -> String;
 }
 
 pub type BxNativeFunction = fn(&mut dyn BxVM, &[BxValue]) -> Result<BxValue, String>;
@@ -61,27 +124,41 @@ impl PartialEq for dyn BxNativeObject {
     }
 }
 
+// Display will need the Heap context to display pointers
 impl fmt::Display for BxValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            BxValue::String(s) => write!(f, "{}", s),
-            BxValue::Number(n) => write!(f, "{}", n),
-            BxValue::Boolean(b) => write!(f, "{}", b),
-            BxValue::Null => write!(f, "null"),
-            BxValue::Array(id) => write!(f, "<array id:{}>", id),
-            BxValue::Struct(id) => write!(f, "<struct id:{}>", id),
-            BxValue::StringArray(arr) => write!(f, "<string array {:?}>", arr),
-            BxValue::CompiledFunction(func) => write!(f, "<compiled function {}>", func.name),
-            BxValue::NativeFunction(_) => write!(f, "<native function>"),
-            BxValue::Class(class) => write!(f, "<class {}>", class.borrow().name),
-            BxValue::Interface(iface) => write!(f, "<interface {}>", iface.borrow().name),
-            BxValue::Instance(id) => write!(f, "<instance id:{}>", id),
-            BxValue::Future(id) => write!(f, "<future id:{}>", id),
-            #[cfg(target_arch = "wasm32")]
-            BxValue::JsValue(js) => write!(f, "<js value {:?}>", js),
-            BxValue::NativeObject(obj) => write!(f, "<native object {:?}>", obj.borrow()),
+        if self.is_number() {
+            write!(f, "{}", self.as_number())
+        } else if self.is_int() {
+            write!(f, "{}", self.as_int())
+        } else if self.is_bool() {
+            write!(f, "{}", self.as_bool())
+        } else if self.is_null() {
+            write!(f, "null")
+        } else if self.is_ptr() {
+            write!(f, "<ptr {}>", self.as_gc_id().unwrap())
+        } else {
+            write!(f, "<invalid value 0x{:X}>", self.0)
         }
     }
+}
+
+impl fmt::Debug for BxValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Constant {
+    Number(f64),
+    String(String),
+    Boolean(bool),
+    Null,
+    CompiledFunction(BxCompiledFunction),
+    Class(BxClass),
+    Interface(BxInterface),
+    StringArray(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,6 +168,8 @@ pub struct BxCompiledFunction {
     pub min_arity: usize, // Required parameters
     pub params: Vec<String>, // Parameter names
     pub chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    #[serde(skip)]
+    pub promoted_constants: RefCell<Vec<Option<BxValue>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -98,7 +177,7 @@ pub struct BxClass {
     pub name: String,
     pub extends: Option<String>,
     pub implements: Vec<String>,
-    pub constructor: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    pub constructor: Rc<BxCompiledFunction>,
     pub methods: HashMap<String, Rc<BxCompiledFunction>>,
 }
 

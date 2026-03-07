@@ -78,8 +78,7 @@ impl BoxLangVM {
             bx_args.push(self.vm.js_to_bx(args.get(i)));
         }
 
-        let name_lower = name.to_lowercase();
-        let func = self.vm.globals.get(&name_lower).cloned()
+        let func = self.vm.get_global(name)
             .ok_or_else(|| format!("Function {} not found", name))?;
 
         match self.vm.call_function_value(func, bx_args) {
@@ -277,7 +276,7 @@ fn run_repl() -> Result<()> {
                     Ok(chunk) => {
                         match vm.interpret(chunk) {
                             Ok(val) => {
-                                if val != types::BxValue::Null {
+                                if val != types::BxValue::new_null() {
                                     println!("=> {}", val);
                                 }
                             }

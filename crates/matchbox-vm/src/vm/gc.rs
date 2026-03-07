@@ -1,13 +1,23 @@
-use crate::types::{BxValue, BxStruct, BxInstance, BxFuture};
+use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject};
+use std::rc::Rc;
+use std::cell::RefCell;
 
 pub type GcId = usize;
 
 #[derive(Debug, Clone)]
 pub enum GcObject {
+    String(String),
     Array(Vec<BxValue>),
     Struct(BxStruct),
     Instance(BxInstance),
     Future(BxFuture),
+    CompiledFunction(Rc<BxCompiledFunction>),
+    NativeFunction(BxNativeFunction),
+    Class(Rc<RefCell<BxClass>>),
+    Interface(Rc<RefCell<BxInterface>>),
+    NativeObject(Rc<RefCell<dyn BxNativeObject>>),
+    #[cfg(target_arch = "wasm32")]
+    JsValue(wasm_bindgen::JsValue),
 }
 
 pub struct Heap {
@@ -67,6 +77,9 @@ impl Heap {
             self.marks[id] = true;
 
             let children = match self.objects[id].as_ref().unwrap() {
+                GcObject::String(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::NativeObject(_) => Vec::new(),
+                #[cfg(target_arch = "wasm32")]
+                GcObject::JsValue(_) => Vec::new(),
                 GcObject::Array(arr) => arr.clone(),
                 GcObject::Struct(s) => s.properties.clone(),
                 GcObject::Instance(inst) => {
@@ -74,7 +87,13 @@ impl Heap {
                     c.extend(inst.variables.borrow().values().cloned());
                     c
                 }
-                GcObject::Future(f) => vec![f.value.clone()],
+                GcObject::Future(f) => {
+                    let mut c = vec![f.value];
+                    if let Some(h) = f.error_handler {
+                        c.push(h);
+                    }
+                    c
+                }
             };
 
             for child in children {
@@ -92,11 +111,10 @@ impl Heap {
     }
 
     fn add_to_worklist(&self, val: &BxValue, worklist: &mut Vec<GcId>) {
-        match val {
-            BxValue::Array(id) | BxValue::Struct(id) | BxValue::Instance(id) | BxValue::Future(id) => {
-                worklist.push(*id);
+        if let Some(id) = val.as_gc_id() {
+            if id < self.objects.len() && self.objects[id].is_some() {
+                worklist.push(id);
             }
-            _ => {}
         }
     }
 }
