@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use crate::ast::{Expression, ExpressionKind, Literal, Statement, StatementKind, StringPart, FunctionBody, ClassMember};
 use matchbox_vm::types::{BxCompiledFunction, BxClass, BxInterface, Constant, box_string::BoxString};
 use matchbox_vm::Chunk;
-use matchbox_vm::vm::opcode::OpCode;
+use matchbox_vm::vm::opcode::op;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -47,7 +47,7 @@ impl Compiler {
             let is_last = i == len - 1;
             self.compile_statement(stmt, is_last)?;
         }
-        self.chunk.write(OpCode::OpReturn, self.current_line as u32);
+        self.chunk.emit0(op::RETURN, self.current_line as u32);
         Ok(self.chunk)
     }
 
@@ -78,10 +78,10 @@ impl Compiler {
                         ClassMember::Property(prop_name) => {
                             properties.push(prop_name.clone());
                             let null_idx = constructor_compiler.chunk.add_constant(Constant::Null);
-                            constructor_compiler.chunk.write(OpCode::OpConstant(null_idx), stmt.line as u32);
+                            constructor_compiler.chunk.emit1(op::CONSTANT, null_idx, stmt.line as u32);
                             let name_idx = constructor_compiler.chunk.add_constant(Constant::String(BoxString::new(&prop_name.clone())));
-                            constructor_compiler.chunk.write(OpCode::OpSetPrivate(name_idx as u32), stmt.line as u32);
-                            constructor_compiler.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                            constructor_compiler.chunk.emit1(op::SET_PRIVATE, name_idx as u32, stmt.line as u32);
+                            constructor_compiler.chunk.emit0(op::POP, stmt.line as u32);
                         }
                         ClassMember::Statement(inner_stmt) => {
                             match &inner_stmt.kind {
@@ -115,8 +115,8 @@ impl Compiler {
                             let mut getter_chunk = Chunk::default();
                             getter_chunk.filename = self.chunk.filename.clone();
                             let name_idx = getter_chunk.add_constant(Constant::String(BoxString::new(&prop.clone())));
-                            getter_chunk.write(OpCode::OpGetPrivate(name_idx as u32), stmt.line as u32);
-                            getter_chunk.write(OpCode::OpReturn, stmt.line as u32);
+                            getter_chunk.emit1(op::GET_PRIVATE, name_idx as u32, stmt.line as u32);
+                            getter_chunk.emit0(op::RETURN, stmt.line as u32);
                             
                             let constant_count = getter_chunk.constants.len();
                             let func = BxCompiledFunction {
@@ -135,10 +135,10 @@ impl Compiler {
                         if !methods.contains_key(&setter_name.to_lowercase()) {
                             let mut setter_chunk = Chunk::default();
                             setter_chunk.filename = self.chunk.filename.clone();
-                            setter_chunk.write(OpCode::OpGetLocal(0), stmt.line as u32);
+                            setter_chunk.emit1(op::GET_LOCAL, 0, stmt.line as u32);
                             let name_idx = setter_chunk.add_constant(Constant::String(BoxString::new(&prop.clone())));
-                            setter_chunk.write(OpCode::OpSetPrivate(name_idx as u32), stmt.line as u32);
-                            setter_chunk.write(OpCode::OpReturn, stmt.line as u32);
+                            setter_chunk.emit1(op::SET_PRIVATE, name_idx as u32, stmt.line as u32);
+                            setter_chunk.emit0(op::RETURN, stmt.line as u32);
                             
                             let constant_count = setter_chunk.constants.len();
                             let func = BxCompiledFunction {
@@ -185,8 +185,8 @@ impl Compiler {
                     }
                 }
                 
-                constructor_compiler.chunk.write(OpCode::OpReturn, stmt.line as u32 as u32);
-                
+                constructor_compiler.chunk.emit0(op::RETURN, stmt.line as u32);
+
                 let constructor_constant_count = constructor_compiler.chunk.constants.len();
                 let constructor = BxCompiledFunction {
                     name: format!("{}.constructor", name),
@@ -206,9 +206,9 @@ impl Compiler {
                 };
 
                 let class_idx = self.chunk.add_constant(Constant::Class(class));
-                self.chunk.write(OpCode::OpConstant(class_idx), stmt.line as u32);
+                self.chunk.emit1(op::CONSTANT, class_idx, stmt.line as u32);
                 let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                self.chunk.write(OpCode::OpDefineGlobal(name_idx as u32), stmt.line as u32);
+                self.chunk.emit1(op::DEFINE_GLOBAL, name_idx as u32, stmt.line as u32);
                 Ok(())
                 }            StatementKind::InterfaceDecl { name, members } => {
                 let mut methods = HashMap::new();
@@ -234,9 +234,9 @@ impl Compiler {
                     methods,
                 };
                 let iface_idx = self.chunk.add_constant(Constant::Interface(iface));
-                self.chunk.write(OpCode::OpConstant(iface_idx), stmt.line as u32);
+                self.chunk.emit1(op::CONSTANT, iface_idx, stmt.line as u32);
                 let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                self.chunk.write(OpCode::OpDefineGlobal(name_idx as u32), stmt.line as u32);
+                self.chunk.emit1(op::DEFINE_GLOBAL, name_idx as u32, stmt.line as u32);
                 Ok(())
             }
             StatementKind::Expression(expr) => {
@@ -252,9 +252,9 @@ impl Compiler {
                     self.compile_expression(e)?;
                 } else {
                     let null_idx = self.chunk.add_constant(Constant::Null);
-                    self.chunk.write(OpCode::OpConstant(null_idx), stmt.line as u32);
+                    self.chunk.emit1(op::CONSTANT, null_idx, stmt.line as u32);
                 }
-                self.chunk.write(OpCode::OpReturn, stmt.line as u32 as u32);
+                self.chunk.emit0(op::RETURN, stmt.line as u32);
                 Ok(())
             }
             StatementKind::Throw(expr) => {
@@ -262,14 +262,14 @@ impl Compiler {
                     self.compile_expression(e)?;
                 } else {
                     let null_idx = self.chunk.add_constant(Constant::Null);
-                    self.chunk.write(OpCode::OpConstant(null_idx), stmt.line as u32);
+                    self.chunk.emit1(op::CONSTANT, null_idx, stmt.line as u32);
                 }
-                self.chunk.write(OpCode::OpThrow, stmt.line as u32);
+                self.chunk.emit0(op::THROW, stmt.line as u32);
                 Ok(())
             }
             StatementKind::Continue => {
                 let jump_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpJump(0), stmt.line as u32);
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
                 if let Some(patches) = self.continue_patches.last_mut() {
                     patches.push(jump_idx);
                 } else {
@@ -279,7 +279,7 @@ impl Compiler {
             }
             StatementKind::TryCatch { try_branch, catches, finally_branch } => {
                 let push_handler_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpPushHandler(0), stmt.line as u32);
+                self.chunk.emit1(op::PUSH_HANDLER, 0, stmt.line as u32);
 
                 self.begin_scope();
                 for s in try_branch {
@@ -287,14 +287,14 @@ impl Compiler {
                 }
                 self.end_scope();
 
-                self.chunk.write(OpCode::OpPopHandler, stmt.line as u32);
+                self.chunk.emit0(op::POP_HANDLER, stmt.line as u32);
 
                 let jump_to_finally_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpJump(0 as u32), stmt.line as u32);
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
 
                 let catch_target = self.chunk.code.len();
                 let offset = catch_target - push_handler_idx - 1;
-                self.chunk.code[push_handler_idx] = OpCode::OpPushHandler(offset as u32);
+                self.chunk.code[push_handler_idx] = op::PUSH_HANDLER as u32 | ((offset as u32) << 8);
 
                 if !catches.is_empty() {
                     let first_catch = &catches[0];
@@ -305,12 +305,12 @@ impl Compiler {
                     }
                     self.end_scope();
                 } else {
-                    self.chunk.write(OpCode::OpThrow, stmt.line as u32);
+                    self.chunk.emit0(op::THROW, stmt.line as u32);
                 }
 
                 let finally_target = self.chunk.code.len();
                 let jump_offset = finally_target - jump_to_finally_idx - 1;
-                self.chunk.code[jump_to_finally_idx] = OpCode::OpJump(jump_offset as u32);
+                self.chunk.code[jump_to_finally_idx] = op::JUMP as u32 | ((jump_offset as u32) << 8);
 
                 if let Some(finally_stmts) = finally_branch {
                     self.begin_scope();
@@ -328,10 +328,10 @@ impl Compiler {
                     self.add_local(name.clone());
                 } else {
                     if self.is_repl && is_last {
-                        self.chunk.write(OpCode::OpDup, stmt.line as u32);
+                        self.chunk.emit0(op::DUP, stmt.line as u32);
                     }
                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                    self.chunk.write(OpCode::OpDefineGlobal(name_idx as u32), stmt.line as u32);
+                    self.chunk.emit1(op::DEFINE_GLOBAL, name_idx as u32, stmt.line as u32);
                 }
                 Ok(())
             }
@@ -357,7 +357,7 @@ impl Compiler {
                                 
                                 if let Some(c_idx) = const_idx {
                                     jump_if_false_idx = self.chunk.code.len();
-                                    self.chunk.write(OpCode::OpLocalJumpIfNeConst(slot as u32, c_idx as u32, 0), condition.line as u32);
+                                    self.chunk.emit3(op::LOCAL_JUMP_IF_NE_CONST, slot as u32, c_idx as u32, 0, condition.line as u32);
                                     optimized = true;
                                 }
                             }
@@ -368,8 +368,8 @@ impl Compiler {
                 if !optimized {
                     self.compile_expression(condition)?;
                     jump_if_false_idx = self.chunk.code.len();
-                    self.chunk.write(OpCode::OpJumpIfFalse(0), stmt.line as u32);
-                    self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                    self.chunk.emit1(op::JUMP_IF_FALSE, 0, stmt.line as u32);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
                 }
 
                 self.begin_scope();
@@ -379,18 +379,20 @@ impl Compiler {
                 self.end_scope();
 
                 let jump_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpJump(0 as u32), stmt.line as u32);
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
 
                 let false_target = self.chunk.code.len();
-                let offset = false_target - jump_if_false_idx - 1;
-                
-                if optimized {
-                    if let OpCode::OpLocalJumpIfNeConst(s, c, _) = self.chunk.code[jump_if_false_idx] {
-                        self.chunk.code[jump_if_false_idx] = OpCode::OpLocalJumpIfNeConst(s, c, offset as u32);
-                    }
+                let offset = if optimized {
+                    false_target - jump_if_false_idx - 3  // 3-word LOCAL_JUMP_IF_NE_CONST
                 } else {
-                    self.chunk.code[jump_if_false_idx] = OpCode::OpJumpIfFalse(offset as u32);
-                    self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                    false_target - jump_if_false_idx - 1  // 1-word JUMP_IF_FALSE
+                };
+
+                if optimized {
+                    self.chunk.code[jump_if_false_idx + 2] = offset as u32;
+                } else {
+                    self.chunk.code[jump_if_false_idx] = op::JUMP_IF_FALSE as u32 | ((offset as u32) << 8);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
                 }
 
                 if let Some(else_stmts) = else_branch {
@@ -403,7 +405,7 @@ impl Compiler {
 
                 let end_target = self.chunk.code.len();
                 let jump_offset = end_target - jump_idx - 1;
-                self.chunk.code[jump_idx] = OpCode::OpJump(jump_offset as u32);
+                self.chunk.code[jump_idx] = op::JUMP as u32 | ((jump_offset as u32) << 8);
 
                 Ok(())
             }
@@ -429,8 +431,8 @@ impl Compiler {
                                     // Local optimized candidate
                                     self.compile_expression(cond_expr)?;
                                     let jump_idx = self.chunk.code.len();
-                                    self.chunk.write(OpCode::OpJumpIfFalse(0), cond_expr.line as u32);
-                                    self.chunk.write(OpCode::OpPop, cond_expr.line as u32);
+                                    self.chunk.emit1(op::JUMP_IF_FALSE, 0, cond_expr.line as u32);
+                                    self.chunk.emit0(op::POP, cond_expr.line as u32);
                                     exit_jump = Some(jump_idx);
                                     optimized_condition = Some((true, slot as u32, const_idx as u32)); // true = is_local
                                     handled = true;
@@ -438,12 +440,12 @@ impl Compiler {
                                     // Global optimized candidate
                                     let name_lower = name.to_lowercase();
                                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name_lower)));
-                                    
+
                                     // Initial check (standard instructions)
                                     self.compile_expression(cond_expr)?;
                                     let jump_idx = self.chunk.code.len();
-                                    self.chunk.write(OpCode::OpJumpIfFalse(0), cond_expr.line as u32);
-                                    self.chunk.write(OpCode::OpPop, cond_expr.line as u32);
+                                    self.chunk.emit1(op::JUMP_IF_FALSE, 0, cond_expr.line as u32);
+                                    self.chunk.emit0(op::POP, cond_expr.line as u32);
                                     exit_jump = Some(jump_idx);
                                     optimized_condition = Some((false, name_idx as u32, const_idx as u32)); // false = is_local
                                     handled = true;
@@ -455,8 +457,8 @@ impl Compiler {
                     if !handled {
                         self.compile_expression(cond_expr)?;
                         let jump_idx = self.chunk.code.len();
-                        self.chunk.write(OpCode::OpJumpIfFalse(0), stmt.line as u32);
-                        self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                        self.chunk.emit1(op::JUMP_IF_FALSE, 0, stmt.line as u32);
+                        self.chunk.emit0(op::POP, stmt.line as u32);
                         exit_jump = Some(jump_idx);
                     }
                 }
@@ -473,7 +475,7 @@ impl Compiler {
                 if let Some(patches) = self.continue_patches.pop() {
                     for idx in patches {
                         let offset = continue_target - idx - 1;
-                        self.chunk.code[idx] = OpCode::OpJump(offset as u32);
+                        self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
                     }
                 }
 
@@ -483,42 +485,42 @@ impl Compiler {
                         if *operator == "++" {
                             if let ExpressionKind::Identifier(name) = &base.kind {
                                 if let Some(slot) = self.resolve_local(name) {
-                                    self.chunk.write(OpCode::OpIncLocal(slot as u32), update_expr.line);
+                                    self.chunk.emit1(op::INC_LOCAL, slot as u32, update_expr.line);
                                     optimized_update = true;
                                 } else if !self.is_class {
                                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                                    self.chunk.write(OpCode::OpIncGlobal(name_idx as u32), update_expr.line);
+                                    self.chunk.emit1(op::INC_GLOBAL, name_idx as u32, update_expr.line);
                                     optimized_update = true;
                                 }
                             }
                         }
                     }
-                    
+
                     if !optimized_update {
                         self.compile_expression(update_expr)?;
-                        self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                        self.chunk.emit0(op::POP, stmt.line as u32);
                     }
                 }
 
                 if let Some((is_local, idx, const_idx)) = optimized_condition {
                     if is_local {
-                        let offset = self.chunk.code.len() - body_start + 1;
-                        self.chunk.write(OpCode::OpLocalCompareJump(idx as u32, const_idx as u32, offset as u32), stmt.line as u32 as u32);
+                        let offset = self.chunk.code.len() - body_start + 3;
+                        self.chunk.emit3(op::LOCAL_COMPARE_JUMP, idx as u32, const_idx as u32, offset as u32, stmt.line as u32);
                     } else {
-                        let offset = self.chunk.code.len() - body_start + 1;
-                        self.chunk.write(OpCode::OpGlobalCompareJump(idx as u32, const_idx as u32, offset as u32), stmt.line as u32);
+                        let offset = self.chunk.code.len() - body_start + 3;
+                        self.chunk.emit3(op::GLOBAL_COMPARE_JUMP, idx as u32, const_idx as u32, offset as u32, stmt.line as u32);
                     }
                 } else {
                     let loop_end = self.chunk.code.len();
                     let offset = loop_end - loop_start + 1;
-                    self.chunk.write(OpCode::OpLoop(offset as u32), stmt.line as u32);
+                    self.chunk.emit1(op::LOOP, offset as u32, stmt.line as u32);
                 }
 
                 if let Some(idx) = exit_jump {
                     let exit_target = self.chunk.code.len();
                     let offset = exit_target - idx - 1;
-                    self.chunk.code[idx] = OpCode::OpJumpIfFalse(offset as u32);
-                    self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                    self.chunk.code[idx] = op::JUMP_IF_FALSE as u32 | ((offset as u32) << 8);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
                 }
                 self.end_scope();
 
@@ -528,12 +530,12 @@ impl Compiler {
                 let func = self.compile_function(&name, &params, &body)?;
                 if self.is_repl && is_last {
                     let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func.clone()));
-                    self.chunk.write(OpCode::OpConstant(func_idx), stmt.line as u32);
+                    self.chunk.emit1(op::CONSTANT, func_idx, stmt.line as u32);
                 }
                 let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
-                self.chunk.write(OpCode::OpConstant(func_idx), stmt.line as u32);
+                self.chunk.emit1(op::CONSTANT, func_idx, stmt.line as u32);
                 let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                self.chunk.write(OpCode::OpDefineGlobal(name_idx as u32), stmt.line as u32);
+                self.chunk.emit1(op::DEFINE_GLOBAL, name_idx as u32, stmt.line as u32);
                 Ok(())
             }
             StatementKind::ForLoop { item, index, collection, body } => {
@@ -544,7 +546,7 @@ impl Compiler {
                 self.locals.push(Local { name: "$collection".to_string(), depth: self.scope_depth });
 
                 let zero_idx = self.chunk.add_constant(Constant::Number(0.0));
-                self.chunk.write(OpCode::OpConstant(zero_idx), stmt.line as u32);
+                self.chunk.emit1(op::CONSTANT, zero_idx, stmt.line as u32);
                 let cursor_slot = self.locals.len();
                 self.locals.push(Local { name: "$cursor".to_string(), depth: self.scope_depth });
 
@@ -552,7 +554,7 @@ impl Compiler {
 
                 let has_index = index.is_some();
                 let iter_next_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpIterNext(collection_slot as u32, cursor_slot as u32, 0, has_index), stmt.line as u32 as u32);
+                self.chunk.emit_iter_next(collection_slot as u32, cursor_slot as u32, has_index, stmt.line as u32);
 
                 self.add_local(item.clone());
                 if let Some(index_name) = index {
@@ -569,24 +571,24 @@ impl Compiler {
                 if let Some(patches) = self.continue_patches.pop() {
                     for idx in patches {
                         let offset = continue_target - idx - 1;
-                        self.chunk.code[idx] = OpCode::OpJump(offset as u32);
+                        self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
                     }
                 }
 
                 if index.is_some() {
-                    self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
                     self.locals.pop();
                 }
-                self.chunk.write(OpCode::OpPop, stmt.line as u32 as u32);
+                self.chunk.emit0(op::POP, stmt.line as u32);
                 self.locals.pop();
 
                 let loop_end = self.chunk.code.len();
                 let offset = loop_end - loop_start + 1;
-                self.chunk.write(OpCode::OpLoop(offset as u32), stmt.line as u32);
+                self.chunk.emit1(op::LOOP, offset as u32, stmt.line as u32);
 
                 let exit_target = self.chunk.code.len();
-                let offset = exit_target - iter_next_idx - 1;
-                self.chunk.code[iter_next_idx] = OpCode::OpIterNext(collection_slot as u32, cursor_slot as u32, offset as u32, has_index);
+                let offset = exit_target - iter_next_idx - 3;
+                self.chunk.code[iter_next_idx + 2] = offset as u32;
 
                 self.end_scope();
                 Ok(())
@@ -606,23 +608,23 @@ impl Compiler {
                     
                     // Push createObject onto stack
                     let bif_name_idx = self.chunk.add_constant(Constant::String(BoxString::new("createobject")));
-                    self.chunk.write(OpCode::OpGetGlobal(bif_name_idx), expr.line);
+                    self.chunk.emit1(op::GET_GLOBAL, bif_name_idx, expr.line);
 
                     // Push type "java"
                     let type_idx = self.chunk.add_constant(Constant::String(BoxString::new("java")));
-                    self.chunk.write(OpCode::OpConstant(type_idx), expr.line);
+                    self.chunk.emit1(op::CONSTANT, type_idx, expr.line);
 
                     // Push class name
                     let class_idx = self.chunk.add_constant(Constant::String(BoxString::new(java_class)));
-                    self.chunk.write(OpCode::OpConstant(class_idx), expr.line);
-                    
+                    self.chunk.emit1(op::CONSTANT, class_idx, expr.line);
+
                     // Push arguments
                     for arg in args {
                         self.compile_expression(&arg.value)?;
                     }
-                    
+
                     // Call createObject(type, class, ...args)
-                    self.chunk.write(OpCode::OpCall(2 + args.len() as u32), expr.line);
+                    self.chunk.emit1(op::CALL, 2 + args.len() as u32, expr.line);
                     return Ok(());
                 }
 
@@ -631,33 +633,33 @@ impl Compiler {
                     
                     // Push createObject onto stack
                     let bif_name_idx = self.chunk.add_constant(Constant::String(BoxString::new("createobject")));
-                    self.chunk.write(OpCode::OpGetGlobal(bif_name_idx), expr.line);
+                    self.chunk.emit1(op::GET_GLOBAL, bif_name_idx, expr.line);
 
                     // Push type "rust"
                     let type_idx = self.chunk.add_constant(Constant::String(BoxString::new("rust")));
-                    self.chunk.write(OpCode::OpConstant(type_idx), expr.line);
+                    self.chunk.emit1(op::CONSTANT, type_idx, expr.line);
 
                     // Push class name
                     let class_idx = self.chunk.add_constant(Constant::String(BoxString::new(rust_class)));
-                    self.chunk.write(OpCode::OpConstant(class_idx), expr.line);
-                    
+                    self.chunk.emit1(op::CONSTANT, class_idx, expr.line);
+
                     // Push arguments
                     for arg in args {
                         self.compile_expression(&arg.value)?;
                     }
-                    
+
                     // Call createObject(type, class, ...args)
-                    self.chunk.write(OpCode::OpCall(2 + args.len() as u32), expr.line);
+                    self.chunk.emit1(op::CALL, 2 + args.len() as u32, expr.line);
                     return Ok(());
                 }
 
                 if resolved_path.contains('.') {
                     let class_val = self.load_class_from_path(&resolved_path)?;
                     let class_idx = self.chunk.add_constant(class_val);
-                    self.chunk.write(OpCode::OpConstant(class_idx), expr.line);
+                    self.chunk.emit1(op::CONSTANT, class_idx, expr.line);
                 } else {
                     let class_idx = self.chunk.add_constant(Constant::String(BoxString::new(&resolved_path)));
-                    self.chunk.write(OpCode::OpGetGlobal(class_idx), expr.line);
+                    self.chunk.emit1(op::GET_GLOBAL, class_idx, expr.line);
                 }
                 
                 let mut arg_names = Vec::new();
@@ -674,16 +676,16 @@ impl Compiler {
                 
                 // OpNew(args.len()) replaces Class with Instance BELOW args
                 // and sets up the constructor frame
-                self.chunk.write(OpCode::OpNew(args.len() as u32), expr.line);
-                
+                self.chunk.emit1(op::NEW, args.len() as u32, expr.line);
+
                 // Automatically call init() if args were passed
                 if !args.is_empty() {
                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new("init")));
                     if has_named {
                         let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
-                        self.chunk.write(OpCode::OpInvokeNamed(name_idx as u32, args.len() as u32, names_idx as u32), expr.line);
+                        self.chunk.emit3(op::INVOKE_NAMED, name_idx as u32, args.len() as u32, names_idx as u32, expr.line);
                     } else {
-                        self.chunk.write(OpCode::OpInvoke(name_idx as u32, args.len() as u32), expr.line);
+                        self.chunk.emit2(op::INVOKE, name_idx as u32, args.len() as u32, expr.line);
                     }
                 }
                 
@@ -692,37 +694,37 @@ impl Compiler {
             ExpressionKind::Literal(lit) => match lit {
                 Literal::Number(n) => {
                     let idx = self.chunk.add_constant(Constant::Number(*n));
-                    self.chunk.write(OpCode::OpConstant(idx as u32), expr.line);
+                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
                     Ok(())
                 }
                 Literal::String(parts) => {
                     if parts.is_empty() {
                         let idx = self.chunk.add_constant(Constant::String(BoxString::new("")));
-                        self.chunk.write(OpCode::OpConstant(idx as u32), expr.line);
+                        self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
                         return Ok(());
                     }
                     self.compile_string_part(&parts[0])?;
                     for i in 1..parts.len() {
                         self.compile_string_part(&parts[i])?;
-                        self.chunk.write(OpCode::OpStringConcat, expr.line);
+                        self.chunk.emit0(op::STRING_CONCAT, expr.line);
                     }
                     Ok(())
                 }
                 Literal::Boolean(b) => {
                     let idx = self.chunk.add_constant(Constant::Boolean(*b));
-                    self.chunk.write(OpCode::OpConstant(idx as u32), expr.line);
+                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
                     Ok(())
                 }
                 Literal::Null => {
                     let idx = self.chunk.add_constant(Constant::Null);
-                    self.chunk.write(OpCode::OpConstant(idx as u32), expr.line);
+                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
                     Ok(())
                 }
                 Literal::Array(items) => {
                     for item in items {
                         self.compile_expression(item)?;
                     }
-                    self.chunk.write(OpCode::OpArray(items.len() as u32), expr.line);
+                    self.chunk.emit1(op::ARRAY, items.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Struct(members) => {
@@ -730,19 +732,19 @@ impl Compiler {
                         match &key_expr.kind {
                             ExpressionKind::Identifier(name) => {
                                 let idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                                self.chunk.write(OpCode::OpConstant(idx as u32), expr.line);
+                                self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
                             }
                             _ => self.compile_expression(key_expr)?,
                         }
                         self.compile_expression(val_expr)?;
                     }
-                    self.chunk.write(OpCode::OpStruct(members.len() as u32), expr.line);
+                    self.chunk.emit1(op::STRUCT, members.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Function { params, body } => {
                     let func = self.compile_function("anonymous", &params, &body)?;
                     let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
-                    self.chunk.write(OpCode::OpConstant(func_idx), expr.line);
+                    self.chunk.emit1(op::CONSTANT, func_idx, expr.line);
                     Ok(())
                 }
             },
@@ -753,31 +755,31 @@ impl Compiler {
                         self.compile_expression(left)?;
                         // If left is falsy, skip the unconditional jump to land at pop+right
                         let jif_idx = self.chunk.code.len();
-                        self.chunk.write(OpCode::OpJumpIfFalse(0), expr.line);
+                        self.chunk.emit1(op::JUMP_IF_FALSE, 0, expr.line);
                         // Left is truthy: jump past pop+right to end
                         let jump_idx = self.chunk.code.len();
-                        self.chunk.write(OpCode::OpJump(0), expr.line);
+                        self.chunk.emit1(op::JUMP, 0, expr.line);
                         // False path: pop falsy left, evaluate right
                         let false_target = self.chunk.code.len();
-                        self.chunk.code[jif_idx] = OpCode::OpJumpIfFalse((false_target - jif_idx - 1) as u32);
-                        self.chunk.write(OpCode::OpPop, expr.line);
+                        self.chunk.code[jif_idx] = op::JUMP_IF_FALSE as u32 | (((false_target - jif_idx - 1) as u32) << 8);
+                        self.chunk.emit0(op::POP, expr.line);
                         self.compile_expression(right)?;
                         // Patch unconditional jump to end
                         let end_target = self.chunk.code.len();
-                        self.chunk.code[jump_idx] = OpCode::OpJump((end_target - jump_idx - 1) as u32);
+                        self.chunk.code[jump_idx] = op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
                         return Ok(());
                     }
                     "&&" => {
                         self.compile_expression(left)?;
                         // If left is falsy, jump to end (left stays on stack as result)
                         let jif_idx = self.chunk.code.len();
-                        self.chunk.write(OpCode::OpJumpIfFalse(0), expr.line);
+                        self.chunk.emit1(op::JUMP_IF_FALSE, 0, expr.line);
                         // Left is truthy: pop it, evaluate right
-                        self.chunk.write(OpCode::OpPop, expr.line);
+                        self.chunk.emit0(op::POP, expr.line);
                         self.compile_expression(right)?;
                         // Patch JumpIfFalse to end
                         let end_target = self.chunk.code.len();
-                        self.chunk.code[jif_idx] = OpCode::OpJumpIfFalse((end_target - jif_idx - 1) as u32);
+                        self.chunk.code[jif_idx] = op::JUMP_IF_FALSE as u32 | (((end_target - jif_idx - 1) as u32) << 8);
                         return Ok(());
                     }
                     _ => {}
@@ -790,69 +792,69 @@ impl Compiler {
                         let mut specialized = false;
                         if let (ExpressionKind::Literal(Literal::Number(a)), ExpressionKind::Literal(Literal::Number(b))) = (&left.kind, &right.kind) {
                             if a.fract() == 0.0 && b.fract() == 0.0 {
-                                self.chunk.write(OpCode::OpAddInt, expr.line);
+                                self.chunk.emit0(op::ADD_INT, expr.line);
                             } else {
-                                self.chunk.write(OpCode::OpAddFloat, expr.line);
+                                self.chunk.emit0(op::ADD_FLOAT, expr.line);
                             }
                             specialized = true;
                         }
-                        
+
                         if !specialized {
-                            self.chunk.write(OpCode::OpAdd, expr.line);
+                            self.chunk.emit0(op::ADD, expr.line);
                         }
                     }
                     "-" => {
                         let mut specialized = false;
                         if let (ExpressionKind::Literal(Literal::Number(a)), ExpressionKind::Literal(Literal::Number(b))) = (&left.kind, &right.kind) {
                             if a.fract() == 0.0 && b.fract() == 0.0 {
-                                self.chunk.write(OpCode::OpSubInt, expr.line);
+                                self.chunk.emit0(op::SUB_INT, expr.line);
                             } else {
-                                self.chunk.write(OpCode::OpSubFloat, expr.line);
+                                self.chunk.emit0(op::SUB_FLOAT, expr.line);
                             }
                             specialized = true;
                         }
                         if !specialized {
-                            self.chunk.write(OpCode::OpSubtract, expr.line);
+                            self.chunk.emit0(op::SUBTRACT, expr.line);
                         }
                     }
                     "*" => {
                         let mut specialized = false;
                         if let (ExpressionKind::Literal(Literal::Number(a)), ExpressionKind::Literal(Literal::Number(b))) = (&left.kind, &right.kind) {
                             if a.fract() == 0.0 && b.fract() == 0.0 {
-                                self.chunk.write(OpCode::OpMulInt, expr.line);
+                                self.chunk.emit0(op::MUL_INT, expr.line);
                             } else {
-                                self.chunk.write(OpCode::OpMulFloat, expr.line);
+                                self.chunk.emit0(op::MUL_FLOAT, expr.line);
                             }
                             specialized = true;
                         }
                         if !specialized {
-                            self.chunk.write(OpCode::OpMultiply, expr.line);
+                            self.chunk.emit0(op::MULTIPLY, expr.line);
                         }
                     }
                     "/" => {
                         let mut specialized = false;
                         if let (ExpressionKind::Literal(Literal::Number(_)), ExpressionKind::Literal(Literal::Number(_))) = (&left.kind, &right.kind) {
-                            self.chunk.write(OpCode::OpDivFloat, expr.line);
+                            self.chunk.emit0(op::DIV_FLOAT, expr.line);
                             specialized = true;
                         }
                         if !specialized {
-                            self.chunk.write(OpCode::OpDivide, expr.line);
+                            self.chunk.emit0(op::DIVIDE, expr.line);
                         }
                     }
-                    "&" => self.chunk.write(OpCode::OpStringConcat, expr.line),
-                    "==" => self.chunk.write(OpCode::OpEqual, expr.line),
-                    "!=" => self.chunk.write(OpCode::OpNotEqual, expr.line),
-                    "<" => self.chunk.write(OpCode::OpLess, expr.line),
-                    "<=" => self.chunk.write(OpCode::OpLessEqual, expr.line),
-                    ">" => self.chunk.write(OpCode::OpGreater, expr.line),
-                    ">=" => self.chunk.write(OpCode::OpGreaterEqual, expr.line),
+                    "&" => self.chunk.emit0(op::STRING_CONCAT, expr.line),
+                    "==" => self.chunk.emit0(op::EQUAL, expr.line),
+                    "!=" => self.chunk.emit0(op::NOT_EQUAL, expr.line),
+                    "<" => self.chunk.emit0(op::LESS, expr.line),
+                    "<=" => self.chunk.emit0(op::LESS_EQUAL, expr.line),
+                    ">" => self.chunk.emit0(op::GREATER, expr.line),
+                    ">=" => self.chunk.emit0(op::GREATER_EQUAL, expr.line),
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())
             }
             ExpressionKind::UnaryNot(inner) => {
                 self.compile_expression(inner)?;
-                self.chunk.write(OpCode::OpNot, expr.line);
+                self.chunk.emit0(op::NOT, expr.line);
                 Ok(())
             }
             ExpressionKind::Ternary { condition, then_expr, else_expr } => {
@@ -860,39 +862,39 @@ impl Compiler {
                 self.compile_expression(condition)?;
                 // Jump to else branch if false
                 let jif_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpJumpIfFalse(0), expr.line);
+                self.chunk.emit1(op::JUMP_IF_FALSE, 0, expr.line);
                 // True branch
-                self.chunk.write(OpCode::OpPop, expr.line);
+                self.chunk.emit0(op::POP, expr.line);
                 self.compile_expression(then_expr)?;
                 // Jump over else branch
                 let jump_idx = self.chunk.code.len();
-                self.chunk.write(OpCode::OpJump(0), expr.line);
+                self.chunk.emit1(op::JUMP, 0, expr.line);
                 // False branch
                 let else_target = self.chunk.code.len();
-                self.chunk.code[jif_idx] = OpCode::OpJumpIfFalse((else_target - jif_idx - 1) as u32);
-                self.chunk.write(OpCode::OpPop, expr.line);
+                self.chunk.code[jif_idx] = op::JUMP_IF_FALSE as u32 | (((else_target - jif_idx - 1) as u32) << 8);
+                self.chunk.emit0(op::POP, expr.line);
                 self.compile_expression(else_expr)?;
                 // Patch end jump
                 let end_target = self.chunk.code.len();
-                self.chunk.code[jump_idx] = OpCode::OpJump((end_target - jump_idx - 1) as u32);
+                self.chunk.code[jump_idx] = op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
                 Ok(())
             }
             ExpressionKind::Identifier(name) => {
                 let lower_name = name.to_lowercase();
                 if lower_name == "this" {
                     let idx = self.chunk.add_constant(Constant::String(BoxString::new("this")));
-                    self.chunk.write(OpCode::OpGetPrivate(idx as u32), expr.line);
+                    self.chunk.emit1(op::GET_PRIVATE, idx as u32, expr.line);
                 } else if lower_name == "variables" {
                     let idx = self.chunk.add_constant(Constant::String(BoxString::new("variables")));
-                    self.chunk.write(OpCode::OpGetPrivate(idx as u32), expr.line);
+                    self.chunk.emit1(op::GET_PRIVATE, idx as u32, expr.line);
                 } else if let Some(slot) = self.resolve_local(&name) {
-                    self.chunk.write(OpCode::OpGetLocal(slot as u32), expr.line);
+                    self.chunk.emit1(op::GET_LOCAL, slot as u32, expr.line);
                 } else if self.is_class {
                     let idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                    self.chunk.write(OpCode::OpGetPrivate(idx as u32), expr.line);
+                    self.chunk.emit1(op::GET_PRIVATE, idx as u32, expr.line);
                 } else {
                     let idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                    self.chunk.write(OpCode::OpGetGlobal(idx as u32), expr.line);
+                    self.chunk.emit1(op::GET_GLOBAL, idx as u32, expr.line);
                 }
                 Ok(())
             }
@@ -905,26 +907,26 @@ impl Compiler {
                         }
                         self.compile_expression(value)?;
                         if let Some(slot) = self.resolve_local(&name) {
-                            self.chunk.write(OpCode::OpSetLocal(slot as u32), expr.line);
+                            self.chunk.emit1(op::SET_LOCAL, slot as u32, expr.line);
                         } else if self.is_class {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                            self.chunk.write(OpCode::OpSetPrivate(name_idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_PRIVATE, name_idx as u32, expr.line);
                         } else {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                            self.chunk.write(OpCode::OpSetGlobal(name_idx), expr.line);
+                            self.chunk.emit1(op::SET_GLOBAL, name_idx, expr.line);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base, member } => {
                         self.compile_expression(base)?;
                         self.compile_expression(value)?;
                         let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                        self.chunk.write(OpCode::OpSetMember(name_idx as u32), expr.line);
+                        self.chunk.emit1(op::SET_MEMBER, name_idx as u32, expr.line);
                     }
                     crate::ast::AssignmentTarget::Index { base, index } => {
                         self.compile_expression(base)?;
                         self.compile_expression(index)?;
                         self.compile_expression(value)?;
-                        self.chunk.write(OpCode::OpSetIndex, expr.line);
+                        self.chunk.emit0(op::SET_INDEX, expr.line);
                     }
                 }
                 Ok(())
@@ -948,18 +950,18 @@ impl Compiler {
                         for arg in args {
                             self.compile_expression(&arg.value)?;
                         }
-                        self.chunk.write(OpCode::OpPrintln(args.len() as u32), expr.line);
+                        self.chunk.emit1(op::PRINTLN, args.len() as u32, expr.line);
                         let null_idx = self.chunk.add_constant(Constant::Null);
-                        self.chunk.write(OpCode::OpConstant(null_idx), expr.line);
+                        self.chunk.emit1(op::CONSTANT, null_idx, expr.line);
                         return Ok(());
                     }
                     if lower_name == "print" {
                         for arg in args {
                             self.compile_expression(&arg.value)?;
                         }
-                        self.chunk.write(OpCode::OpPrint(args.len() as u32), expr.line);
+                        self.chunk.emit1(op::PRINT, args.len() as u32, expr.line);
                         let null_idx = self.chunk.add_constant(Constant::Null);
-                        self.chunk.write(OpCode::OpConstant(null_idx), expr.line);
+                        self.chunk.emit1(op::CONSTANT, null_idx, expr.line);
                         return Ok(());
                     }
                 }
@@ -972,9 +974,9 @@ impl Compiler {
                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
                     if has_named {
                         let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
-                        self.chunk.write(OpCode::OpInvokeNamed(name_idx as u32, args.len() as u32, names_idx as u32), expr.line);
+                        self.chunk.emit3(op::INVOKE_NAMED, name_idx as u32, args.len() as u32, names_idx as u32, expr.line);
                     } else {
-                        self.chunk.write(OpCode::OpInvoke(name_idx as u32, args.len() as u32), expr.line);
+                        self.chunk.emit2(op::INVOKE, name_idx as u32, args.len() as u32, expr.line);
                     }
                     return Ok(());
                 }
@@ -985,22 +987,22 @@ impl Compiler {
                 }
                 if has_named {
                     let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
-                    self.chunk.write(OpCode::OpCallNamed(args.len() as u32, names_idx as u32), expr.line);
+                    self.chunk.emit2(op::CALL_NAMED, args.len() as u32, names_idx as u32, expr.line);
                 } else {
-                    self.chunk.write(OpCode::OpCall(args.len() as u32), expr.line);
+                    self.chunk.emit1(op::CALL, args.len() as u32, expr.line);
                 }
                 Ok(())
             }
             ExpressionKind::ArrayAccess { base, index } => {
                 self.compile_expression(base)?;
                 self.compile_expression(index)?;
-                self.chunk.write(OpCode::OpIndex, expr.line);
+                self.chunk.emit0(op::INDEX, expr.line);
                 Ok(())
             }
             ExpressionKind::MemberAccess { base, member } => {
                 self.compile_expression(base)?;
                 let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                self.chunk.write(OpCode::OpMember(name_idx), expr.line);
+                self.chunk.emit1(op::MEMBER, name_idx, expr.line);
                 Ok(())
             }
             ExpressionKind::Prefix { operator, target } => {
@@ -1008,31 +1010,31 @@ impl Compiler {
                     crate::ast::AssignmentTarget::Identifier(name) => {
                         self.compile_expression(&Expression::new(ExpressionKind::Identifier(name.clone()), expr.line))?;
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc, expr.line);
+                            self.chunk.emit0(op::INC, expr.line);
                         } else {
-                            self.chunk.write(OpCode::OpDec, expr.line);
+                            self.chunk.emit0(op::DEC, expr.line);
                         }
                         if let Some(slot) = self.resolve_local(&name) {
-                            self.chunk.write(OpCode::OpSetLocal(slot as u32), expr.line);
+                            self.chunk.emit1(op::SET_LOCAL, slot as u32, expr.line);
                         } else if self.is_class {
                             let idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                            self.chunk.write(OpCode::OpSetPrivate(idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_PRIVATE, idx as u32, expr.line);
                         } else {
                             let idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                            self.chunk.write(OpCode::OpSetGlobal(idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_GLOBAL, idx as u32, expr.line);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base, member } => {
                         self.compile_expression(base)?;
-                        self.chunk.write(OpCode::OpDup, expr.line);
+                        self.chunk.emit0(op::DUP, expr.line);
                         let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                        self.chunk.write(OpCode::OpMember(name_idx), expr.line);
+                        self.chunk.emit1(op::MEMBER, name_idx, expr.line);
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc, expr.line);
+                            self.chunk.emit0(op::INC, expr.line);
                         } else {
-                            self.chunk.write(OpCode::OpDec, expr.line);
+                            self.chunk.emit0(op::DEC, expr.line);
                         }
-                        self.chunk.write(OpCode::OpSetMember(name_idx as u32), expr.line);
+                        self.chunk.emit1(op::SET_MEMBER, name_idx as u32, expr.line);
                     }
                     crate::ast::AssignmentTarget::Index { base: _, index: _ } => {
                         bail!("Prefix ops on indexed targets not yet implemented");
@@ -1044,37 +1046,37 @@ impl Compiler {
                 match &base.kind {
                     ExpressionKind::Identifier(name) => {
                         self.compile_expression(base)?;
-                        self.chunk.write(OpCode::OpDup, expr.line);
+                        self.chunk.emit0(op::DUP, expr.line);
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc, expr.line);
+                            self.chunk.emit0(op::INC, expr.line);
                         } else {
-                            self.chunk.write(OpCode::OpDec, expr.line);
+                            self.chunk.emit0(op::DEC, expr.line);
                         }
                         if let Some(slot) = self.resolve_local(&name) {
-                            self.chunk.write(OpCode::OpSetLocal(slot as u32), expr.line);
+                            self.chunk.emit1(op::SET_LOCAL, slot as u32, expr.line);
                         } else if self.is_class {
                             let idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                            self.chunk.write(OpCode::OpSetPrivate(idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_PRIVATE, idx as u32, expr.line);
                         } else {
                             let idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
-                            self.chunk.write(OpCode::OpSetGlobal(idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_GLOBAL, idx as u32, expr.line);
                         }
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                     ExpressionKind::MemberAccess { base: member_base, member } => {
                         self.compile_expression(member_base)?;
-                        self.chunk.write(OpCode::OpDup, expr.line);
+                        self.chunk.emit0(op::DUP, expr.line);
                         let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                        self.chunk.write(OpCode::OpMember(name_idx), expr.line);
-                        self.chunk.write(OpCode::OpSwap, expr.line);
-                        self.chunk.write(OpCode::OpOver, expr.line);
+                        self.chunk.emit1(op::MEMBER, name_idx, expr.line);
+                        self.chunk.emit0(op::SWAP, expr.line);
+                        self.chunk.emit0(op::OVER, expr.line);
                         if operator == "++" {
-                            self.chunk.write(OpCode::OpInc, expr.line);
+                            self.chunk.emit0(op::INC, expr.line);
                         } else {
-                            self.chunk.write(OpCode::OpDec, expr.line);
+                            self.chunk.emit0(op::DEC, expr.line);
                         }
-                        self.chunk.write(OpCode::OpSetMember(name_idx as u32), expr.line);
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit1(op::SET_MEMBER, name_idx as u32, expr.line);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                     _ => bail!("Postfix ops only supported on identifiers and members currently"),
                 }
@@ -1087,7 +1089,7 @@ impl Compiler {
         match part {
             StringPart::Text(t) => {
                 let idx = self.chunk.add_constant(Constant::String(BoxString::new(&t.clone())));
-                self.chunk.write(OpCode::OpConstant(idx as u32), self.current_line);
+                self.chunk.emit1(op::CONSTANT, idx as u32, self.current_line);
                 Ok(())
             }
             StringPart::Expression(expr) => self.compile_expression(expr),
@@ -1117,32 +1119,32 @@ impl Compiler {
         // Emit default value logic at the beginning of the function
         for (i, param) in params.iter().enumerate() {
             if let Some(default_expr) = &param.default_value {
-                sub_compiler.chunk.write(OpCode::OpGetLocal(i as u32), self.current_line);
+                sub_compiler.chunk.emit1(op::GET_LOCAL, i as u32, self.current_line);
                 let null_idx = sub_compiler.chunk.add_constant(Constant::Null);
-                sub_compiler.chunk.write(OpCode::OpConstant(null_idx), self.current_line);
-                sub_compiler.chunk.write(OpCode::OpEqual, self.current_line);
-                
+                sub_compiler.chunk.emit1(op::CONSTANT, null_idx, self.current_line);
+                sub_compiler.chunk.emit0(op::EQUAL, self.current_line);
+
                 let jump_idx = sub_compiler.chunk.code.len();
-                sub_compiler.chunk.write(OpCode::OpJumpIfFalse(0), self.current_line);
-                
+                sub_compiler.chunk.emit1(op::JUMP_IF_FALSE, 0, self.current_line);
+
                 // True branch: value IS null
-                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop true
+                sub_compiler.chunk.emit0(op::POP, self.current_line); // pop true
                 sub_compiler.compile_expression(default_expr)?;
-                sub_compiler.chunk.write(OpCode::OpSetLocal(i as u32), self.current_line);
-                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop set value
-                
+                sub_compiler.chunk.emit1(op::SET_LOCAL, i as u32, self.current_line);
+                sub_compiler.chunk.emit0(op::POP, self.current_line); // pop set value
+
                 let end_jump_idx = sub_compiler.chunk.code.len();
-                sub_compiler.chunk.write(OpCode::OpJump(0 as u32), self.current_line);
+                sub_compiler.chunk.emit1(op::JUMP, 0, self.current_line);
 
                 // False target: value IS NOT null
                 let false_target = sub_compiler.chunk.code.len();
                 let offset = false_target - jump_idx - 1;
-                sub_compiler.chunk.code[jump_idx] = OpCode::OpJumpIfFalse(offset as u32);
-                sub_compiler.chunk.write(OpCode::OpPop, self.current_line); // pop false
+                sub_compiler.chunk.code[jump_idx] = op::JUMP_IF_FALSE as u32 | ((offset as u32) << 8);
+                sub_compiler.chunk.emit0(op::POP, self.current_line); // pop false
 
                 let end_target = sub_compiler.chunk.code.len();
                 let end_offset = end_target - end_jump_idx - 1;
-                sub_compiler.chunk.code[end_jump_idx] = OpCode::OpJump(end_offset as u32);
+                sub_compiler.chunk.code[end_jump_idx] = op::JUMP as u32 | ((end_offset as u32) << 8);
             }
         }
 
@@ -1152,12 +1154,12 @@ impl Compiler {
                     sub_compiler.compile_statement(stmt, false)?;
                 }
                 let null_idx = sub_compiler.chunk.add_constant(Constant::Null);
-                sub_compiler.chunk.write(OpCode::OpConstant(null_idx), sub_compiler.current_line);
-                sub_compiler.chunk.write(OpCode::OpReturn, sub_compiler.current_line);
+                sub_compiler.chunk.emit1(op::CONSTANT, null_idx, sub_compiler.current_line);
+                sub_compiler.chunk.emit0(op::RETURN, sub_compiler.current_line);
             }
             FunctionBody::Expression(expr) => {
                 sub_compiler.compile_expression(expr)?;
-                sub_compiler.chunk.write(OpCode::OpReturn, sub_compiler.current_line);
+                sub_compiler.chunk.emit0(op::RETURN, sub_compiler.current_line);
             }
             FunctionBody::Abstract => {
                 bail!("Cannot compile an abstract function body");
@@ -1196,29 +1198,29 @@ impl Compiler {
                         }
                         self.compile_expression(value)?;
                         if let Some(slot) = self.resolve_local(&name) {
-                            self.chunk.write(OpCode::OpSetLocalPop(slot as u32), expr.line);
+                            self.chunk.emit1(op::SET_LOCAL_POP, slot as u32, expr.line);
                         } else if self.is_class {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                            self.chunk.write(OpCode::OpSetPrivate(name_idx as u32), expr.line);
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit1(op::SET_PRIVATE, name_idx as u32, expr.line);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         } else {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&lower_name)));
-                            self.chunk.write(OpCode::OpSetGlobalPop(name_idx as u32), expr.line);
+                            self.chunk.emit1(op::SET_GLOBAL_POP, name_idx as u32, expr.line);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base, member } => {
                         self.compile_expression(base)?;
                         self.compile_expression(value)?;
                         let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                        self.chunk.write(OpCode::OpSetMember(name_idx as u32), expr.line);
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit1(op::SET_MEMBER, name_idx as u32, expr.line);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                     crate::ast::AssignmentTarget::Index { base, index } => {
                         self.compile_expression(base)?;
                         self.compile_expression(index)?;
                         self.compile_expression(value)?;
-                        self.chunk.write(OpCode::OpSetIndex, expr.line);
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit0(op::SET_INDEX, expr.line);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                 }
                 Ok(())
@@ -1228,40 +1230,40 @@ impl Compiler {
                     ExpressionKind::Identifier(name) => {
                         if let Some(slot) = self.resolve_local(&name) {
                             if *operator == "++" {
-                                self.chunk.write(OpCode::OpIncLocal(slot as u32), expr.line);
+                                self.chunk.emit1(op::INC_LOCAL, slot as u32, expr.line);
                             } else {
                                 self.compile_expression(base)?;
-                                self.chunk.write(OpCode::OpDec, expr.line);
-                                self.chunk.write(OpCode::OpSetLocalPop(slot as u32), expr.line);
+                                self.chunk.emit0(op::DEC, expr.line);
+                                self.chunk.emit1(op::SET_LOCAL_POP, slot as u32, expr.line);
                             }
                         } else if !self.is_class {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
                             if *operator == "++" {
-                                self.chunk.write(OpCode::OpIncGlobal(name_idx as u32), expr.line);
+                                self.chunk.emit1(op::INC_GLOBAL, name_idx as u32, expr.line);
                             } else {
                                 self.compile_expression(base)?;
-                                self.chunk.write(OpCode::OpDec, expr.line);
-                                self.chunk.write(OpCode::OpSetGlobalPop(name_idx as u32), expr.line);
+                                self.chunk.emit0(op::DEC, expr.line);
+                                self.chunk.emit1(op::SET_GLOBAL_POP, name_idx as u32, expr.line);
                             }
                         } else {
                             self.compile_expression(expr)?;
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         }
                     }
                     ExpressionKind::MemberAccess { base: member_base, member } => {
                         if *operator == "++" {
                             self.compile_expression(member_base)?;
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                            self.chunk.write(OpCode::OpIncMember(name_idx as u32), expr.line);
-                            self.chunk.write(OpCode::OpPop, expr.line as u32); // OpIncMember pushes NEW value, we pop it
+                            self.chunk.emit1(op::INC_MEMBER, name_idx as u32, expr.line);
+                            self.chunk.emit0(op::POP, expr.line as u32); // INC_MEMBER pushes NEW value, we pop it
                         } else {
                             self.compile_expression(expr)?;
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         }
                     }
                     _ => {
                         self.compile_expression(expr)?;
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                 }
                 Ok(())
@@ -1271,47 +1273,47 @@ impl Compiler {
                     crate::ast::AssignmentTarget::Identifier(name) => {
                         if let Some(slot) = self.resolve_local(&name) {
                             if *operator == "++" {
-                                self.chunk.write(OpCode::OpIncLocal(slot as u32), expr.line);
+                                self.chunk.emit1(op::INC_LOCAL, slot as u32, expr.line);
                             } else {
                                 self.compile_expression(&Expression::new(ExpressionKind::Identifier(name.clone()), expr.line))?;
-                                self.chunk.write(OpCode::OpDec, expr.line);
-                                self.chunk.write(OpCode::OpSetLocalPop(slot as u32), expr.line);
+                                self.chunk.emit0(op::DEC, expr.line);
+                                self.chunk.emit1(op::SET_LOCAL_POP, slot as u32, expr.line);
                             }
                         } else if !self.is_class {
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
                             if *operator == "++" {
-                                self.chunk.write(OpCode::OpIncGlobal(name_idx as u32), expr.line);
+                                self.chunk.emit1(op::INC_GLOBAL, name_idx as u32, expr.line);
                             } else {
                                 self.compile_expression(&Expression::new(ExpressionKind::Identifier(name.clone()), expr.line))?;
-                                self.chunk.write(OpCode::OpDec, expr.line);
-                                self.chunk.write(OpCode::OpSetGlobalPop(name_idx as u32), expr.line);
+                                self.chunk.emit0(op::DEC, expr.line);
+                                self.chunk.emit1(op::SET_GLOBAL_POP, name_idx as u32, expr.line);
                             }
                         } else {
                             self.compile_expression(expr)?;
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         }
                     }
                     crate::ast::AssignmentTarget::Member { base: member_base, member } => {
                         if *operator == "++" {
                             self.compile_expression(member_base)?;
                             let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&member.to_lowercase())));
-                            self.chunk.write(OpCode::OpIncMember(name_idx as u32), expr.line);
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit1(op::INC_MEMBER, name_idx as u32, expr.line);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         } else {
                             self.compile_expression(expr)?;
-                            self.chunk.write(OpCode::OpPop, expr.line as u32);
+                            self.chunk.emit0(op::POP, expr.line as u32);
                         }
                     }
                     _ => {
                         self.compile_expression(expr)?;
-                        self.chunk.write(OpCode::OpPop, expr.line as u32);
+                        self.chunk.emit0(op::POP, expr.line as u32);
                     }
                 }
                 Ok(())
             }
             _ => {
                 self.compile_expression(expr)?;
-                self.chunk.write(OpCode::OpPop, expr.line as u32);
+                self.chunk.emit0(op::POP, expr.line as u32);
                 Ok(())
             }
         }
@@ -1333,7 +1335,7 @@ impl Compiler {
         while let Some(local) = self.locals.last() {
             if local.depth > self.scope_depth {
                 self.locals.pop();
-                self.chunk.write(OpCode::OpPop, self.current_line);
+                self.chunk.emit0(op::POP, self.current_line);
             } else {
                 break;
             }

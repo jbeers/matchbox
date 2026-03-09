@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::types::Constant;
 use crate::types::box_string::BoxString;
-use super::opcode::OpCode;
+use super::opcode::op;
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -28,7 +28,7 @@ impl ConstantKey {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Chunk {
-    pub code: Vec<OpCode>,
+    pub code: Vec<u32>,
     pub constants: Vec<Constant>,
     pub lines: Vec<u32>,
     pub filename: String,
@@ -78,10 +78,58 @@ impl Chunk {
         }
     }
 
-    pub fn write(&mut self, opcode: OpCode, line: u32) {
-        self.code.push(opcode);
+    /// Emit a zero-operand instruction (1 word).
+    #[inline]
+    pub fn emit0(&mut self, opcode: u8, line: u32) {
+        self.code.push(opcode as u32);
         self.lines.push(line);
         self.caches.push(None);
+    }
+
+    /// Emit a single-operand instruction (1 word).
+    /// Operand `a` occupies bits [31:8]; must fit in 24 bits for correct decoding.
+    #[inline]
+    pub fn emit1(&mut self, opcode: u8, a: u32, line: u32) {
+        self.code.push((opcode as u32) | (a << 8));
+        self.lines.push(line);
+        self.caches.push(None);
+    }
+
+    /// Emit a two-operand instruction (2 words).
+    /// `a` in word0 bits [31:8], `b` in word1 (full 32 bits).
+    #[inline]
+    pub fn emit2(&mut self, opcode: u8, a: u32, b: u32, line: u32) {
+        self.code.push((opcode as u32) | (a << 8));
+        self.lines.push(line);
+        self.caches.push(None);
+        self.code.push(b);
+        self.lines.push(line);
+        self.caches.push(None);
+    }
+
+    /// Emit a three-operand instruction (3 words).
+    /// `a` in word0 bits [31:8], `b` in word1, `c` in word2 (each full 32 bits except a which is 24-bit).
+    #[inline]
+    pub fn emit3(&mut self, opcode: u8, a: u32, b: u32, c: u32, line: u32) {
+        self.code.push((opcode as u32) | (a << 8));
+        self.lines.push(line);
+        self.caches.push(None);
+        self.code.push(b);
+        self.lines.push(line);
+        self.caches.push(None);
+        self.code.push(c);
+        self.lines.push(line);
+        self.caches.push(None);
+    }
+
+    /// Emit ITER_NEXT: 3 words.
+    /// word0 = ITER_NEXT | (collection_slot << 8)
+    /// word1 = cursor_slot | (has_index << 31)
+    /// word2 = exit_offset (placeholder 0, back-patched later)
+    #[inline]
+    pub fn emit_iter_next(&mut self, collection: u32, cursor: u32, has_index: bool, line: u32) {
+        let word1 = cursor | if has_index { 0x8000_0000u32 } else { 0 };
+        self.emit3(op::ITER_NEXT, collection, word1, 0, line);
     }
 
     pub fn add_constant(&mut self, value: Constant) -> u32 {

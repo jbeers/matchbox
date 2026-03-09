@@ -6,7 +6,7 @@ pub mod intern;
 
 use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxNativeObject, BxNativeFunction, box_string::BoxString};
 use self::chunk::{Chunk, IcEntry};
-use self::opcode::OpCode;
+use self::opcode::op;
 use self::gc::{Heap, GcObject};
 use self::shape::ShapeRegistry;
 use self::intern::StringInterner;
@@ -543,21 +543,39 @@ impl VM {
                 chunk_rc.borrow_mut().ensure_caches();
             }
 
-            let (instruction, ip_at_start) = {
+            let (word0, ip_at_start) = {
                 let fiber = &self.fibers[fiber_idx];
                 let frame = fiber.frames.last().unwrap();
                 let chunk = frame.function.chunk.borrow();
                 if frame.ip >= chunk.code.len() {
                     return Ok(Some(BxValue::new_null()));
                 }
-                (chunk.code[frame.ip].clone(), frame.ip)
+                (chunk.code[frame.ip], frame.ip)
             };
-            
+
             self.fibers[fiber_idx].frames.last_mut().unwrap().ip += 1;
 
-            match instruction {
+            let opcode = (word0 & 0xFF) as u8;
+            let op0 = word0 >> 8;
+
+            // Read next word and advance IP (for multi-word instructions)
+            macro_rules! next_word {
+                () => {{
+                    let ip = self.fibers[fiber_idx].frames.last().unwrap().ip;
+                    let w = {
+                        let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                        let chunk = frame.function.chunk.borrow();
+                        chunk.code[ip]
+                    };
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip += 1;
+                    w
+                }};
+            }
+
+            match opcode {
                 // --- Hot Loop / Specialized Opcodes ---
-                OpCode::OpIncLocal(slot) => {
+                op::INC_LOCAL => {
+                    let slot = op0;
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     if val.is_number() {
@@ -569,7 +587,10 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpLocalCompareJump(slot, const_idx, offset) => {
+                op::LOCAL_COMPARE_JUMP => {
+                    let slot = op0;
+                    let const_idx = next_word!();
+                    let offset = next_word!();
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     let limit = self.read_constant(fiber_idx, const_idx as usize);
@@ -583,10 +604,12 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpCompareJump(const_idx, offset) => {
+                op::COMPARE_JUMP => {
+                    let const_idx = op0;
+                    let offset = next_word!();
                     let limit = self.read_constant(fiber_idx, const_idx as usize);
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    
+
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
@@ -596,7 +619,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpIncGlobal(idx) => {
+                op::INC_GLOBAL => {
+                    let idx = op0;
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                         let chunk = frame.function.chunk.borrow();
@@ -632,7 +656,10 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpGlobalCompareJump(name_idx, const_idx, offset) => {
+                op::GLOBAL_COMPARE_JUMP => {
+                    let name_idx = op0;
+                    let const_idx = next_word!();
+                    let offset = next_word!();
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                         let chunk = frame.function.chunk.borrow();
@@ -663,36 +690,40 @@ impl VM {
                 }
 
                 // --- Basic Hot Opcodes ---
-                OpCode::OpGetLocal(slot) => {
+                op::GET_LOCAL => {
+                    let slot = op0;
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     self.fibers[fiber_idx].stack.push(val);
                 }
-                OpCode::OpSetLocal(slot) => {
+                op::SET_LOCAL => {
+                    let slot = op0;
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
                     self.fibers[fiber_idx].stack[base + slot as usize] = val;
                 }
-                OpCode::OpSetLocalPop(slot) => {
+                op::SET_LOCAL_POP => {
+                    let slot = op0;
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack[base + slot as usize] = val;
                 }
-                OpCode::OpConstant(idx) => {
+                op::CONSTANT => {
+                    let idx = op0;
                     let constant = self.read_constant(fiber_idx, idx as usize);
                     self.fibers[fiber_idx].stack.push(constant);
                 }
-                OpCode::OpAddInt => {
+                op::ADD_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 + b.as_number() as i32));
                 }
-                OpCode::OpAddFloat => {
+                op::ADD_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() + b.as_number()));
                 }
-                OpCode::OpAdd => {
+                op::ADD => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -704,7 +735,7 @@ impl VM {
                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(res_id));
                     }
                 }
-                OpCode::OpSubtract => {
+                op::SUBTRACT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -714,17 +745,17 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpSubInt => {
+                op::SUB_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 - b.as_number() as i32));
                 }
-                OpCode::OpSubFloat => {
+                op::SUB_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() - b.as_number()));
                 }
-                OpCode::OpMultiply => {
+                op::MULTIPLY => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -734,17 +765,17 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpMulInt => {
+                op::MUL_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 * b.as_number() as i32));
                 }
-                OpCode::OpMulFloat => {
+                op::MUL_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() * b.as_number()));
                 }
-                OpCode::OpDivide => {
+                op::DIVIDE => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -756,26 +787,29 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpDivFloat => {
+                op::DIV_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() / b.as_number()));
                 }
-                OpCode::OpPop => {
+                op::POP => {
                     self.fibers[fiber_idx].stack.pop();
                 }
-                OpCode::OpJumpIfFalse(offset) => {
+                op::JUMP_IF_FALSE => {
+                    let offset = op0;
                     if !self.is_truthy(*self.fibers[fiber_idx].stack.last().unwrap()) {
                         self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                     }
                 }
-                OpCode::OpJump(offset) => {
+                op::JUMP => {
+                    let offset = op0;
                     self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                 }
-                OpCode::OpLoop(offset) => {
+                op::LOOP => {
+                    let offset = op0;
                     self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                 }
-                OpCode::OpReturn => {
+                op::RETURN => {
                     let fiber = &mut self.fibers[fiber_idx];
                     let frame = fiber.frames.pop().unwrap();
                     let result = if fiber.stack.len() > frame.stack_base {
@@ -803,7 +837,8 @@ impl VM {
                 }
 
                 // --- Global / Scope Opcodes ---
-                OpCode::OpGetGlobal(idx) => {
+                op::GET_GLOBAL => {
+                    let idx = op0;
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                         let chunk = frame.function.chunk.borrow();
@@ -827,7 +862,8 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpSetGlobal(idx) => {
+                op::SET_GLOBAL => {
+                    let idx = op0;
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                         let chunk = frame.function.chunk.borrow();
@@ -856,7 +892,8 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpSetGlobalPop(idx) => {
+                op::SET_GLOBAL_POP => {
+                    let idx = op0;
                     let ic = {
                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                         let chunk = frame.function.chunk.borrow();
@@ -885,12 +922,14 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpDefineGlobal(idx) => {
+                op::DEFINE_GLOBAL => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.insert_global_interned(name_id, val);
                 }
-                OpCode::OpGetPrivate(idx) => {
+                op::GET_PRIVATE => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let name = self.interner.resolve(name_id).to_string();
                     let val = if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
@@ -925,7 +964,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpSetPrivate(idx) => {
+                op::SET_PRIVATE => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let name = self.interner.resolve(name_id).to_string();
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
@@ -942,21 +982,21 @@ impl VM {
                 }
 
                 // --- Stack Manipulation ---
-                OpCode::OpDup => {
+                op::DUP => {
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
                     self.fibers[fiber_idx].stack.push(val);
                 }
-                OpCode::OpSwap => {
+                op::SWAP => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.fibers[fiber_idx].stack.push(b);
                     self.fibers[fiber_idx].stack.push(a);
                 }
-                OpCode::OpOver => {
+                op::OVER => {
                     let val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 2];
                     self.fibers[fiber_idx].stack.push(val);
                 }
-                OpCode::OpInc => {
+                op::INC => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if val.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() + 1.0));
@@ -967,7 +1007,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpDec => {
+                op::DEC => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if val.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() - 1.0));
@@ -980,7 +1020,8 @@ impl VM {
                 }
 
                 // --- Data Structures ---
-                OpCode::OpArray(count) => {
+                op::ARRAY => {
+                    let count = op0;
                     let mut items = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         items.push(self.fibers[fiber_idx].stack.pop().unwrap());
@@ -989,7 +1030,8 @@ impl VM {
                     let id = self.heap.alloc(GcObject::Array(items));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
-                OpCode::OpStruct(count) => {
+                op::STRUCT => {
+                    let count = op0;
                     let mut shape_id = self.shapes.get_root();
                     let mut props = Vec::with_capacity(count as usize);
 
@@ -1011,7 +1053,7 @@ impl VM {
                     let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
-                OpCode::OpIndex => {
+                op::INDEX => {
                     let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let Some(id) = base_val.as_gc_id() {
@@ -1046,7 +1088,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpSetIndex => {
+                op::SET_INDEX => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -1107,7 +1149,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpMember(idx) => {
+                op::MEMBER => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
@@ -1235,7 +1278,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpSetMember(idx) => {
+                op::SET_MEMBER => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -1363,7 +1407,8 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpIncMember(idx) => {
+                op::INC_MEMBER => {
+                    let idx = op0;
                     let name_id = self.read_intern_id(fiber_idx, idx as usize);
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
@@ -1451,7 +1496,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpStringConcat => {
+                op::STRING_CONCAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a_s = self.to_box_string(a);
@@ -1461,10 +1506,13 @@ impl VM {
                 }
 
                 // --- Calls / Invocations ---
-                OpCode::OpCall(arg_count) => {
+                op::CALL => {
+                    let arg_count = op0;
                     self.execute_call(fiber_idx, arg_count as usize, None)?;
                 }
-                OpCode::OpCallNamed(total_count, names_idx) => {
+                op::CALL_NAMED => {
+                    let total_count = op0;
+                    let names_idx = next_word!();
                     let names = match self.read_constant(fiber_idx, names_idx as usize) {
                         v if v.is_ptr() => {
                             if let GcObject::Array(arr) = self.heap.get(v.as_gc_id().unwrap()) {
@@ -1477,8 +1525,10 @@ impl VM {
                     };
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
                 }
-                OpCode::OpInvoke(idx, arg_count) => {
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                op::INVOKE => {
+                    let name_idx = op0;
+                    let arg_count = next_word!();
+                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
                     let name = self.interner.resolve(name_id).to_string();
                     #[cfg(all(target_arch = "wasm32", not(feature = "js")))]
                     {
@@ -1515,7 +1565,10 @@ impl VM {
                     }
                     self.execute_invoke(fiber_idx, name, arg_count as usize, None, ip_at_start)?;
                 }
-                OpCode::OpInvokeNamed(name_idx, total_count, names_idx) => {
+                op::INVOKE_NAMED => {
+                    let name_idx = op0;
+                    let total_count = next_word!();
+                    let names_idx = next_word!();
                     let invoke_name_id = self.read_intern_id(fiber_idx, name_idx as usize);
                     let name = self.interner.resolve(invoke_name_id).to_string();
                     let names = match self.read_constant(fiber_idx, names_idx as usize) {
@@ -1530,7 +1583,8 @@ impl VM {
                     };
                     self.execute_invoke(fiber_idx, name, total_count as usize, Some(names), ip_at_start)?;
                 }
-                OpCode::OpNew(arg_count) => {
+                op::NEW => {
+                    let arg_count = op0;
                     let class_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
                     let class_val = self.fibers[fiber_idx].stack[class_idx];
                     if let Some(id) = class_val.as_gc_id() {
@@ -1570,19 +1624,19 @@ impl VM {
                 }
 
                 // --- Comparison ---
-                OpCode::OpEqual => {
+                op::EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let res = self.is_equal(a, b);
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(res));
                 }
-                OpCode::OpNotEqual => {
+                op::NOT_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let res = self.is_equal(a, b);
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(!res));
                 }
-                OpCode::OpLess => {
+                op::LESS => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -1592,7 +1646,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpLessEqual => {
+                op::LESS_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -1602,7 +1656,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpGreater => {
+                op::GREATER => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -1612,7 +1666,7 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpGreaterEqual => {
+                op::GREATER_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
@@ -1622,14 +1676,19 @@ impl VM {
                         continue;
                     }
                 }
-                OpCode::OpNot => {
+                op::NOT => {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let res = self.is_truthy(a);
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(!res));
                 }
 
                 // --- Control Flow / Misc ---
-                OpCode::OpIterNext(collection_slot, cursor_slot, offset, push_index) => {
+                op::ITER_NEXT => {
+                    let collection_slot = op0;
+                    let word1 = next_word!();
+                    let cursor_slot = word1 & 0x7FFF_FFFF;
+                    let push_index = (word1 >> 31) != 0;
+                    let offset = next_word!();
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let collection_idx = base + collection_slot as usize;
                     let cursor_idx = base + cursor_slot as usize;
@@ -1697,7 +1756,10 @@ impl VM {
                         }
                     }
                 }
-                OpCode::OpLocalJumpIfNeConst(slot, const_idx, offset) => {
+                op::LOCAL_JUMP_IF_NE_CONST => {
+                    let slot = op0;
+                    let const_idx = next_word!();
+                    let offset = next_word!();
                     let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                     let val = self.fibers[fiber_idx].stack[base + slot as usize];
                     let constant = self.read_constant(fiber_idx, const_idx as usize);
@@ -1705,18 +1767,20 @@ impl VM {
                         self.fibers[fiber_idx].frames.last_mut().unwrap().ip += offset as usize;
                     }
                 }
-                OpCode::OpPushHandler(offset) => {
+                op::PUSH_HANDLER => {
+                    let offset = op0;
                     let target_ip = self.fibers[fiber_idx].frames.last().unwrap().ip + offset as usize;
                     self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.push(target_ip);
                 }
-                OpCode::OpPopHandler => {
+                op::POP_HANDLER => {
                     self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.pop();
                 }
-                OpCode::OpThrow => {
+                op::THROW => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.throw_value(fiber_idx, val)?;
                 }
-                OpCode::OpPrint(count) => {
+                op::PRINT => {
+                    let count = op0;
                     let mut args = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
@@ -1725,7 +1789,8 @@ impl VM {
                     let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
                     print!("{}", out);
                 }
-                OpCode::OpPrintln(count) => {
+                op::PRINTLN => {
+                    let count = op0;
                     let mut args = Vec::with_capacity(count as usize);
                     for _ in 0..count {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
@@ -1733,6 +1798,9 @@ impl VM {
                     args.reverse();
                     let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
                     println!("{}", out);
+                }
+                _ => {
+                    bail!("Unknown opcode: {}", opcode);
                 }
             }
         }
