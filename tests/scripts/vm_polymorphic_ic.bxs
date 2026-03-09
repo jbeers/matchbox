@@ -1,0 +1,26 @@
+
+function get_p(obj) {
+    return obj.p;
+}
+
+// 4 different shapes
+s1 = { p: 1 };
+s2 = { a: 1, p: 2 };
+s3 = { a: 1, b: 2, p: 3 };
+s4 = { a: 1, b: 2, c: 3, p: 4 };
+s5 = { a: 1, b: 2, c: 3, d: 4, p: 5 }; // Megamorphic transition for get_p
+
+total = 0;
+for (i = 0; i < 1000; i++) {
+    total = total + get_p(s1);
+    total = total + get_p(s2);
+    total = total + get_p(s3);
+    total = total + get_p(s4);
+    total = total + get_p(s5);
+}
+
+if (total != 15000) {
+    throw "Total mismatch: " & total;
+}
+
+println("Polymorphic IC test passed!");

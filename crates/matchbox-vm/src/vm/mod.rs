@@ -521,7 +521,7 @@ impl VM {
     }
 
     fn run_fiber(&mut self, fiber_idx: usize, quantum: usize) -> Result<Option<BxValue>> {
-        for _ in 0..quantum {
+        'quantum: for _ in 0..quantum {
             if fiber_idx >= self.fibers.len() {
                 return Ok(None);
             }
@@ -1206,12 +1206,24 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize {
-                                        let val = unsafe { &*properties_ptr }[index as usize];
-                                        self.fibers[fiber_idx].stack.push(val);
-                                        continue;
+                                match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize {
+                                            let val = unsafe { &*properties_ptr }[index as usize];
+                                            self.fibers[fiber_idx].stack.push(val);
+                                            continue;
+                                        }
                                     }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                let val = unsafe { &*properties_ptr }[entries[i].1];
+                                                self.fibers[fiber_idx].stack.push(val);
+                                                continue 'quantum;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
 
                                 if let Some(idx) = self.shapes.get_index(shape_id, name_id) {
@@ -1219,7 +1231,26 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                        match chunk.caches[ip_at_start] {
+                                            None => {
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            }
+                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                let mut entries = [(0, 0); 4];
+                                                entries[0] = (s, i);
+                                                entries[1] = (shape_id as usize, idx as usize);
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                            }
+                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                if *count < 4 {
+                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    *count += 1;
+                                                } else {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     let val = unsafe { &*properties_ptr }[idx as usize];
                                     self.fibers[fiber_idx].stack.push(val);
@@ -1239,12 +1270,24 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize {
-                                        let val = unsafe { &*properties_ptr }[index as usize];
-                                        self.fibers[fiber_idx].stack.push(val);
-                                        continue;
+                                match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize {
+                                            let val = unsafe { &*properties_ptr }[index as usize];
+                                            self.fibers[fiber_idx].stack.push(val);
+                                            continue;
+                                        }
                                     }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                let val = unsafe { &*properties_ptr }[entries[i].1];
+                                                self.fibers[fiber_idx].stack.push(val);
+                                                continue 'quantum;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
 
                                 if let Some(idx) = self.shapes.get_index(shape_id, name_id) {
@@ -1252,7 +1295,26 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                        match chunk.caches[ip_at_start] {
+                                            None => {
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            }
+                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                let mut entries = [(0, 0); 4];
+                                                entries[0] = (s, i);
+                                                entries[1] = (shape_id as usize, idx as usize);
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                            }
+                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                if *count < 4 {
+                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    *count += 1;
+                                                } else {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     let val = unsafe { &*properties_ptr }[idx as usize];
                                     self.fibers[fiber_idx].stack.push(val);
@@ -1342,12 +1404,24 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize {
-                                        s.properties[index as usize] = val;
-                                        self.fibers[fiber_idx].stack.push(val);
-                                        continue;
+                                match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize {
+                                            s.properties[index as usize] = val;
+                                            self.fibers[fiber_idx].stack.push(val);
+                                            continue;
+                                        }
                                     }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                s.properties[entries[i].1] = val;
+                                                self.fibers[fiber_idx].stack.push(val);
+                                                continue 'quantum;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
 
                                 if let Some(idx) = self.shapes.get_index(shape_id, name_id) {
@@ -1355,7 +1429,26 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                        match chunk.caches[ip_at_start] {
+                                            None => {
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            }
+                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                let mut entries = [(0, 0); 4];
+                                                entries[0] = (s, i);
+                                                entries[1] = (shape_id as usize, idx as usize);
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                            }
+                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                if *count < 4 {
+                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    *count += 1;
+                                                } else {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     s.properties[idx as usize] = val;
                                 } else {
@@ -1373,12 +1466,24 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize {
-                                        inst.properties[index as usize] = val;
-                                        self.fibers[fiber_idx].stack.push(val);
-                                        continue;
+                                match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize {
+                                            inst.properties[index as usize] = val;
+                                            self.fibers[fiber_idx].stack.push(val);
+                                            continue;
+                                        }
                                     }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                inst.properties[entries[i].1] = val;
+                                                self.fibers[fiber_idx].stack.push(val);
+                                                continue 'quantum;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
                                 }
 
                                 if let Some(idx) = self.shapes.get_index(shape_id, name_id) {
@@ -1386,7 +1491,26 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                        match chunk.caches[ip_at_start] {
+                                            None => {
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            }
+                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                let mut entries = [(0, 0); 4];
+                                                entries[0] = (s, i);
+                                                entries[1] = (shape_id as usize, idx as usize);
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                            }
+                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                if *count < 4 {
+                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    *count += 1;
+                                                } else {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     inst.properties[idx as usize] = val;
                                 } else {
@@ -1423,9 +1547,22 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                let index = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize { Some(index as usize) } else { None }
-                                } else { None };
+                                let index = match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize { Some(index as usize) } else { None }
+                                    }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        let mut found = None;
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                found = Some(entries[i].1);
+                                                break;
+                                            }
+                                        }
+                                        found
+                                    }
+                                    _ => None,
+                                };
 
                                 if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, name_id).map(|i| i as usize)) {
                                     let old_val = s.properties[idx];
@@ -1438,7 +1575,26 @@ impl VM {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
-                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            match chunk.caches[ip_at_start] {
+                                                None => {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                }
+                                                Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                    let mut entries = [(0, 0); 4];
+                                                    entries[0] = (s, i);
+                                                    entries[1] = (shape_id as usize, idx as usize);
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                }
+                                                Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                    if *count < 4 {
+                                                        entries[*count] = (shape_id as usize, idx as usize);
+                                                        *count += 1;
+                                                    } else {
+                                                        chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     } else {
                                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
@@ -1459,9 +1615,22 @@ impl VM {
                                     chunk.caches[ip_at_start].clone()
                                 };
 
-                                let index = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                                    if cached_shape == shape_id as usize { Some(index as usize) } else { None }
-                                } else { None };
+                                let index = match ic {
+                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                        if cached_shape == shape_id as usize { Some(index as usize) } else { None }
+                                    }
+                                    Some(IcEntry::Polymorphic { entries, count }) => {
+                                        let mut found = None;
+                                        for i in 0..count {
+                                            if entries[i].0 == shape_id as usize {
+                                                found = Some(entries[i].1);
+                                                break;
+                                            }
+                                        }
+                                        found
+                                    }
+                                    _ => None,
+                                };
 
                                 if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, name_id).map(|i| i as usize)) {
                                     let old_val = inst.properties[idx];
@@ -1474,7 +1643,26 @@ impl VM {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.function.chunk.borrow_mut();
-                                            chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            match chunk.caches[ip_at_start] {
+                                                None => {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                }
+                                                Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                    let mut entries = [(0, 0); 4];
+                                                    entries[0] = (s, i);
+                                                    entries[1] = (shape_id as usize, idx as usize);
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                }
+                                                Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                    if *count < 4 {
+                                                        entries[*count] = (shape_id as usize, idx as usize);
+                                                        *count += 1;
+                                                    } else {
+                                                        chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     } else {
                                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
@@ -2240,16 +2428,36 @@ impl VM {
                         chunk.caches[ip_at_start].clone()
                     };
 
-                    let method = if let Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) = ic {
-                        if cached_shape == shape_id as usize {
-                            let method_val = inst.properties[index as usize];
-                            if let Some(m_id) = method_val.as_gc_id() {
-                                if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
-                                    Some(Rc::clone(f))
+                    let method = match ic {
+                        Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                            if cached_shape == shape_id as usize {
+                                let method_val = inst.properties[index as usize];
+                                if let Some(m_id) = method_val.as_gc_id() {
+                                    if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
+                                        Some(Rc::clone(f))
+                                    } else { None }
                                 } else { None }
                             } else { None }
-                        } else { None }
-                    } else { None };
+                        }
+                        Some(IcEntry::Polymorphic { entries, count }) => {
+                            let mut found_idx = None;
+                            for i in 0..count {
+                                if entries[i].0 == shape_id as usize {
+                                    found_idx = Some(entries[i].1);
+                                    break;
+                                }
+                            }
+                            if let Some(idx) = found_idx {
+                                let method_val = inst.properties[idx];
+                                if let Some(m_id) = method_val.as_gc_id() {
+                                    if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
+                                        Some(Rc::clone(f))
+                                    } else { None }
+                                } else { None }
+                            } else { None }
+                        }
+                        _ => None,
+                    };
 
                     let method = if method.is_none() {
                         let name_intern_id = self.interner.intern(&name);
@@ -2261,7 +2469,26 @@ impl VM {
                                         let fiber = &self.fibers[fiber_idx];
                                         let frame = fiber.frames.last().unwrap();
                                         let mut chunk = frame.function.chunk.borrow_mut();
-                                        chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                        match chunk.caches[ip_at_start] {
+                                            None => {
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                            }
+                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                let mut entries = [(0, 0); 4];
+                                                entries[0] = (s, i);
+                                                entries[1] = (shape_id as usize, idx as usize);
+                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                            }
+                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                if *count < 4 {
+                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    *count += 1;
+                                                } else {
+                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                     Some(Rc::clone(f))
                                 } else { None }

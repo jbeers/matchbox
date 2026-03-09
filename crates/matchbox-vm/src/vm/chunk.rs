@@ -59,10 +59,14 @@ pub enum IcEntry {
         shape_id: usize,
         index: usize,
     },
+    Polymorphic {
+        entries: [(usize, usize); 4],
+        count: usize,
+    },
+    Megamorphic,
     Global {
         index: usize,
     },
-    // We can add Polymorphic here later
 }
 
 impl Chunk {
