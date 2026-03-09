@@ -1,0 +1,65 @@
+// java_interop/main.bxs
+// Demonstrates calling Java classes and methods from BoxLang via the
+// experimental JNI bridge in MatchBox native builds.
+//
+// Requirements:
+//   - A JDK installed on the host machine (e.g. Java 11+).
+//   - JAVA_HOME set, or `java` on your PATH.
+//   - A native build — Java interop is NOT available in WASM builds.
+//
+// Build & run:
+//   matchbox --target native main.bxs
+//   ./main
+
+println("=== BoxLang Java Interop ===")
+println("")
+
+// ---- java.lang.StringBuilder ----
+println("--- StringBuilder ---")
+import java:java.lang.StringBuilder as SB;
+
+sb = new SB("Hello")
+sb.append(", World")
+sb.append("!")
+println(sb.toString())        // Hello, World!
+println("Length: " & sb.length())
+
+println("")
+
+// ---- java.util.ArrayList ----
+println("--- ArrayList ---")
+import java:java.util.ArrayList as List;
+
+list = new List()
+list.add("BoxLang")
+list.add("MatchBox")
+list.add("Rust")
+println("Size:   " & list.size())
+println("Item 0: " & list.get(0))
+println("Item 1: " & list.get(1))
+
+println("")
+
+// ---- java.util.HashMap ----
+println("--- HashMap ---")
+import java:java.util.HashMap;
+
+map = new HashMap()
+map.put("language", "BoxLang")
+map.put("runtime",  "MatchBox")
+map.put("backend",  "Rust")
+println("language → " & map.get("language"))
+println("runtime  → " & map.get("runtime"))
+println("Contains 'backend': " & map.containsKey("backend"))
+
+println("")
+
+// ---- java.lang.Math (instantiated via java.new) ----
+println("--- Math ---")
+mathVal = java.new("java.lang.Math")
+println("sqrt(144)  = " & mathVal.sqrt(144))
+println("pow(2, 10) = " & mathVal.pow(2, 10))
+println("abs(-42)   = " & mathVal.abs(-42))
+
+println("")
+println("Done!")

@@ -1,0 +1,42 @@
+// main.bxs — Entry point for the Basic BoxLang Project example.
+// Run with: matchbox main.bxs
+
+import models.Animal;
+import models.Dog;
+
+println("=== MatchBox Basic Project ===")
+println("")
+
+// --- Create instances ---
+cat = new models.Animal().init("Whiskers", "Meow")
+dog = new models.Dog().init("Rex", "Labrador")
+
+// --- Polymorphism: call shared methods on both ---
+println("--- Descriptions ---")
+cat.describe()
+dog.describe()
+
+println("")
+println("--- Speak ---")
+cat.speak()
+dog.speak()
+
+println("")
+println("--- Dog Only ---")
+dog.fetch("ball")
+dog.fetch("frisbee")
+
+// --- Structs & for-in loops ---
+println("")
+println("--- Roster ---")
+animalRoster = [
+    { name: cat.name, kind: "Cat" },
+    { name: dog.name, kind: "Dog", breed: dog.breed }
+]
+
+for (entry in animalRoster) {
+    println("  " & entry.name & " — " & entry.kind)
+}
+
+println("")
+println("All done!")

@@ -111,6 +111,8 @@ The resulting binaries are typically **~500 KB** — small enough to ship as a G
 
 **Native Fusion** lets you write performance-critical functions in Rust and expose them as BoxLang BIFs (Built-In Functions), all statically linked into your final binary.
 
+> For the full macro and API reference, see [Native Fusion Reference](native-fusion.md).
+
 ### When to Use It
 
 - You need maximum throughput for a hot path (e.g., data parsing, compression, crypto).

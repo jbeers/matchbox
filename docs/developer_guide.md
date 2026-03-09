@@ -38,6 +38,8 @@ MatchBox provides a groundbreaking feature called **Native Fusion**. If you need
 
 When MatchBox detects a `native/` directory in your project containing Rust files (`.rs`), it automatically compiles them alongside the MatchBox VM engine, creating a hybrid binary where your Rust code is exposed as BoxLang Built-In Functions (BIFs).
 
+See the [Native Fusion Reference](building-and-deploying/native-fusion.md) for the full macro API, native object classes, and registration conventions.
+
 ---
 
 ## MatchBox CLI

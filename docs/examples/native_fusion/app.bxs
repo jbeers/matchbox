@@ -1,0 +1,59 @@
+// app.bxs — Native Fusion demo
+//
+// Demonstrates two forms of Native Fusion interop:
+//   1. Standalone BIFs  — plain functions callable anywhere (fast_fib, fast_factorial)
+//   2. Native objects   — stateful Rust structs instantiated with `new rust:module.Class()`
+//
+// MatchBox detects the native/ directory alongside this file, compiles the
+// Rust code, and links everything into the final binary automatically.
+//
+// Build:
+//   matchbox --target native app.bxs
+//
+// Run:
+//   ./app
+
+println("=== Native Fusion Demo ===")
+println("")
+
+// ---- Part 1: Standalone BIFs via #[matchbox_fn] ----
+
+// --- Fibonacci sequence (computed in Rust) ---
+println("--- Fibonacci (BIF) ---")
+for (i = 0; i <= 10; i++) {
+    println("  fib(" & i & ") = " & fast_fib(i))
+}
+
+println("")
+
+// --- Factorials (computed in Rust) ---
+println("--- Factorials (BIF) ---")
+for (n = 1; n <= 10; n++) {
+    println("  " & n & "! = " & fast_factorial(n))
+}
+
+println("")
+
+// ---- Part 2: Native object via #[matchbox_class] + #[matchbox_methods] ----
+//
+// `new rust:stats.RunningStats()` allocates a Rust RunningStats struct on the
+// VM heap. Method calls are routed back into Rust by the dispatcher generated
+// by #[matchbox_methods].
+
+println("--- RunningStats (native object) ---")
+
+stats = new rust:stats.RunningStats()
+
+dataset = [4, 8, 15, 16, 23, 42]
+for (v in dataset) {
+    stats.push(v)
+}
+
+println("  count : " & stats.count())
+println("  sum   : " & stats.sum())
+println("  mean  : " & stats.mean())
+println("  min   : " & stats.min())
+println("  max   : " & stats.max())
+
+println("")
+println("All results computed in Rust — zero JVM, zero overhead.")

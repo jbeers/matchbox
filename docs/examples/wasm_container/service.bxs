@@ -1,0 +1,62 @@
+// service.bxs — BoxLang WASM container service
+//
+// This script runs in a WASI environment:
+//   - No DOM access (no js.*)
+//   - No Java interop
+//   - stdout → container logs / wasmtime output
+//
+// Compile to a raw WASM binary:
+//   matchbox --target wasm service.bxs
+//
+// Run directly with Wasmtime:
+//   wasmtime service.wasm
+//
+// Run in Docker (with a WASM-capable runtime):
+//   docker build -t matchbox-service .
+//   docker run --runtime=io.containerd.wasmtime.v1 \
+//              --platform=wasi/wasm32 matchbox-service
+
+println("=== BoxLang WASM Service ===")
+println("")
+
+// ---- Process a dataset ----
+// In a real service this data would come from stdin, CLI args, or a file
+// mounted via WASI --dir grants.
+
+data  = [15, 42, 8, 97, 3, 64, 28, 51, 76, 33]
+count = 10
+sum   = 0
+max   = data[1]
+min   = data[1]
+
+for (n in data) {
+    sum = sum + n
+    if (n > max) { max = n }
+    if (n < min) { min = n }
+}
+
+mean  = sum / count
+range = max - min
+
+println("--- Dataset Summary ---")
+println("Values : " & count)
+println("Sum    : " & sum)
+println("Mean   : " & mean)
+println("Min    : " & min)
+println("Max    : " & max)
+println("Range  : " & range)
+println("")
+
+// ---- Fibonacci sequence (first 10 terms) ----
+println("--- Fibonacci (first 10 terms) ---")
+a = 0
+b = 1
+for (i = 1; i <= 10; i++) {
+    println("  term " & i & ": " & a)
+    next = a + b
+    a    = b
+    b    = next
+}
+
+println("")
+println("Service completed successfully.")

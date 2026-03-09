@@ -1,0 +1,18 @@
+class Animal {
+    property name;
+    property sound;
+
+    function init(name, sound) {
+        this.name  = name
+        this.sound = sound
+        return this
+    }
+
+    function describe() {
+        println("I am " & this.name & " and I make the sound '" & this.sound & "'")
+    }
+
+    function speak() {
+        println(this.sound & "!")
+    }
+}

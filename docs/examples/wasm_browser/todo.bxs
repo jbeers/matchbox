@@ -1,0 +1,89 @@
+// todo.bxs — A simple browser Todo app using BoxLang compiled to WebAssembly.
+//
+// Compile with:
+//   matchbox --target js todo.bxs
+// This produces todo.js + todo.wasm.  Open index.html in a browser to run.
+//
+// The js.* global provides access to Browser APIs (DOM, window, console).
+// Top-level code runs once when the ES module is initialised (DOM is ready).
+// All functions defined here are exported and callable from JavaScript.
+
+// --------------------------------------------------------------------------
+// State
+// --------------------------------------------------------------------------
+todos    = []
+nextId   = 1
+
+// --------------------------------------------------------------------------
+// Exported functions — called from index.html via the compiled JS module
+// --------------------------------------------------------------------------
+
+function addTodo(text) {
+    if (text == "" || text == null) {
+        return
+    }
+    todo        = { id: nextId, text: text, done: false }
+    todos[nextId] = todo      // store by id so removal is easy
+    nextId      = nextId + 1
+    renderTodos()
+}
+
+function toggleTodo(id) {
+    if (todos[id] != null) {
+        todos[id].done = !todos[id].done
+        renderTodos()
+    }
+}
+
+function removeTodo(id) {
+    todos[id] = null          // mark slot as empty
+    renderTodos()
+}
+
+// --------------------------------------------------------------------------
+// DOM rendering (internal)
+// --------------------------------------------------------------------------
+
+function renderTodos() {
+    list     = js.document.getElementById("todo-list")
+    list.innerHTML = ""
+
+    anyVisible = false
+
+    for (id = 1; id < nextId; id++) {
+        todo = todos[id]
+        if (todo == null) {
+            continue
+        }
+        anyVisible = true
+
+        li   = js.document.createElement("li")
+        li.className = todo.done ? "done" : ""
+
+        span = js.document.createElement("span")
+        span.className   = "todo-text"
+        span.textContent = todo.text
+        span.setAttribute("data-id", id)
+
+        btn = js.document.createElement("button")
+        btn.className   = "remove-btn"
+        btn.textContent = "✕"
+        btn.setAttribute("data-id", id)
+
+        li.appendChild(span)
+        li.appendChild(btn)
+        list.appendChild(li)
+    }
+
+    if (!anyVisible) {
+        empty = js.document.createElement("li")
+        empty.className   = "empty"
+        empty.textContent = "No tasks yet — add one above!"
+        list.appendChild(empty)
+    }
+}
+
+// --------------------------------------------------------------------------
+// Initial render
+// --------------------------------------------------------------------------
+renderTodos()

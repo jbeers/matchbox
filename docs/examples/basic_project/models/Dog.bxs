@@ -1,0 +1,21 @@
+import models.Animal;
+import models.ISpeakable;
+
+class Dog extends Animal implements ISpeakable {
+    property breed;
+
+    function init(name, breed) {
+        this.name  = name
+        this.sound = "Woof"
+        this.breed = breed
+        return this
+    }
+
+    function speak() {
+        println(this.name & " barks: Woof! Woof!")
+    }
+
+    function fetch(item) {
+        println(this.name & " fetches the " & item & "!")
+    }
+}
