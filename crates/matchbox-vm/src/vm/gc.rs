@@ -78,31 +78,37 @@ impl Heap {
             if self.marks[id] { continue; }
             self.marks[id] = true;
 
-            let children = match self.objects[id].as_ref().unwrap() {
-                GcObject::String(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::NativeObject(_) => Vec::new(),
+            match self.objects[id].as_ref().unwrap() {
+                GcObject::String(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::NativeObject(_) => {}
                 #[cfg(all(target_arch = "wasm32", feature = "js"))]
-                GcObject::JsValue(_) => Vec::new(),
+                GcObject::JsValue(_) => {}
                 #[cfg(all(target_arch = "wasm32", not(feature = "js")))]
-                GcObject::JsHandle(_) => Vec::new(),
-                GcObject::Array(arr) => arr.clone(),
-                GcObject::Struct(s) => s.properties.clone(),
+                GcObject::JsHandle(_) => {}
+                GcObject::Array(arr) => {
+                    for val in arr {
+                        self.add_to_worklist(val, &mut worklist);
+                    }
+                }
+                GcObject::Struct(s) => {
+                    for val in &s.properties {
+                        self.add_to_worklist(val, &mut worklist);
+                    }
+                }
                 GcObject::Instance(inst) => {
-                    let mut c = inst.properties.clone();
-                    c.extend(inst.variables.borrow().values().cloned());
-                    c
+                    for val in &inst.properties {
+                        self.add_to_worklist(val, &mut worklist);
+                    }
+                    for val in inst.variables.borrow().values() {
+                        self.add_to_worklist(val, &mut worklist);
+                    }
                 }
                 GcObject::Future(f) => {
-                    let mut c = vec![f.value];
-                    if let Some(h) = f.error_handler {
-                        c.push(h);
+                    self.add_to_worklist(&f.value, &mut worklist);
+                    if let Some(h) = &f.error_handler {
+                        self.add_to_worklist(h, &mut worklist);
                     }
-                    c
                 }
             };
-
-            for child in children {
-                self.add_to_worklist(&child, &mut worklist);
-            }
         }
 
         // 2. Sweep Phase
