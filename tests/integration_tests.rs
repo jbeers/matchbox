@@ -9,7 +9,7 @@ macro_rules! script_test {
             path.push("tests/scripts");
             path.push($file);
             
-            if let Err(e) = process_file(&path, false, None, Vec::new(), false, false) {
+            if let Err(e) = process_file(&path, false, None, Vec::new(), false, false, None) {
                 panic!("Script {} failed: {}", $file, e);
             }
         }
@@ -54,7 +54,7 @@ script_test!(vm_imports_no_alias, "vm_imports_no_alias.bxs");
 fn vm_interface_fail() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/scripts/vm_interface_fail.bxs");
-    process_file(&path, false, None, Vec::new(), false, false).unwrap();
+    process_file(&path, false, None, Vec::new(), false, false, None).unwrap();
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn test_native_fusion_build() {
     path.push("tests/native_fusion/script.bxs");
     
     // 1. Build the native binary
-    if let Err(e) = process_file(&path, false, Some("native"), Vec::new(), false, false) {
+    if let Err(e) = process_file(&path, false, Some("native"), Vec::new(), false, false, None) {
         panic!("Native fusion build failed: {}", e);
     }
     

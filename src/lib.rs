@@ -129,19 +129,26 @@ pub fn run() -> Result<()> {
         }
     }
 
+    let output: Option<std::path::PathBuf> = if let Some(idx) = args.iter().position(|a| a == "--output") {
+        args.get(idx + 1).map(|s| std::path::PathBuf::from(s))
+    } else {
+        None
+    };
+
     let filename = args.iter().skip(1)
         .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm" && *a != "wasi" && *a != "js"
               && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--target").unwrap_or(true))
               && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--keep").unwrap_or(true))
+              && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--output").unwrap_or(true))
         );
 
     match filename {
         Some(name) => {
             let path = Path::new(name);
             if path.is_dir() {
-                process_directory(path, is_build, target, keep_symbols, no_shaking, no_std_lib)?;
+                process_directory(path, is_build, target, keep_symbols, no_shaking, no_std_lib, output.as_deref())?;
             } else {
-                process_file(path, is_build, target, keep_symbols, no_shaking, no_std_lib)?;
+                process_file(path, is_build, target, keep_symbols, no_shaking, no_std_lib, output.as_deref())?;
             }
         }
         None => {
@@ -168,6 +175,7 @@ fn print_usage() {
     println!("  --keep <symbols>    Comma-separated list of BIFs to preserve");
     println!("  --no-shaking        Disable tree-shaking and include all prelude BIFs");
     println!("  --no-std-lib        Exclude the standard library (prelude) entirely");
+    println!("  --output <path>     Set the output file path for compiled artifacts");
     println!("\nIf no file is provided, matchbox starts in REPL mode.");
 }
 
@@ -180,7 +188,7 @@ fn print_version() {
     println!("built on: {}", date);
 }
 
-pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool) -> Result<()> {
+pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, output: Option<&Path>) -> Result<()> {
     if path.extension().and_then(|s| s.to_str()) == Some("bxb") {
         let bytes = fs::read(path)?;
         let chunk: Chunk = bincode::deserialize(&bytes)?;
@@ -193,7 +201,7 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
 
         if is_build {
             let bytes = bincode::serialize(&chunk)?;
-            let out_path = path.with_extension("bxb");
+            let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| path.with_extension("bxb"));
             fs::write(&out_path, bytes)?;
             println!("Compiled to {}", out_path.display());
         } else if let Some(t) = target {
@@ -201,14 +209,14 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
             let native_dir = project_root.join("native");
             
             if native_dir.exists() && native_dir.is_dir() {
-                return produce_fusion_artifact(&chunk, path, &native_dir, t, &ast);
+                return produce_fusion_artifact(&chunk, path, &native_dir, t, &ast, output);
             }
 
             match t {
-                "wasi" => produce_wasi_binary(&chunk, path)?,
-                "wasm" => produce_wasm_binary(&chunk, path)?,
-                "js" => produce_js_bundle(&chunk, path, &ast)?,
-                target => produce_native_binary(&chunk, path, target)?,
+                "wasi" => produce_wasi_binary(&chunk, path, output)?,
+                "wasm" => produce_wasm_binary(&chunk, path, output)?,
+                "js" => produce_js_bundle(&chunk, path, &ast, output)?,
+                target => produce_native_binary(&chunk, path, target, output)?,
             }
         } else {
             run_chunk(chunk)?;
@@ -217,7 +225,7 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
     Ok(())
 }
 
-fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement]) -> Result<()> {
+fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement], output: Option<&Path>) -> Result<()> {
     let bytecode = bincode::serialize(chunk)?;
     let b64_bytecode = base64_simd::STANDARD.encode_to_string(&bytecode);
     
@@ -257,13 +265,13 @@ fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement]) 
 
     let final_js = JS_GLUE_TEMPLATE.replace("/* __REPLACE_ME__ */", &bootstrap);
 
-    let out_path = source_path.with_extension("js");
+    let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| source_path.with_extension("js"));
     fs::write(&out_path, final_js)?;
     println!("Standalone JS module produced: {}", out_path.display());
     Ok(())
 }
 
-fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool) -> Result<()> {
+fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, output: Option<&Path>) -> Result<()> {
     let entry_points = ["index.bxs", "main.bxs", "Application.bx"];
     let mut entry_file = None;
     for ep in entry_points {
@@ -274,7 +282,7 @@ fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_sym
         }
     }
     let entry_file = entry_file.context("No entry point found in directory")?;
-    process_file(&entry_file, is_build, target, keep_symbols, no_shaking, no_std_lib)
+    process_file(&entry_file, is_build, target, keep_symbols, no_shaking, no_std_lib, output)
 }
 
 pub fn run_chunk(chunk: Chunk) -> Result<()> {
@@ -361,7 +369,7 @@ fn load_wasm_custom_section() -> Result<Chunk> {
     bail!("Custom section loading requires host support in this POC")
 }
 
-fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str) -> Result<()> {
+fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str, output: Option<&Path>) -> Result<()> {
     let stub_key = if target == "native" { "host" } else { target };
     let native_bytes = stubs::get_stub(stub_key).unwrap_or(&[]);
     if native_bytes.is_empty() {
@@ -373,7 +381,9 @@ fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str) -> Res
     binary_bytes.extend_from_slice(&chunk_bytes);
     binary_bytes.extend_from_slice(&chunk_len.to_le_bytes());
     binary_bytes.extend_from_slice(MAGIC_FOOTER);
-    let out_path = source_path.with_extension("");
+    let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+        if cfg!(windows) { source_path.with_extension("exe") } else { source_path.with_extension("") }
+    });
     fs::write(&out_path, binary_bytes)?;
     #[cfg(unix)]
     {
@@ -386,7 +396,7 @@ fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str) -> Res
     Ok(())
 }
 
-fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path, target: &str, ast: &[ast::Statement]) -> Result<()> {
+fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path, target: &str, ast: &[ast::Statement], output: Option<&Path>) -> Result<()> {
     println!("Native Fusion detected! Target: {}. Building hybrid artifact...", target);
     
     let build_dir = std_env::current_dir()?.join("target").join("fusion");
@@ -544,17 +554,19 @@ impl BoxLangVM {
     if target == "native" {
         let exe_name = if cfg!(windows) { "fusion_build.exe" } else { "fusion_build" };
         let artifact = build_dir.join("target").join("release").join(exe_name);
-        let out_path = source_path.with_extension("");
+        let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| {
+            if cfg!(windows) { source_path.with_extension("exe") } else { source_path.with_extension("") }
+        });
         fs::copy(artifact, &out_path)?;
         println!("Native Fusion binary produced: {}", out_path.display());
     } else if target == "wasi" {
         let artifact = build_dir.join("target").join("wasm32-wasip1").join("release").join("fusion_build.wasm");
-        let out_path = source_path.with_extension("wasm");
+        let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| source_path.with_extension("wasm"));
         fs::copy(artifact, &out_path)?;
         println!("WASI Fusion binary produced: {}", out_path.display());
     } else if target == "wasm" {
         let artifact = build_dir.join("target").join("wasm32-unknown-unknown").join("release").join("fusion_build.wasm");
-        let out_path = source_path.with_extension("wasm");
+        let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| source_path.with_extension("wasm"));
         fs::copy(artifact, &out_path)?;
         println!("WASM Fusion binary produced: {}", out_path.display());
     } else if target == "js" {
@@ -565,14 +577,14 @@ impl BoxLangVM {
         fs::copy(artifact, &wasm_out)?;
         
         // Re-use standard JS bundle logic but pointed to this new wasm
-        produce_js_bundle(chunk, source_path, ast)?;
+        produce_js_bundle(chunk, source_path, ast, output)?;
         println!("JS Fusion module produced. NOTE: Requires wasm-bindgen on the fusion artifact for full functionality.");
     }
 
     Ok(())
 }
 
-fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
+fn produce_wasi_binary(chunk: &Chunk, source_path: &Path, output: Option<&Path>) -> Result<()> {
     let mut wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
@@ -612,14 +624,14 @@ fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
     wasm_bytes[len_offset..len_offset + 4].copy_from_slice(&len_bytes);
     wasm_bytes[data_offset..data_offset + chunk_bytes.len()].copy_from_slice(&chunk_bytes);
 
-    let out_path = source_path.with_extension("wasm");
+    let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| source_path.with_extension("wasm"));
     fs::write(&out_path, wasm_bytes)?;
 
     println!("WASI container binary produced: {}", out_path.display());
     Ok(())
 }
 
-fn produce_wasm_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
+fn produce_wasm_binary(chunk: &Chunk, source_path: &Path, output: Option<&Path>) -> Result<()> {
     let wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
@@ -636,7 +648,7 @@ fn produce_wasm_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
     custom_section.encode(&mut section_bytes);
     out_bytes.extend_from_slice(&section_bytes);
     
-    let out_path = source_path.with_extension("wasm");
+    let out_path = output.map(|p| p.to_path_buf()).unwrap_or_else(|| source_path.with_extension("wasm"));
     fs::write(&out_path, out_bytes)?;
     
     println!("WASM binary produced: {}", out_path.display());
