@@ -8,7 +8,8 @@
 # No OS, no shell, no libc — just the binary and the WASM runtime.
 #
 # Build (must specify --platform so the manifest matches the run command):
-#   matchbox --target wasm service.bxs   # compile BoxLang → service.wasm
+#   rustup target add wasm32-wasip1
+#   matchbox --target wasi service.bxs   # compile BoxLang → service.wasm
 #   docker buildx build --platform wasi/wasm32 -t matchbox-service .
 #
 # Run (Docker Desktop 4.15+ with built-in WASM support):
@@ -21,7 +22,7 @@
 # Use -d (detached) and docker logs to see output.
 # ---------------------------------------------------------------------------
 
-FROM --platform=wasi/wasm32 scratch
+FROM scratch
 
 COPY service.wasm /service.wasm
 

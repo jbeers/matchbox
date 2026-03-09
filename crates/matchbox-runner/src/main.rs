@@ -5,6 +5,35 @@ use std::fs;
 
 const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
+// ---------------------------------------------------------------------------
+// WASI embed blob
+//
+// Layout: [0..8]  = magic sentinel  "BXLG\x00\x00\x00\x01"
+//         [8..12] = bytecode length (u32, little-endian), zero until patched
+//         [12..]  = bytecode bytes,  zero until patched
+//
+// `matchbox --target wasi` locates this sentinel in the pre-built stub binary
+// and patches the length + bytecode in-place — no cargo invocation needed.
+//
+// EMBED_CAPACITY is the total size of this region. Data capacity is
+// EMBED_CAPACITY - 12 bytes. Scripts that exceed this limit should use
+// `--target native` or increase EMBED_CAPACITY and rebuild the stub.
+// ---------------------------------------------------------------------------
+#[cfg(target_arch = "wasm32")]
+const EMBED_CAPACITY: usize = 1024 * 1024; // 1 MB total (≈1 MB - 12 B usable)
+
+#[cfg(target_arch = "wasm32")]
+#[used]
+#[no_mangle]
+static mut BOXLANG_EMBED: [u8; EMBED_CAPACITY] = {
+    let mut arr = [0u8; EMBED_CAPACITY];
+    // Magic sentinel — must match SENTINEL in produce_wasi_binary
+    arr[0] = b'B'; arr[1] = b'X'; arr[2] = b'L'; arr[3] = b'G';
+    arr[4] = 0;    arr[5] = 0;    arr[6] = 0;    arr[7] = 1;
+    // bytes 8-11: length (u32 LE) — zero → no bytecode embedded
+    arr
+};
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()> {
     let bytes = fs::read(std_env::current_exe()?)?;
@@ -15,7 +44,33 @@ fn main() -> Result<()> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {}
+fn main() -> Result<()> {
+    // Safety: single-threaded WASM, no concurrent access.
+    let embed: &[u8] = unsafe {
+        std::slice::from_raw_parts((&raw const BOXLANG_EMBED) as *const u8, EMBED_CAPACITY)
+    };
+
+    // Verify sentinel
+    if embed[0..8] != [b'B', b'X', b'L', b'G', 0, 0, 0, 1] {
+        anyhow::bail!("BOXLANG_EMBED sentinel missing — stub may be corrupt");
+    }
+
+    let len = u32::from_le_bytes([embed[8], embed[9], embed[10], embed[11]]) as usize;
+    if len == 0 {
+        // Unpatched stub — nothing to run.
+        return Ok(());
+    }
+
+    if 12 + len > EMBED_CAPACITY {
+        anyhow::bail!("Embedded bytecode length {} exceeds EMBED_CAPACITY", len);
+    }
+
+    let bytecode = &embed[12..12 + len];
+    let chunk: Chunk = bincode::deserialize(bytecode)?;
+    let mut vm = VM::new();
+    vm.interpret(chunk)?;
+    Ok(())
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn load_embedded_bytecode(bytes: &[u8]) -> Result<Chunk> {

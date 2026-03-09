@@ -5,16 +5,21 @@
 //   - No Java interop
 //   - stdout → container logs / wasmtime output
 //
-// Compile to a raw WASM binary:
-//   matchbox --target wasm service.bxs
+// Prerequisites:
+//   rustup target add wasm32-wasip1
+//
+// Compile to a WASI binary (--target wasi, not --target wasm):
+//   matchbox --target wasi service.bxs
 //
 // Run directly with Wasmtime:
 //   wasmtime service.wasm
 //
 // Run in Docker (with a WASM-capable runtime):
-//   docker build -t matchbox-service .
-//   docker run --runtime=io.containerd.wasmtime.v1 \
+//   docker buildx build --platform wasi/wasm32 -t matchbox-service .
+//   docker run -d --name matchbox-svc \
+//              --runtime=io.containerd.wasmtime.v1 \
 //              --platform=wasi/wasm32 matchbox-service
+//   docker logs matchbox-svc && docker rm matchbox-svc
 
 println("=== BoxLang WASM Service ===")
 println("")

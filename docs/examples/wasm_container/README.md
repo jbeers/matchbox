@@ -15,25 +15,40 @@ wasm_container/
 └── Dockerfile   ← minimal OCI image (FROM scratch)
 ```
 
-## Step 1 — Compile to WASM
+## Step 1 — Prerequisites
+
+No special prerequisites are needed. `matchbox --target wasi` uses a pre-built
+WASI runner stub and produces a `.wasm` binary in under a second with no `cargo`
+or Rust toolchain required at compile time.
+
+To run the binary outside of Docker you need a WASI runtime such as Wasmtime:
+
+```bash
+# Install Wasmtime (macOS / Linux) — optional, for running without Docker
+curl https://wasmtime.dev/install.sh -sSf | bash
+```
+
+## Step 2 — Compile to WASM
 
 ```bash
 cd docs/examples/wasm_container
-matchbox --target wasm service.bxs
+matchbox --target wasi service.bxs
 ```
 
-This produces `service.wasm` — a self-contained binary embedding the MatchBox VM
-and your compiled BoxLang bytecode.
+> **`--target wasi` not `--target wasm`**  
+> `--target wasm` produces a browser-oriented binary. `--target wasi` compiles
+> to `wasm32-wasip1` using a pre-built runner stub — no `cargo` invocation
+> needed; compilation completes in under a second.
 
-## Step 2A — Run with Wasmtime (no Docker required)
+This produces `service.wasm` — a self-contained WASI binary embedding the
+MatchBox VM and your compiled BoxLang bytecode.
 
-[Wasmtime](https://wasmtime.dev/) is the reference WASI runtime.
+## Step 3 — Run with Wasmtime (no Docker required)
+
+If you installed Wasmtime, you can run the binary directly and see output in your
+terminal immediately — no Docker overhead:
 
 ```bash
-# Install Wasmtime (macOS / Linux)
-curl https://wasmtime.dev/install.sh -sSf | bash
-
-# Run
 wasmtime service.wasm
 ```
 
@@ -65,7 +80,7 @@ Grant filesystem access if your script reads files:
 wasmtime --dir=. service.wasm
 ```
 
-## Step 2B — Run with WasmEdge
+## Step 4 — Run with WasmEdge
 
 ```bash
 # Install WasmEdge
@@ -75,11 +90,11 @@ curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/insta
 wasmedge service.wasm
 ```
 
-## Step 3 — Build a Docker Image
+## Step 5 — Build a Docker Image
 
 ```bash
-# Compile first (produces service.wasm)
-matchbox --target wasm service.bxs
+# Compile first (produces service.wasm via a full wasm32-wasip1 cargo build)
+matchbox --target wasi service.bxs
 
 # Build the OCI image, annotating it for the wasi/wasm32 platform.
 # This must match the --platform flag used at run time.
@@ -96,25 +111,12 @@ size is the WASM file itself (~500 KB).
 > and tries to pull from Docker Hub — causing a "repository does not exist" error.
 > Building with `--platform wasi/wasm32` ensures the manifest matches.
 
-## Step 4 — Run the Docker Container
+## Step 6 — Run the Docker Container
 
-Docker Desktop 4.15+ includes native WASM support. The containerd WASM shim
-routes the WASM process's stdout to Docker's log buffer rather than streaming it
-directly to the terminal, so run the container detached and read the output with
-`docker logs`:
-
-```bash
-docker run -d --name matchbox-svc \
-           --runtime=io.containerd.wasmtime.v1 \
-           --platform=wasi/wasm32 \
-           matchbox-service
-
-docker logs matchbox-svc
-docker rm matchbox-svc
-```
-
-With the [containerd-shim-wasmtime](https://github.com/containerd/runwasi) on a
-Linux host the same approach applies:
+The `containerd-shim-wasmtime` always routes the WASM process's stdout through
+Docker's log driver. It does not stream output to an attached terminal, regardless
+of flags. The reliable pattern is to run detached and read logs after the
+container exits:
 
 ```bash
 docker run -d --name matchbox-svc \
@@ -126,12 +128,8 @@ docker logs matchbox-svc
 docker rm matchbox-svc
 ```
 
-> **Why detached + `docker logs`?**  
-> The containerd WASM shim buffers the WASM process's stdout into Docker's log
-> driver rather than piping it directly to the terminal. Running attached (with
-> or without `-i`) produces no visible output; running with `-i` causes the shim
-> to send SIGKILL (exit 137) when stdin closes. Detached mode (`-d`) is the
-> reliable pattern for capturing output from WASM containers.
+> **Tip:** For live terminal output during development, skip Docker and use
+> `wasmtime service.wasm` directly — it is simpler and faster.
 
 ## Push to a Registry
 

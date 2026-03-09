@@ -570,25 +570,48 @@ impl BoxLangVM {
 }
 
 fn produce_wasi_binary(chunk: &Chunk, source_path: &Path) -> Result<()> {
-    let wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
+    let mut wasm_bytes = stubs::get_stub("wasi").unwrap_or(&[]).to_vec();
     if wasm_bytes.is_empty() {
         bail!("WASI runner stub is empty. The matchbox CLI must be rebuilt with the wasm32-wasip1 target installed.");
     }
+
     let chunk_bytes = bincode::serialize(chunk)?;
-    
-    let mut out_bytes = wasm_bytes;
-    use wasm_encoder::Encode;
-    let custom_section = wasm_encoder::CustomSection {
-        name: "boxlang_bytecode".into(),
-        data: (&chunk_bytes).into(),
-    };
-    let mut section_bytes = Vec::new();
-    custom_section.encode(&mut section_bytes);
-    out_bytes.extend_from_slice(&section_bytes);
-    
+
+    // The runner stub contains a 1 MB sentinel region whose layout is:
+    //   [0..8]  = magic "BXLG\x00\x00\x00\x01"
+    //   [8..12] = bytecode length (u32 LE)
+    //   [12..]  = bytecode data
+    // We locate it by magic and patch in-place — no cargo invocation needed.
+    const SENTINEL: [u8; 8] = [b'B', b'X', b'L', b'G', 0, 0, 0, 1];
+    const EMBED_CAPACITY: usize = 1024 * 1024;
+    const EMBED_DATA_CAPACITY: usize = EMBED_CAPACITY - 12;
+
+    let sentinel_pos = wasm_bytes
+        .windows(SENTINEL.len())
+        .position(|w| w == SENTINEL)
+        .context("WASI stub is missing the BOXLANG_EMBED sentinel. \
+                  Rebuild the runner stub: \
+                  cargo build --release --target wasm32-wasip1 -p matchbox_runner")?;
+
+    if chunk_bytes.len() > EMBED_DATA_CAPACITY {
+        bail!(
+            "Bytecode ({} bytes) exceeds the WASI embed capacity ({} bytes). \
+             Increase EMBED_CAPACITY in crates/matchbox-runner/src/main.rs and rebuild the stub.",
+            chunk_bytes.len(),
+            EMBED_DATA_CAPACITY
+        );
+    }
+
+    let len_offset  = sentinel_pos + 8;
+    let data_offset = sentinel_pos + 12;
+
+    let len_bytes = (chunk_bytes.len() as u32).to_le_bytes();
+    wasm_bytes[len_offset..len_offset + 4].copy_from_slice(&len_bytes);
+    wasm_bytes[data_offset..data_offset + chunk_bytes.len()].copy_from_slice(&chunk_bytes);
+
     let out_path = source_path.with_extension("wasm");
-    fs::write(&out_path, out_bytes)?;
-    
+    fs::write(&out_path, wasm_bytes)?;
+
     println!("WASI container binary produced: {}", out_path.display());
     Ok(())
 }

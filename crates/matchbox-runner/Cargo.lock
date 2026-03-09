@@ -301,6 +301,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "matchbox-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "matchbox_runner"
 version = "0.2.0"
 dependencies = [
@@ -320,6 +329,7 @@ dependencies = [
  "chrono",
  "getrandom",
  "jni",
+ "matchbox-macros",
  "rand",
  "serde",
  "serde_json",
