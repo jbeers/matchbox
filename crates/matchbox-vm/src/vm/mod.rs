@@ -500,7 +500,7 @@ impl VM {
 
                 all_waiting = false;
                 self.current_fiber_idx = Some(i);
-                match self.run_fiber(i, 100) {
+                match self.run_fiber(i, 1000) {
                     Ok(Some(result)) => {
                         let fiber = self.fibers.swap_remove(i);
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
@@ -640,6 +640,35 @@ impl VM {
                         if val.as_int() < limit.as_int() {
                             self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                         }
+                    }
+                }
+                op::FOR_LOOP_STEP => {
+                    // Fused: increment local, compare to const, jump back if still less.
+                    // Replaces INC_LOCAL + LOCAL_COMPARE_JUMP — halves dispatch overhead for tight for-loops.
+                    let slot = op0;
+                    let const_idx = next_word!();
+                    let offset = next_word!();
+                    let base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
+                    let val = self.fibers[fiber_idx].stack[base + slot as usize];
+                    let next_val = if val.is_int() {
+                        BxValue::new_int(val.as_int() + 1)
+                    } else if val.is_number() {
+                        BxValue::new_number(val.as_number() + 1.0)
+                    } else {
+                        self.throw_error(fiber_idx, "For loop variable must be a number")?;
+                        continue;
+                    };
+                    self.fibers[fiber_idx].stack[base + slot as usize] = next_val;
+                    let limit = self.read_constant(fiber_idx, const_idx as usize);
+                    let should_loop = if next_val.is_int() && limit.is_int() {
+                        next_val.as_int() < limit.as_int()
+                    } else if next_val.is_number() && limit.is_number() {
+                        next_val.as_number() < limit.as_number()
+                    } else {
+                        false
+                    };
+                    if should_loop {
+                        self.fibers[fiber_idx].frames.last_mut().unwrap().ip -= offset as usize;
                     }
                 }
                 op::COMPARE_JUMP => {

@@ -479,13 +479,25 @@ impl Compiler {
                     }
                 }
 
+                let mut merged_into_step = false;
                 if let Some(update_expr) = update {
                     let mut optimized_update = false;
                     if let ExpressionKind::Postfix { base, operator } = &update_expr.kind {
                         if *operator == "++" {
                             if let ExpressionKind::Identifier(name) = &base.kind {
                                 if let Some(slot) = self.resolve_local(name) {
-                                    self.chunk.emit1(op::INC_LOCAL, slot as u32, update_expr.line);
+                                    // If condition is also `this_local < CONST`, merge into FOR_LOOP_STEP
+                                    let can_merge = if let Some((is_local_cond, cond_slot, _)) = optimized_condition {
+                                        is_local_cond && cond_slot == slot as u32
+                                    } else {
+                                        false
+                                    };
+                                    if can_merge {
+                                        merged_into_step = true;
+                                        // INC will be handled by FOR_LOOP_STEP; don't emit INC_LOCAL
+                                    } else {
+                                        self.chunk.emit1(op::INC_LOCAL, slot as u32, update_expr.line);
+                                    }
                                     optimized_update = true;
                                 } else if !self.is_class {
                                     let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name.to_lowercase())));
@@ -503,7 +515,11 @@ impl Compiler {
                 }
 
                 if let Some((is_local, idx, const_idx)) = optimized_condition {
-                    if is_local {
+                    if is_local && merged_into_step {
+                        // Single opcode: increment local + compare + jump back
+                        let offset = self.chunk.code.len() - body_start + 3;
+                        self.chunk.emit3(op::FOR_LOOP_STEP, idx as u32, const_idx as u32, offset as u32, stmt.line as u32);
+                    } else if is_local {
                         let offset = self.chunk.code.len() - body_start + 3;
                         self.chunk.emit3(op::LOCAL_COMPARE_JUMP, idx as u32, const_idx as u32, offset as u32, stmt.line as u32);
                     } else {

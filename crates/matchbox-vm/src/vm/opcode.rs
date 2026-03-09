@@ -6,7 +6,7 @@
 /// Instruction widths:
 ///   1-word: most instructions
 ///   2-word: COMPARE_JUMP, CALL_NAMED, INVOKE
-///   3-word: LOCAL_COMPARE_JUMP, GLOBAL_COMPARE_JUMP, INVOKE_NAMED, ITER_NEXT, LOCAL_JUMP_IF_NE_CONST
+///   3-word: LOCAL_COMPARE_JUMP, GLOBAL_COMPARE_JUMP, INVOKE_NAMED, ITER_NEXT, LOCAL_JUMP_IF_NE_CONST, FOR_LOOP_STEP
 pub mod op {
     pub const INC_LOCAL: u8 = 0;
     pub const LOCAL_COMPARE_JUMP: u8 = 1;   // 3-word: op0=slot, w1=const_idx, w2=offset
@@ -71,4 +71,5 @@ pub mod op {
     pub const THROW: u8 = 60;
     pub const PRINT: u8 = 61;
     pub const PRINTLN: u8 = 62;
+    pub const FOR_LOOP_STEP: u8 = 63;  // 3-word: op0=slot, w1=const_idx, w2=offset — increment local, compare < const, jump back if true
 }
