@@ -439,7 +439,15 @@ strip = true
             let mod_name = path.file_stem().unwrap().to_str().unwrap();
             fs::copy(&path, build_dir.join("src").join(format!("{}.rs", mod_name)))?;
             mod_decls.push_str(&format!("mod {};\n", mod_name));
-            registration_calls.push_str(&format!("    for (name, val) in {}::register_bifs() {{ bifs.insert(name, val); }}\n", mod_name));
+            
+            // Check if module has register_bifs or register_classes using simple string searching
+            let content = fs::read_to_string(&path)?;
+            if content.contains("pub fn register_bifs") {
+                registration_calls.push_str(&format!("    for (name, val) in {}::register_bifs() {{ bifs.insert(name, val); }}\n", mod_name));
+            }
+            if content.contains("pub fn register_classes") {
+                registration_calls.push_str(&format!("    for (name, val) in {}::register_classes() {{ classes.insert(name, val); }}\n", mod_name));
+            }
         }
     }
 
@@ -454,12 +462,13 @@ strip = true
 
 fn run_interpreted() -> anyhow::Result<()> {{
     let mut bifs = HashMap::new();
+    let mut classes = HashMap::new();
 {}
     
     let bytecode: Vec<u8> = vec!{:?};
     let chunk: Chunk = bincode::deserialize(&bytecode)?;
     
-    let mut vm = VM::new_with_bifs(bifs);
+    let mut vm = VM::new_with_bifs(bifs, classes);
     vm.interpret(chunk)?;
     Ok(())
 }}
@@ -485,7 +494,7 @@ impl BoxLangVM {
     pub fn new() -> BoxLangVM {
         let mut bifs = HashMap::new();
         // TODO: In a real implementation, we'd need to re-run registration here
-        BoxLangVM { vm: VM::new_with_bifs(bifs) }
+        BoxLangVM { vm: VM::new_with_bifs(bifs, HashMap::new()) }
     }
 
     pub fn load_bytecode(&mut self, bytes: &[u8]) -> Result<(), String> {

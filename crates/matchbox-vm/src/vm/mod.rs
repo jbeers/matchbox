@@ -43,6 +43,7 @@ pub struct VM {
     pub current_fiber_idx: Option<usize>,
     pub shapes: ShapeRegistry,
     pub heap: Heap,
+    pub native_classes: HashMap<String, BxNativeFunction>,
 }
 
 impl BxVM for VM {
@@ -141,6 +142,20 @@ impl BxVM for VM {
         self.heap.alloc(GcObject::NativeObject(obj))
     }
 
+    fn construct_native_class(&mut self, class_name: &str, args: &[BxValue]) -> Result<BxValue, String> {
+        let class_lower = class_name.to_lowercase();
+        // Since we need to borrow `self` mutably in the function call, we must clone the function pointer first
+        let func = {
+            self.native_classes.get(&class_lower).copied()
+        };
+
+        if let Some(constructor) = func {
+            constructor(self, args)
+        } else {
+            Err(format!("Native class '{}' not found. Ensure it is registered.", class_name))
+        }
+    }
+
     fn string_new(&mut self, s: String) -> usize {
         self.heap.alloc(GcObject::String(BoxString::new(&s)))
     }
@@ -202,10 +217,10 @@ impl VM {
     }
 
     pub fn new() -> Self {
-        Self::new_with_bifs(HashMap::new())
+        Self::new_with_bifs(HashMap::new(), HashMap::new())
     }
 
-    pub fn new_with_bifs(external_bifs: HashMap<String, BxNativeFunction>) -> Self {
+    pub fn new_with_bifs(external_bifs: HashMap<String, BxNativeFunction>, native_classes: HashMap<String, BxNativeFunction>) -> Self {
         let mut vm = VM {
             fibers: Vec::new(),
             global_names: HashMap::new(),
@@ -213,6 +228,7 @@ impl VM {
             current_fiber_idx: None,
             shapes: ShapeRegistry::new(),
             heap: Heap::new(),
+            native_classes: native_classes.into_iter().map(|(k, v)| (k.to_lowercase(), v)).collect(),
         };
 
         #[cfg(all(target_arch = "wasm32", feature = "js"))]

@@ -146,8 +146,11 @@ fn create_object(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         "java" => {
             jni::create_java_object(vm, &class_name, &args[2..])
         }
-        "rust" | "native" => {
-            Err("Native objects not yet implemented for NaN-boxing".to_string())
+        "rust" => {
+            vm.construct_native_class(&class_name, &args[2..])
+        }
+        "native" => {
+            Err("Use 'rust' type for native objects".to_string())
         }
         _ => Err(format!("Unknown object type: {}", obj_type)),
     }

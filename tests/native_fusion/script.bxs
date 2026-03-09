@@ -1,2 +1,9 @@
 result = multiply(4, 5)
 println(result)
+
+import rust:crypto.Vault;
+v1 = new Vault("my-secret");
+println(v1.encrypt("data"));
+
+v2 = new rust:crypto.Vault("another-key");
+println(v2.encrypt("more-data"));
