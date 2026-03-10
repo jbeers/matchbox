@@ -127,7 +127,50 @@ fn test_native_fusion_build() {
     let _ = std::fs::remove_file(&out_path);
 }
 
-/// Verify the module system end-to-end:
+/// Verify that a BoxLang module's `matchbox/` Rust crate is compiled into the
+/// Native Fusion binary and its registered BIFs are callable from the script.
+#[test]
+fn test_module_native_fusion_build() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = manifest_dir.join("tests/scripts/vm_module_native_fusion.bxs");
+    let module_path = manifest_dir.join("tests/modules/native-math");
+
+    // 1. Compile to a native binary with the native-math module wired in.
+    if let Err(e) = process_file(
+        &script_path,
+        false,
+        Some("native"),
+        Vec::new(),
+        false,
+        false,
+        false,
+        None,
+        &[module_path],
+    ) {
+        panic!("Module native fusion build failed: {}", e);
+    }
+
+    // 2. Locate the produced binary.
+    let out_name = if cfg!(windows) { "vm_module_native_fusion.exe" } else { "vm_module_native_fusion" };
+    let out_path = script_path.with_file_name(out_name);
+    assert!(out_path.exists(), "Native binary was not produced at {}", out_path.display());
+
+    // 3. Run it and check that cube(3) == 27.
+    let output = std::process::Command::new(&out_path)
+        .output()
+        .expect("Failed to execute module native fusion binary");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("27"),
+        "Expected output to contain '27' (cube of 3), got: {}",
+        stdout
+    );
+
+    // 4. Cleanup.
+    let _ = std::fs::remove_file(&out_path);
+}
+
 /// - BIF from `bifs/*.bxs` is available in the script without an explicit import
 /// - Class inside `models/` is reachable via `import bxModules.{name}.models.Greeter`
 #[test]

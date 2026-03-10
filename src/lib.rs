@@ -243,8 +243,9 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
             let project_root = path.parent().unwrap_or(Path::new("."));
             let native_dir = project_root.join("native");
             
-            if native_dir.exists() && native_dir.is_dir() {
-                return produce_fusion_artifact(&chunk, path, &native_dir, t, &ast, output);
+            let has_native_modules = modules_info.iter().any(|m| m.has_native);
+            if (native_dir.exists() && native_dir.is_dir()) || has_native_modules {
+                return produce_fusion_artifact(&chunk, path, &native_dir, t, &ast, output, &modules_info);
             }
 
             match t {
@@ -455,10 +456,11 @@ fn produce_native_binary(chunk: &Chunk, source_path: &Path, target: &str, output
     Ok(())
 }
 
-fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path, target: &str, ast: &[ast::Statement], output: Option<&Path>) -> Result<()> {
+fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path, target: &str, ast: &[ast::Statement], output: Option<&Path>, modules: &[modules::ModuleInfo]) -> Result<()> {
     println!("Native Fusion detected! Target: {}. Building hybrid artifact...", target);
     
-    let build_dir = std_env::current_dir()?.join("target").join("fusion");
+    let script_stem = source_path.file_stem().and_then(|s| s.to_str()).unwrap_or("fusion");
+    let build_dir = std_env::current_dir()?.join("target").join("fusion").join(script_stem);
     if build_dir.exists() {
         fs::remove_dir_all(&build_dir)?;
     }
@@ -472,6 +474,23 @@ fn produce_fusion_artifact(chunk: &Chunk, source_path: &Path, native_dir: &Path,
     // (Windows paths with backslashes would require escaping inside TOML strings).
     let vm_path = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/matchbox-vm")
         .replace('\\', "/");
+
+    // Collect path dependencies for modules with native Rust code.
+    // These must land inside [dependencies], not after [profile.release].
+    let mut extra_dep_lines = String::new();
+    for module in modules.iter().filter(|m| m.has_native) {
+        let dep_path = module.path.join("matchbox");
+        // canonicalize() on Windows may produce \\?\ extended-length prefixes
+        // which TOML rejects. Strip them after converting to forward slashes.
+        let dep_str = dep_path.to_str().unwrap_or("").replace('\\', "/");
+        let dep_str = dep_str.strip_prefix("//?/").unwrap_or(&dep_str);
+        extra_dep_lines.push_str(&format!(
+            "{} = {{ path = \"{}\" }}\n",
+            module.name,
+            dep_str,
+        ));
+    }
+
     let mut cargo_toml = format!(r#"[package]
 name = "fusion_build"
 version = "0.1.0"
@@ -480,17 +499,17 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-matchbox_vm = {{ path = "{}" }}
+matchbox_vm = {{ path = "{vm_path}" }}
 bincode = "1.3.3"
 anyhow = "1.0"
-
+{extra_dep_lines}
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
-"#, vm_path);
+"#);
 
     if is_wasm {
         cargo_toml.push_str("\n[lib]\ncrate-type = [\"cdylib\", \"rlib\"]\n\n");
@@ -503,23 +522,65 @@ strip = true
     // 2. Prepare user modules
     let mut mod_decls = String::new();
     let mut registration_calls = String::new();
-    
-    for entry in fs::read_dir(native_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            let mod_name = path.file_stem().unwrap().to_str().unwrap();
-            fs::copy(&path, build_dir.join("src").join(format!("{}.rs", mod_name)))?;
-            mod_decls.push_str(&format!("mod {};\n", mod_name));
-            
-            // Check if module has register_bifs or register_classes using simple string searching
-            let content = fs::read_to_string(&path)?;
-            if content.contains("pub fn register_bifs") {
-                registration_calls.push_str(&format!("    for (name, val) in {}::register_bifs() {{ bifs.insert(name, val); }}\n", mod_name));
+
+    // Scan the script-adjacent native/ directory for hand-written .rs files.
+    if native_dir.exists() && native_dir.is_dir() {
+        for entry in fs::read_dir(native_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+                let mod_name = path.file_stem().unwrap().to_str().unwrap();
+                fs::copy(&path, build_dir.join("src").join(format!("{}.rs", mod_name)))?;
+                mod_decls.push_str(&format!("mod {};\n", mod_name));
+
+                let content = fs::read_to_string(&path)?;
+                if content.contains("pub fn register_bifs") {
+                    registration_calls.push_str(&format!(
+                        "    for (name, val) in {}::register_bifs() {{ bifs.insert(name, val); }}\n",
+                        mod_name
+                    ));
+                }
+                if content.contains("pub fn register_classes") {
+                    registration_calls.push_str(&format!(
+                        "    for (name, val) in {}::register_classes() {{ classes.insert(name, val); }}\n",
+                        mod_name
+                    ));
+                }
             }
-            if content.contains("pub fn register_classes") {
-                registration_calls.push_str(&format!("    for (name, val) in {}::register_classes() {{ classes.insert(name, val); }}\n", mod_name));
+        }
+    }
+
+    // Scan each BoxLang module's matchbox/ crate for register_bifs / register_classes.
+    for module in modules.iter().filter(|m| m.has_native) {
+        let matchbox_dir = module.path.join("matchbox");
+        let cargo_toml_path = matchbox_dir.join("Cargo.toml");
+        let crate_name = read_crate_name(&cargo_toml_path)
+            .with_context(|| format!("Module '{}': cannot read matchbox/Cargo.toml", module.name))?;
+        let rust_name = crate_name.replace('-', "_");
+
+        let src_dir = matchbox_dir.join("src");
+        let (mut has_bifs, mut has_classes) = (false, false);
+        if src_dir.is_dir() {
+            for entry in fs::read_dir(&src_dir)?.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|s| s.to_str()) == Some("rs") {
+                    let content = fs::read_to_string(&p).unwrap_or_default();
+                    if content.contains("pub fn register_bifs") { has_bifs = true; }
+                    if content.contains("pub fn register_classes") { has_classes = true; }
+                }
             }
+        }
+        if has_bifs {
+            registration_calls.push_str(&format!(
+                "    for (name, val) in {}::register_bifs() {{ bifs.insert(name, val); }}\n",
+                rust_name
+            ));
+        }
+        if has_classes {
+            registration_calls.push_str(&format!(
+                "    for (name, val) in {}::register_classes() {{ classes.insert(name, val); }}\n",
+                rust_name
+            ));
         }
     }
 
@@ -641,6 +702,23 @@ impl BoxLangVM {
     }
 
     Ok(())
+}
+
+/// Extract the `[package] name` value from a `Cargo.toml` file.
+fn read_crate_name(cargo_toml_path: &Path) -> Result<String> {
+    let text = fs::read_to_string(cargo_toml_path)?;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("name") {
+            if let Some(eq) = line.find('=') {
+                let value = line[eq + 1..].trim().trim_matches(|c| c == '"' || c == '\'');
+                if !value.is_empty() {
+                    return Ok(value.to_string());
+                }
+            }
+        }
+    }
+    bail!("Could not find `name` in {}", cargo_toml_path.display())
 }
 
 fn produce_wasi_binary(chunk: &Chunk, source_path: &Path, output: Option<&Path>) -> Result<()> {

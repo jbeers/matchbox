@@ -1,0 +1,3 @@
+// Integration test: native Rust BIF provided by a module's matchbox/ crate
+result = cube(3)
+println(result)
