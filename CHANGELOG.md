@@ -8,18 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **System BIFs**: Added `createUUID()`, `createGUID()`, and `getSystemSetting()`.
+- **CLI BIFs**: Added `cliGetArgs()` (structured parsing), `cliRead()`, `cliConfirm()`, `cliClear()`, and `cliExit()`.
+- **Expanded Array Library**: 20+ new BIFs including `arraySort`, `arrayFindNoCase`, `arrayAvg`, `arraySum`, `arrayUnique`, etc.
+- **Expanded Struct Library**: 15+ new BIFs including `structAppend`, `structMap`, `structFilter`, `structSort`, `structKeyExists`, etc.
+- **`rust:` Imports**: Support for importing native Rust modules and classes using `import rust:path.to.Module`.
+- **MatchBox Macros**: New `matchbox-macros` crate for zero-boilerplate Rust-to-BoxLang interop (automatic BIF and Class registration).
+- **Polymorphic Inline Caches (PIC)**: Enhanced member access performance with support for multiple shapes per call site.
+- **Generational Garbage Collection**: Improved GC performance with young/old generation separation and optimized allocation strategies.
+- **String Interning**: Added a global string interner for deduplicating identifiers and property names, reducing memory overhead.
+- **Fiber Scheduling**: Implemented timeslice-based quantum management and priority handling for concurrent tasks.
 - **Logical Operators**: `||`, `&&`, and unary `!` (with short-circuit evaluation).
 - **Ternary Operator**: `condition ? trueValue : falseValue` expressions, nestable.
 - **`continue` Statement**: Skip to the next iteration in both `for` and `for-in` loops.
 - **Sparse Array Assignment**: Assigning to an out-of-bounds array index auto-grows the array, filling gaps with `null`. Reading beyond the end also returns `null` instead of throwing.
 - **`--output <path>` CLI flag**: Override the output file path when compiling a script.
-- **`--strip-source` CLI flag**: Strip embedded source text from compiled `.bxb` output for smaller binaries (~35% reduction on typical scripts). Errors still report `filename:line`; native binaries automatically fall back to reading the source file from disk for full error snippets.
-- **JS Interop (WASM target)**: `JsHandle`-based host function bridge (`matchbox_js_host`) for DOM and JS API access from BoxLang scripts compiled with `--target js`.
+- **`--strip-source` CLI flag**: Strip embedded source text from compiled `.bxb` output for smaller binaries (~35% reduction).
+- **JS Interop (WASM target)**: `JsHandle`-based host function bridge (`matchbox_js_host`) for DOM and JS API access from scripts.
+
+### Changed
+- **Flat u32 Bytecode**: Refactored the entire VM to use a high-performance flat u32 opcode encoding.
+- **Optimized Loop Handling**: Added specialized `FOR_LOOP_STEP` opcodes for faster iteration.
+- **Generic `len()`**: The `len()` BIF now natively supports Arrays, Structs, and Strings.
 
 ### Fixed
-- Fixed deserialized function chunks causing an index-out-of-bounds panic in the VM by calling `ensure_caches()` at frame entry when `ip == 0`.
-- Fixed source text being duplicated into every function/method sub-chunk at compile time (was O(functions × source_len)); now stored only in the root chunk, with disk fallback for error snippets.
-- `continue` now works correctly inside `for-in` loops (was only wired up for C-style `for` loops).
+- Fixed critical stack management bug in `CALL` where passing too many arguments caused a subtraction overflow.
+- Enabled string comparison support in `GREATER` and `LESS` opcodes to allow sorting strings in prelude functions.
+- Fixed deserialized function chunks causing an index-out-of-bounds panic in the VM.
+- Fixed source text being duplicated into every function/method sub-chunk at compile time.
+- `continue` now works correctly inside `for-in` loops.
 
 ## [0.2.0] - 2026-03-07
 
