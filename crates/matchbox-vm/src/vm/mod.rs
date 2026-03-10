@@ -500,7 +500,7 @@ impl VM {
 
                 all_waiting = false;
                 self.current_fiber_idx = Some(i);
-                match self.run_fiber(i, 10_000) {
+                match self.run_fiber(i, Instant::now() + Duration::from_millis(2)) {
                     Ok(Some(result)) => {
                         let fiber = self.fibers.swap_remove(i);
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
@@ -558,22 +558,22 @@ impl VM {
         Ok(last_result)
     }
 
-    fn run_fiber(&mut self, fiber_idx: usize, quantum: usize) -> Result<Option<BxValue>> {
-        // Persistent state across `'quantum` iterations.  Refreshed only when
+    fn run_fiber(&mut self, fiber_idx: usize, timeslice_end: Instant) -> Result<Option<BxValue>> {
+        // Persistent state across dispatch iterations. Refreshed only when
         // `frame_changed` is true (after CALL/RETURN/THROW/NEW/etc.).
         // In tight loops there are no frame changes, so these are loaded just once.
-        let mut remaining = quantum;
         let mut frame_changed  = true;
         let mut ip:           usize                     = 0;
         let mut stack_base:   usize                     = 0;
         let mut code_ptr:     *const u32                = std::ptr::null();
         let mut code_len:     usize                     = 0;
         let mut promoted_ptr: *mut Vec<Option<BxValue>> = std::ptr::null_mut();
+        // Counter used to throttle Instant::now() at safe points.
+        // We only call the (expensive) system clock every 256 backward branches.
+        let mut safe_point_count: u32 = 0;
         let trace = std::env::var("BX_TRACE").is_ok();
 
-        'quantum: while remaining > 0 {
-            remaining -= 1;
-
+        'quantum: loop {
             if fiber_idx >= self.fibers.len() {
                 return Ok(None);
             }
@@ -698,10 +698,14 @@ impl VM {
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
+                            safe_point_count = safe_point_count.wrapping_add(1);
+                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
                         }
                     } else if val.is_int() && limit.is_int() {
                         if val.as_int() < limit.as_int() {
                             ip -= offset as usize;
+                            safe_point_count = safe_point_count.wrapping_add(1);
+                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
                         }
                     }
                 }
@@ -736,6 +740,11 @@ impl VM {
                     };
                     if should_loop {
                         ip -= offset as usize;
+                        // Safe point: yield to scheduler if timeslice expired.
+                        safe_point_count = safe_point_count.wrapping_add(1);
+                        if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end {
+                            break 'quantum; // ip flushed after the loop
+                        }
                     }
                 }
                 op::COMPARE_JUMP => {
@@ -821,6 +830,8 @@ impl VM {
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
+                            safe_point_count = safe_point_count.wrapping_add(1);
+                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
                         }
                     }
                 }
@@ -944,6 +955,13 @@ impl VM {
                 op::LOOP => {
                     let offset = op0;
                     ip -= offset as usize;
+                    // Safe point: yield to scheduler if timeslice expired.
+                    // Throttled: only call Instant::now() every 256 backward branches
+                    // to avoid the ~20ns system-call cost on every loop iteration.
+                    safe_point_count = safe_point_count.wrapping_add(1);
+                    if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end {
+                        break 'quantum; // ip flushed after the loop
+                    }
                 }
                 op::RETURN => {
                     let fiber = &mut self.fibers[fiber_idx];
@@ -1866,6 +1884,7 @@ impl VM {
                     let arg_count = op0;
                     flush_ip!();
                     self.execute_call(fiber_idx, arg_count as usize, None)?;
+                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -1884,6 +1903,7 @@ impl VM {
                     };
                     flush_ip!();
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
+                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -1929,6 +1949,7 @@ impl VM {
                     }
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, arg_count as usize, None, ip_at_start)?;
+                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -1950,6 +1971,7 @@ impl VM {
                     };
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, total_count as usize, Some(names), ip_at_start)?;
+                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -2179,9 +2201,9 @@ impl VM {
                     bail!("Unknown opcode: {}", opcode);
                 }
             }
-            // ip persists across iterations within a single quantum slice.
+            // ip persists across iterations within a single timeslice.
         }
-        // Quantum exhausted — flush ip so the next run_fiber call resumes at the right place.
+        // Timeslice expired (safe-point break) — flush ip so the next run_fiber resumes correctly.
         if !self.fibers[fiber_idx].frames.is_empty() {
             self.fibers[fiber_idx].frames.last_mut().unwrap().ip = ip;
         }
@@ -2292,13 +2314,16 @@ impl VM {
                     self.fibers.push(fiber);
                     let fiber_idx = self.fibers.len() - 1;
                     self.current_fiber_idx = Some(fiber_idx);
-                    let res = self.run_fiber(fiber_idx, 1000000);
+                    // Loop until the fiber completes — this is a synchronous blocking call.
+                    let result = loop {
+                        match self.run_fiber(fiber_idx, Instant::now() + Duration::from_millis(2)) {
+                            Ok(Some(val)) => break Ok(val),
+                            Ok(None) => continue, // timeslice expired, keep running
+                            Err(e) => break Err(e),
+                        }
+                    };
                     self.current_fiber_idx = None;
-                    
-                    match res? {
-                        Some(val) => Ok(val),
-                        None => Ok(BxValue::new_null()),
-                    }
+                    result
                 }
                 GcObject::NativeFunction(func) => {
                     let func = *func;
