@@ -2,6 +2,38 @@
  * MatchBox Standard Library (Prelude)
  */
 
+// --- Math BIFs ---
+
+/**
+ * Returns the absolute value of a number.
+ */
+function abs(number) {
+    if (number < 0) {
+        return 0 - number;
+    }
+    return number;
+}
+
+/**
+ * Returns the smaller of two numbers.
+ */
+function min(n1, n2) {
+    if (n1 < n2) {
+        return n1;
+    }
+    return n2;
+}
+
+/**
+ * Returns the larger of two numbers.
+ */
+function max(n1, n2) {
+    if (n1 > n2) {
+        return n1;
+    }
+    return n2;
+}
+
 // --- Array BIFs ---
 
 /**

@@ -13,6 +13,9 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Math BIFs
     bifs.insert("round".to_string(), round as BxNativeFunction);
+    bifs.insert("abs".to_string(), abs_bif as BxNativeFunction);
+    bifs.insert("min".to_string(), min_bif as BxNativeFunction);
+    bifs.insert("max".to_string(), max_bif as BxNativeFunction);
     bifs.insert("randrange".to_string(), rand_range as BxNativeFunction);
 
     // Array BIFs
@@ -96,6 +99,33 @@ fn round(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         Ok(BxValue::new_number(args[0].as_number().round()))
     } else {
         Err("round() expects a number".to_string())
+    }
+}
+
+fn abs_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 { return Err("abs() expects exactly 1 argument".to_string()); }
+    if args[0].is_number() {
+        Ok(BxValue::new_number(args[0].as_number().abs()))
+    } else {
+        Err("abs() expects a number".to_string())
+    }
+}
+
+fn min_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 { return Err("min() expects exactly 2 arguments".to_string()); }
+    if args[0].is_number() && args[1].is_number() {
+        Ok(BxValue::new_number(args[0].as_number().min(args[1].as_number())))
+    } else {
+        Err("min() expects numbers".to_string())
+    }
+}
+
+fn max_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 { return Err("max() expects exactly 2 arguments".to_string()); }
+    if args[0].is_number() && args[1].is_number() {
+        Ok(BxValue::new_number(args[0].as_number().max(args[1].as_number())))
+    } else {
+        Err("max() expects numbers".to_string())
     }
 }
 
