@@ -216,9 +216,15 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
         let module_mappings: Vec<(String, PathBuf)> = modules_info.iter()
             .map(|m| (m.name.clone(), m.path.clone()))
             .collect();
-        let extra_preludes: Vec<String> = modules_info.iter()
+        let mut extra_preludes: Vec<String> = modules_info.iter()
             .flat_map(|m| m.bif_sources.iter().cloned())
             .collect();
+        // Inject a getModuleSettings(name) function whose body is baked from the
+        // settings collected by each module's configure() lifecycle call.
+        if !modules_info.is_empty() {
+            let settings_bxs = modules::generate_get_module_settings_bxs(&modules_info);
+            extra_preludes.push(settings_bxs);
+        }
         let mut chunk = matchbox_compiler::compile_with_treeshaking(
             path.to_str().unwrap_or("unknown"),
             &ast,

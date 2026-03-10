@@ -1,4 +1,4 @@
-// Integration test: verify module BIFs and class imports via bxModules prefix
+// Integration test: verify module BIFs, class imports, and settings via bxModules prefix
 
 import bxModules.greetings.models.Greeter as Greeter;
 
@@ -14,6 +14,15 @@ g.init("Matchbox")
 result = g.getMessage()
 if (result != "Greetings from Matchbox!") {
     throw "Greeter.getMessage() returned unexpected value: " & result
+}
+
+// 3. Settings populated by ModuleConfig.bx configure() lifecycle
+config = getModuleSettings("greetings")
+if (config.language != "en") {
+    throw "Expected config.language 'en', got: " & config.language
+}
+if (config.enthusiastic != false) {
+    throw "Expected config.enthusiastic false, got: " & config.enthusiastic
 }
 
 println("Module integration test passed!")

@@ -1,6 +1,12 @@
-// Phase 2 lifecycle (not yet executed — required marker file for module discovery)
-component {
-    function configure() {}
+class ModuleConfig {
+    function configure() {
+        s = {}
+        s.language = "en"
+        s.enthusiastic = false
+        return s
+    }
+
     function onLoad() {}
+
     function onUnload() {}
 }

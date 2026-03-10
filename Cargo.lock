@@ -382,6 +382,7 @@ dependencies = [
  "matchbox_compiler",
  "matchbox_vm",
  "serde",
+ "serde_json",
  "toml",
  "wasm-bindgen",
  "wasm-encoder 0.245.1",

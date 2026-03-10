@@ -16,6 +16,9 @@ pub struct ModuleInfo {
     pub bif_sources: Vec<String>,
     /// Whether this module contains a `matchbox/Cargo.toml` for native Rust compilation.
     pub has_native: bool,
+    /// Settings collected by executing `ModuleConfig.bx configure()` at compile time.
+    /// An empty JSON object if the module has no settings or lifecycle execution failed.
+    pub settings: serde_json::Value,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,13 +134,153 @@ pub fn discover_modules(
 
         let has_native = path.join("matchbox").join("Cargo.toml").exists();
 
+        // Execute configure() + onLoad() in an isolated VM to collect module settings.
+        let settings = execute_module_lifecycle(&name, &path);
+
         modules.push(ModuleInfo {
             name,
             path,
             bif_sources,
             has_native,
+            settings,
         });
     }
 
     Ok(modules)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2 — Module lifecycle execution
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Execute a module's `ModuleConfig.bx` lifecycle in an isolated VM.
+///
+/// The file must define a class named `ModuleConfig` with a `configure()` method
+/// that sets `this.settings` to a struct, and an optional `onLoad()` method.
+/// Errors are emitted as warnings; an empty JSON object is returned on failure.
+pub fn execute_module_lifecycle(name: &str, path: &Path) -> serde_json::Value {
+    let empty = serde_json::Value::Object(serde_json::Map::new());
+    let descriptor = path.join("ModuleConfig.bx");
+
+    let source = match std::fs::read_to_string(&descriptor) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Warning: Module '{}': could not read ModuleConfig.bx: {}", name, e);
+            return empty;
+        }
+    };
+
+    // Build a wrapper that instantiates ModuleConfig, runs onLoad(), then calls
+    // configure() and returns its result (the settings struct).
+    let wrapper = format!(
+        "{source}\nmc = new ModuleConfig()\nmc.onLoad()\nreturn mc.configure()\n"
+    );
+
+    let ast = match matchbox_compiler::parser::parse(&wrapper) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("Warning: Module '{}': failed to parse ModuleConfig.bx: {}", name, e);
+            return empty;
+        }
+    };
+
+    let chunk = match matchbox_compiler::compile_with_treeshaking(
+        &descriptor.to_string_lossy(),
+        &ast,
+        &wrapper,
+        vec![],
+        false,
+        false,
+        &[],
+        &[],
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Warning: Module '{}': failed to compile ModuleConfig.bx: {}", name, e);
+            return empty;
+        }
+    };
+
+    let mut vm = matchbox_vm::vm::VM::new();
+    let result = match vm.interpret(chunk) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Warning: Module '{}': ModuleConfig.bx lifecycle error: {}", name, e);
+            return empty;
+        }
+    };
+
+    let json = vm.bx_to_json(&result);
+    if matches!(json, serde_json::Value::Object(_)) {
+        json
+    } else {
+        empty
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getModuleSettings BIF code generation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Generate a BoxLang source snippet defining `getModuleSettings(name)` that returns
+/// the compile-time-baked settings struct for the requested module name.
+///
+/// Injected as an extra prelude so the function is tree-shaken like any built-in.
+pub fn generate_get_module_settings_bxs(modules: &[ModuleInfo]) -> String {
+    // Strategy: per-module helper functions (struct built at top-level of each),
+    // plus a default helper returning {}, dispatched via chained ternary ?:
+    // to avoid if-block scoping issues (assignments inside Matchbox if-blocks
+    // do not persist to outer scope).
+    //
+    // IMPORTANT: parameter names must be ALL LOWERCASE. The compiler stores
+    // locals via `param.name.clone()` but resolve_local() lowercases the lookup
+    // name, causing a case-mismatch that makes mixed-case params invisible.
+    let mut bxs = String::new();
+    let mut helpers: Vec<(String, String)> = Vec::new(); // (module_name, helper_fn_name)
+
+    for m in modules {
+        if let serde_json::Value::Object(ref map) = m.settings {
+            if !map.is_empty() {
+                let safe = m.name.replace('-', "_");
+                let helper = format!("getModuleSettings_{safe}");
+                bxs.push_str(&format!("function {}() {{\n", helper));
+                bxs.push_str("    s = {}\n");
+                for (k, v) in map {
+                    bxs.push_str(&format!("    s.{} = {}\n", k, json_value_to_bxs(v)));
+                }
+                bxs.push_str("    return s\n");
+                bxs.push_str("}\n");
+                helpers.push((m.name.clone(), helper));
+            }
+        }
+    }
+
+    // Default (no-match) helper — avoids bare `{}` in ternary else position
+    bxs.push_str("function getModuleSettings_default() {\n");
+    bxs.push_str("    d = {}\n");
+    bxs.push_str("    return d\n");
+    bxs.push_str("}\n");
+
+    // Build a chained ternary dispatched on "mn" (lowercase param — see note above).
+    bxs.push_str("function getModuleSettings(mn) {\n");
+    let mut expr = String::from("getModuleSettings_default()");
+    for (mod_name, helper) in helpers.iter().rev() {
+        expr = format!("(mn == \"{}\") ? {}() : {}", mod_name, helper, expr);
+    }
+    bxs.push_str(&format!("    result = {}\n", expr));
+    bxs.push_str("    return result\n");
+    bxs.push_str("}\n");
+    bxs
+}
+
+fn json_value_to_bxs(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => {
+            format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        _ => "{}".to_string(), // nested objects/arrays: simplified placeholder
+    }
 }
