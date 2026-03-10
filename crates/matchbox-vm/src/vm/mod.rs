@@ -665,7 +665,15 @@ impl VM {
 
                 all_waiting = false;
                 self.current_fiber_idx = Some(i);
-                match self.run_fiber(i, Instant::now() + Duration::from_millis(2)) {
+                // Only pay for timeslice tracking when there are multiple fibers
+                // to cooperatively schedule. Single-fiber scripts skip Instant::now()
+                // entirely inside run_fiber, eliminating a syscall from every loop.
+                let deadline = if self.fibers.len() > 1 {
+                    Some(Instant::now() + Duration::from_millis(2))
+                } else {
+                    None
+                };
+                match self.run_fiber(i, deadline) {
                     Ok(Some(result)) => {
                         let fiber = self.fibers.swap_remove(i);
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
@@ -723,7 +731,7 @@ impl VM {
         Ok(last_result)
     }
 
-    fn run_fiber(&mut self, fiber_idx: usize, timeslice_end: Instant) -> Result<Option<BxValue>> {
+    fn run_fiber(&mut self, fiber_idx: usize, timeslice_end: Option<Instant>) -> Result<Option<BxValue>> {
         // Persistent state across dispatch iterations. Refreshed only when
         // `frame_changed` is true (after CALL/RETURN/THROW/NEW/etc.).
         // In tight loops there are no frame changes, so these are loaded just once.
@@ -733,8 +741,14 @@ impl VM {
         let mut code_ptr:     *const u32                = std::ptr::null();
         let mut code_len:     usize                     = 0;
         let mut promoted_ptr: *mut Vec<Option<BxValue>> = std::ptr::null_mut();
+        // Pointer to the base of the current frame's locals on the value stack.
+        // Refreshed whenever frame_changed is true. Avoids the double pointer
+        // chase (fibers[idx] → stack Vec → slot) in hot opcode arms.
+        let mut locals_ptr:   *mut BxValue              = std::ptr::null_mut();
         // Counter used to throttle Instant::now() at safe points.
-        // We only call the (expensive) system clock every 256 backward branches.
+        // We only call the (expensive) system clock every 1024 backward branches
+        // to avoid the ~20–50ns syscall cost on every loop iteration.
+        // Skipped entirely (Option::None fast path) when only one fiber is running.
         let mut safe_point_count: u32 = 0;
         let trace = std::env::var("BX_TRACE").is_ok();
 
@@ -769,6 +783,19 @@ impl VM {
                     code_ptr     = (*chunk_ptr).code.as_ptr();
                     code_len     = (*chunk_ptr).code.len();
                     promoted_ptr = frame.function.promoted_constants.as_ptr();
+                }
+                // Reserve headroom so that push() within this frame's execution
+                // won't reallocate the stack Vec and invalidate locals_ptr.
+                // 256 slots is generous; expression temporaries rarely exceed ~20.
+                self.fibers[fiber_idx].stack.reserve(256);
+                // SAFETY: stack is not reallocated within a single frame's dispatch
+                // (reserve above guarantees capacity). Any op that changes frames
+                // (CALL / RETURN / THROW / NEW) sets frame_changed = true, which
+                // refreshes locals_ptr on the next iteration before any access.
+                unsafe {
+                    locals_ptr = self.fibers[fiber_idx].stack
+                        .as_mut_ptr()
+                        .add(stack_base);
                 }
             }
 
@@ -838,11 +865,11 @@ impl VM {
                 // --- Hot Loop / Specialized Opcodes ---
                 op::INC_LOCAL => {
                     let slot = op0;
-                    let val = self.fibers[fiber_idx].stack[stack_base + slot as usize];
+                    let val = unsafe { *locals_ptr.add(slot as usize) };
                     if val.is_number() {
-                        self.fibers[fiber_idx].stack[stack_base + slot as usize] = BxValue::new_number(val.as_number() + 1.0);
+                        unsafe { *locals_ptr.add(slot as usize) = BxValue::new_number(val.as_number() + 1.0) };
                     } else if val.is_int() {
-                        self.fibers[fiber_idx].stack[stack_base + slot as usize] = BxValue::new_int(val.as_int() + 1);
+                        unsafe { *locals_ptr.add(slot as usize) = BxValue::new_int(val.as_int() + 1) };
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
@@ -853,7 +880,7 @@ impl VM {
                     let slot = op0;
                     let const_idx = next_word!();
                     let offset = next_word!();
-                    let val = self.fibers[fiber_idx].stack[stack_base + slot as usize];
+                    let val = unsafe { *locals_ptr.add(slot as usize) };
                     let limit: BxValue = {
                         let already = unsafe {
                             (&*promoted_ptr).get(const_idx as usize).copied().flatten()
@@ -863,14 +890,18 @@ impl VM {
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
-                            safe_point_count = safe_point_count.wrapping_add(1);
-                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
+                            if let Some(end) = timeslice_end {
+                                safe_point_count = safe_point_count.wrapping_add(1);
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                            }
                         }
                     } else if val.is_int() && limit.is_int() {
                         if val.as_int() < limit.as_int() {
                             ip -= offset as usize;
-                            safe_point_count = safe_point_count.wrapping_add(1);
-                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
+                            if let Some(end) = timeslice_end {
+                                safe_point_count = safe_point_count.wrapping_add(1);
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                            }
                         }
                     }
                 }
@@ -880,7 +911,7 @@ impl VM {
                     let slot = op0;
                     let const_idx = next_word!();
                     let offset = next_word!();
-                    let val = self.fibers[fiber_idx].stack[stack_base + slot as usize];
+                    let val = unsafe { *locals_ptr.add(slot as usize) };
                     let next_val = if val.is_int() {
                         BxValue::new_int(val.as_int() + 1)
                     } else if val.is_number() {
@@ -888,7 +919,7 @@ impl VM {
                     } else {
                         vm_throw!("For loop variable must be a number");
                     };
-                    self.fibers[fiber_idx].stack[stack_base + slot as usize] = next_val;
+                    unsafe { *locals_ptr.add(slot as usize) = next_val };
                     // Hot-path: read the loop-limit constant without a RefCell borrow.
                     // SAFETY: single-threaded VM; the code_ptr borrow has already dropped;
                     // no concurrent mutable access to promoted_constants is possible here.
@@ -906,9 +937,12 @@ impl VM {
                     if should_loop {
                         ip -= offset as usize;
                         // Safe point: yield to scheduler if timeslice expired.
-                        safe_point_count = safe_point_count.wrapping_add(1);
-                        if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end {
-                            break 'quantum; // ip flushed after the loop
+                        // Skipped entirely when timeslice_end is None (single-fiber case).
+                        if let Some(end) = timeslice_end {
+                            safe_point_count = safe_point_count.wrapping_add(1);
+                            if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                                break 'quantum; // ip flushed after the loop
+                            }
                         }
                     }
                 }
@@ -995,8 +1029,10 @@ impl VM {
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
-                            safe_point_count = safe_point_count.wrapping_add(1);
-                            if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end { break 'quantum; }
+                            if let Some(end) = timeslice_end {
+                                safe_point_count = safe_point_count.wrapping_add(1);
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                            }
                         }
                     }
                 }
@@ -1004,18 +1040,18 @@ impl VM {
                 // --- Basic Hot Opcodes ---
                 op::GET_LOCAL => {
                     let slot = op0;
-                    let val = self.fibers[fiber_idx].stack[stack_base + slot as usize];
+                    let val = unsafe { *locals_ptr.add(slot as usize) };
                     self.fibers[fiber_idx].stack.push(val);
                 }
                 op::SET_LOCAL => {
                     let slot = op0;
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
-                    self.fibers[fiber_idx].stack[stack_base + slot as usize] = val;
+                    unsafe { *locals_ptr.add(slot as usize) = val };
                 }
                 op::SET_LOCAL_POP => {
                     let slot = op0;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack[stack_base + slot as usize] = val;
+                    unsafe { *locals_ptr.add(slot as usize) = val };
                 }
                 op::CONSTANT => {
                     let idx = op0;
@@ -1121,11 +1157,13 @@ impl VM {
                     let offset = op0;
                     ip -= offset as usize;
                     // Safe point: yield to scheduler if timeslice expired.
-                    // Throttled: only call Instant::now() every 256 backward branches
-                    // to avoid the ~20ns system-call cost on every loop iteration.
-                    safe_point_count = safe_point_count.wrapping_add(1);
-                    if safe_point_count & 255 == 0 && Instant::now() >= timeslice_end {
-                        break 'quantum; // ip flushed after the loop
+                    // Skipped entirely (None fast-path) when only one fiber is running.
+                    // Throttled to every 1024 backward branches when active.
+                    if let Some(end) = timeslice_end {
+                        safe_point_count = safe_point_count.wrapping_add(1);
+                        if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                            break 'quantum; // ip flushed after the loop
+                        }
                     }
                 }
                 op::RETURN => {
@@ -2049,7 +2087,7 @@ impl VM {
                     let arg_count = op0;
                     flush_ip!();
                     self.execute_call(fiber_idx, arg_count as usize, None)?;
-                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -2068,7 +2106,7 @@ impl VM {
                     };
                     flush_ip!();
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
-                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -2114,7 +2152,7 @@ impl VM {
                     }
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, arg_count as usize, None, ip_at_start)?;
-                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -2136,7 +2174,7 @@ impl VM {
                     };
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, total_count as usize, Some(names), ip_at_start)?;
-                    if Instant::now() >= timeslice_end { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -2321,7 +2359,7 @@ impl VM {
                     let slot = op0;
                     let const_idx = next_word!();
                     let offset = next_word!();
-                    let val = self.fibers[fiber_idx].stack[stack_base + slot as usize];
+                    let val = unsafe { *locals_ptr.add(slot as usize) };
                     let constant = self.read_constant(fiber_idx, const_idx as usize);
                     if val != constant {
                         ip += offset as usize;
@@ -2481,7 +2519,7 @@ impl VM {
                     self.current_fiber_idx = Some(fiber_idx);
                     // Loop until the fiber completes — this is a synchronous blocking call.
                     let result = loop {
-                        match self.run_fiber(fiber_idx, Instant::now() + Duration::from_millis(2)) {
+                        match self.run_fiber(fiber_idx, Some(Instant::now() + Duration::from_millis(2))) {
                             Ok(Some(val)) => break Ok(val),
                             Ok(None) => continue, // timeslice expired, keep running
                             Err(e) => break Err(e),
