@@ -1,0 +1,12 @@
+class Greeter {
+    property subject;
+
+    function init(subject) {
+        this.subject = subject;
+        return this;
+    }
+
+    function getMessage() {
+        return "Greetings from " & this.subject & "!"
+    }
+}

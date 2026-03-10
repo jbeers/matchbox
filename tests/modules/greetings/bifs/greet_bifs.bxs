@@ -1,0 +1,4 @@
+// BIF provided by the greetings module
+function greetUser(name) {
+    return "Hello, " & name & "!"
+}

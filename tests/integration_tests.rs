@@ -10,7 +10,7 @@ macro_rules! script_test {
             path.push("tests/scripts");
             path.push($file);
             
-            if let Err(e) = process_file(&path, false, None, Vec::new(), false, false, false, None) {
+            if let Err(e) = process_file(&path, false, None, Vec::new(), false, false, false, None, &[]) {
                 panic!("Script {} failed: {}", $file, e);
             }
         }
@@ -62,7 +62,7 @@ fn test_strip_source() {
 
     // Compile to a temp .bxb with --strip-source
     let out_path = std::env::temp_dir().join("matchbox_strip_source_test.bxb");
-    if let Err(e) = process_file(&script_path, true, None, Vec::new(), false, false, true, Some(&out_path)) {
+    if let Err(e) = process_file(&script_path, true, None, Vec::new(), false, false, true, Some(&out_path), &[]) {
         panic!("strip-source compile failed: {}", e);
     }
 
@@ -75,7 +75,7 @@ fn test_strip_source() {
     assert!(!chunk.filename.is_empty(), "chunk.filename should be preserved after --strip-source");
 
     // Verify stripped bytecode still executes without error
-    if let Err(e) = process_file(&out_path, false, None, Vec::new(), false, false, false, None) {
+    if let Err(e) = process_file(&out_path, false, None, Vec::new(), false, false, false, None, &[]) {
         panic!("Executing stripped .bxb failed: {}", e);
     }
 
@@ -87,7 +87,7 @@ fn test_strip_source() {
 fn vm_interface_fail() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("tests/scripts/vm_interface_fail.bxs");
-    process_file(&path, false, None, Vec::new(), false, false, false, None).unwrap();
+    process_file(&path, false, None, Vec::new(), false, false, false, None, &[]).unwrap();
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn test_native_fusion_build() {
     path.push("tests/native_fusion/script.bxs");
     
     // 1. Build the native binary
-    if let Err(e) = process_file(&path, false, Some("native"), Vec::new(), false, false, false, None) {
+    if let Err(e) = process_file(&path, false, Some("native"), Vec::new(), false, false, false, None, &[]) {
         panic!("Native fusion build failed: {}", e);
     }
     
@@ -125,4 +125,29 @@ fn test_native_fusion_build() {
     
     // 4. Cleanup
     let _ = std::fs::remove_file(&out_path);
+}
+
+/// Verify the module system end-to-end:
+/// - BIF from `bifs/*.bxs` is available in the script without an explicit import
+/// - Class inside `models/` is reachable via `import bxModules.{name}.models.Greeter`
+#[test]
+fn test_module_bif_and_class_import() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let script_path = manifest_dir.join("tests/scripts/vm_modules.bxs");
+    let module_path = manifest_dir.join("tests/modules/greetings");
+
+    if let Err(e) = process_file(
+        &script_path,
+        false,
+        None,
+        Vec::new(),
+        false,
+        false,
+        false,
+        None,
+        &[module_path],
+    ) {
+        panic!("Module integration test failed: {}", e);
+    }
 }

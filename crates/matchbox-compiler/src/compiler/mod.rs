@@ -6,7 +6,7 @@ use matchbox_vm::vm::opcode::op;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs;
 
 #[derive(Debug, Clone)]
@@ -20,7 +20,8 @@ pub struct Compiler {
     locals: Vec<Local>,
     scope_depth: i32,
     is_class: bool,
-    imports: HashMap<String, String>, // Alias -> Full Path
+    imports: HashMap<String, String>,           // Alias -> Full dotted path
+    pub module_paths: HashMap<String, PathBuf>, // "bxmodules.{name}" -> physical PathBuf
     current_line: u32,
     pub is_repl: bool,
     continue_patches: Vec<Vec<usize>>,
@@ -34,6 +35,7 @@ impl Compiler {
             scope_depth: 0,
             is_class: false,
             imports: HashMap::new(),
+            module_paths: HashMap::new(),
             current_line: 0,
             is_repl: false,
             continue_patches: Vec::new(),
@@ -68,6 +70,7 @@ impl Compiler {
                 constructor_compiler.is_class = true;
                 constructor_compiler.scope_depth = 1;
                 constructor_compiler.imports = self.imports.clone();
+                constructor_compiler.module_paths = self.module_paths.clone();
                 constructor_compiler.current_line = stmt.line as u32;
                 
                 let mut methods = HashMap::new();
@@ -92,6 +95,7 @@ impl Compiler {
                                     let mut method_compiler = Compiler::new(&self.chunk.filename);
                                     method_compiler.is_class = true;
                                     method_compiler.imports = self.imports.clone();
+                                    method_compiler.module_paths = self.module_paths.clone();
                                     method_compiler.current_line = inner_stmt.line as u32;
                                     let func = method_compiler.compile_function(&func_name, &params, &body)?;
                                     methods.insert(func_name.to_lowercase(), Rc::new(func));
@@ -220,6 +224,7 @@ impl Compiler {
                             let mut method_compiler = Compiler::new(&self.chunk.filename);
                             method_compiler.is_class = true;
                             method_compiler.imports = self.imports.clone();
+                            method_compiler.module_paths = self.module_paths.clone();
                             method_compiler.current_line = member.line;
                             let func = method_compiler.compile_function(func_name, params, body)?;
                             Some(Rc::new(func))
@@ -1119,6 +1124,7 @@ impl Compiler {
         sub_compiler.scope_depth = 1;
         sub_compiler.is_class = self.is_class;
         sub_compiler.imports = self.imports.clone();
+        sub_compiler.module_paths = self.module_paths.clone();
         sub_compiler.current_line = self.current_line;
 
         let mut min_arity = 0;
@@ -1359,57 +1365,107 @@ impl Compiler {
     }
 
     fn load_class_from_path(&mut self, class_path: &str) -> Result<Constant> {
-        let rel_path = class_path.replace('.', "/") + ".bxs";
-        let path = Path::new(&rel_path);
-        
-        if !path.exists() {
-            bail!("Class file not found: {}", path.display());
+        let lower = class_path.to_lowercase();
+
+        // Resolve bxModules.{name}.{...} paths via the module registry.
+        let file_path: PathBuf = if lower.starts_with("bxmodules.") {
+            let mut found = None;
+            for (prefix, module_dir) in &self.module_paths {
+                let prefix_with_dot = format!("{}.", prefix); // e.g. "bxmodules.foo."
+                if lower.starts_with(&prefix_with_dot) {
+                    let tail = &class_path[prefix_with_dot.len()..]; // preserve original case
+                    let rel = tail.replace('.', "/") + ".bxs";
+                    found = Some(module_dir.join(rel));
+                    break;
+                }
+            }
+            found.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No module registered for import path '{}'. \
+                     Declare it in matchbox.toml or pass --module <path>.",
+                    class_path
+                )
+            })?
+        } else {
+            Path::new(&(class_path.replace('.', "/") + ".bxs")).to_path_buf()
+        };
+
+        if !file_path.exists() {
+            bail!("Class file not found: {}", file_path.display());
         }
-        
-        let source = fs::read_to_string(path)?;
-        let ast = crate::parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", class_path, e))?;
-        
-        let mut sub_compiler = Compiler::new(&rel_path);
+
+        let source = fs::read_to_string(&file_path)?;
+        let ast = crate::parser::parse(&source)
+            .map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", class_path, e))?;
+
+        let filename = file_path.to_str().unwrap_or(class_path);
+        let mut sub_compiler = Compiler::new(filename);
         sub_compiler.imports = self.imports.clone();
-        sub_compiler.is_class = true; 
+        sub_compiler.module_paths = self.module_paths.clone();
+        sub_compiler.is_class = true;
         sub_compiler.current_line = self.current_line;
-        
+
         let chunk = sub_compiler.compile(&ast, &source)?;
-        
+
         for constant in chunk.constants {
             if let Constant::Class(_) = constant {
                 return Ok(constant);
             }
         }
-        
-        bail!("No class declaration found in {}", path.display());
+
+        bail!("No class declaration found in {}", file_path.display());
     }
 
     fn load_interface_from_path(&mut self, iface_path: &str) -> Result<Constant> {
-        let rel_path = iface_path.replace('.', "/") + ".bxs";
-        let path = Path::new(&rel_path);
-        
-        if !path.exists() {
-            bail!("Interface file not found: {}", path.display());
+        let lower = iface_path.to_lowercase();
+
+        // Resolve bxModules.{name}.{...} paths via the module registry.
+        let file_path: PathBuf = if lower.starts_with("bxmodules.") {
+            let mut found = None;
+            for (prefix, module_dir) in &self.module_paths {
+                let prefix_with_dot = format!("{}.", prefix);
+                if lower.starts_with(&prefix_with_dot) {
+                    let tail = &iface_path[prefix_with_dot.len()..];
+                    let rel = tail.replace('.', "/") + ".bxs";
+                    found = Some(module_dir.join(rel));
+                    break;
+                }
+            }
+            found.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "No module registered for import path '{}'. \
+                     Declare it in matchbox.toml or pass --module <path>.",
+                    iface_path
+                )
+            })?
+        } else {
+            Path::new(&(iface_path.replace('.', "/") + ".bxs")).to_path_buf()
+        };
+
+        if !file_path.exists() {
+            bail!("Interface file not found: {}", file_path.display());
         }
-        
-        let source = fs::read_to_string(path)?;
-        let ast = crate::parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", iface_path, e))?;
-        
-        let mut sub_compiler = Compiler::new(&rel_path);
+
+        let source = fs::read_to_string(&file_path)?;
+        let ast = crate::parser::parse(&source)
+            .map_err(|e| anyhow::anyhow!("Parse Error in {}: {}", iface_path, e))?;
+
+        let filename = file_path.to_str().unwrap_or(iface_path);
+        let mut sub_compiler = Compiler::new(filename);
         sub_compiler.imports = self.imports.clone();
-        sub_compiler.is_class = true; 
+        sub_compiler.module_paths = self.module_paths.clone();
+        sub_compiler.is_class = true;
         sub_compiler.current_line = self.current_line;
-        
+
         let chunk = sub_compiler.compile(&ast, &source)?;
-        
+
         for constant in chunk.constants {
             if let Constant::Interface(_) = constant {
                 return Ok(constant);
             }
         }
-        
-        bail!("No interface declaration found in {}", path.display());
+
+        bail!("No interface declaration found in {}", file_path.display());
     }
 }
 

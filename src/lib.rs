@@ -3,7 +3,7 @@ use matchbox_vm::{types, vm, Chunk};
 
 use std::env as std_env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::io::{self, Write};
 use anyhow::{Result, bail, Context};
 
@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 const MAGIC_FOOTER: &[u8; 8] = b"BOXLANG\x01";
 
 mod stubs;
+mod modules;
 
 const JS_GLUE_TEMPLATE: &str = include_str!("js_bundle_template.js");
 
@@ -130,26 +131,33 @@ pub fn run() -> Result<()> {
         }
     }
 
-    let output: Option<std::path::PathBuf> = if let Some(idx) = args.iter().position(|a| a == "--output") {
-        args.get(idx + 1).map(|s| std::path::PathBuf::from(s))
+    let output: Option<PathBuf> = if let Some(idx) = args.iter().position(|a| a == "--output") {
+        args.get(idx + 1).map(|s| PathBuf::from(s))
     } else {
         None
     };
+
+    // Collect --module <path> flags.
+    let extra_module_paths: Vec<PathBuf> = args.iter().enumerate()
+        .filter(|(_, a)| *a == "--module")
+        .filter_map(|(i, _)| args.get(i + 1).map(|p| PathBuf::from(p)))
+        .collect();
 
     let filename = args.iter().skip(1)
         .find(|a| !a.starts_with("--") && *a != "native" && *a != "wasm" && *a != "wasi" && *a != "js"
               && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--target").unwrap_or(true))
               && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--keep").unwrap_or(true))
               && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--output").unwrap_or(true))
+              && (args.iter().position(|arg| arg == *a).map(|pos| pos == 0 || args[pos-1] != "--module").unwrap_or(true))
         );
 
     match filename {
         Some(name) => {
             let path = Path::new(name);
             if path.is_dir() {
-                process_directory(path, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output.as_deref())?;
+                process_directory(path, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output.as_deref(), &extra_module_paths)?;
             } else {
-                process_file(path, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output.as_deref())?;
+                process_file(path, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output.as_deref(), &extra_module_paths)?;
             }
         }
         None => {
@@ -179,6 +187,7 @@ fn print_usage() {
     println!("  --output <path>     Set the output file path for compiled artifacts");
     println!("  --strip-source      Strip embedded source text from compiled output");
     println!("                      Errors still report file:line; native binaries fall back to disk for snippets");
+    println!("  --module <path>     Load a BoxLang module directory (may be specified multiple times)");
     println!("\nIf no file is provided, matchbox starts in REPL mode.");
 }
 
@@ -191,7 +200,7 @@ fn print_version() {
     println!("built on: {}", date);
 }
 
-pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, strip_source: bool, output: Option<&Path>) -> Result<()> {
+pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, strip_source: bool, output: Option<&Path>, extra_module_paths: &[PathBuf]) -> Result<()> {
     if path.extension().and_then(|s| s.to_str()) == Some("bxb") {
         let bytes = fs::read(path)?;
         let chunk: Chunk = bincode::deserialize(&bytes)?;
@@ -199,8 +208,27 @@ pub fn process_file(path: &Path, is_build: bool, target: Option<&str>, keep_symb
     } else {
         let source = fs::read_to_string(path)?;
         let ast = parser::parse(&source).map_err(|e| anyhow::anyhow!("Parse Error: {}", e))?;
-        let mut chunk = matchbox_compiler::compile_with_treeshaking(path.to_str().unwrap_or("unknown"), &ast, &source, keep_symbols, no_shaking, no_std_lib)
-            .map_err(|e| anyhow::anyhow!("Compiler Error: {}", e))?;
+        // Discover modules from matchbox.toml (in CWD) and any --module flags.
+        let cwd = std::env::current_dir().unwrap_or_else(|_| {
+            path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        });
+        let modules_info = modules::discover_modules(&cwd, extra_module_paths)?;
+        let module_mappings: Vec<(String, PathBuf)> = modules_info.iter()
+            .map(|m| (m.name.clone(), m.path.clone()))
+            .collect();
+        let extra_preludes: Vec<String> = modules_info.iter()
+            .flat_map(|m| m.bif_sources.iter().cloned())
+            .collect();
+        let mut chunk = matchbox_compiler::compile_with_treeshaking(
+            path.to_str().unwrap_or("unknown"),
+            &ast,
+            &source,
+            keep_symbols,
+            no_shaking,
+            no_std_lib,
+            &module_mappings,
+            &extra_preludes,
+        ).map_err(|e| anyhow::anyhow!("Compiler Error: {}", e))?;
 
         if strip_source {
             strip_sources(&mut chunk);
@@ -278,7 +306,7 @@ fn produce_js_bundle(chunk: &Chunk, source_path: &Path, ast: &[ast::Statement], 
     Ok(())
 }
 
-fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, strip_source: bool, output: Option<&Path>) -> Result<()> {
+fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_symbols: Vec<String>, no_shaking: bool, no_std_lib: bool, strip_source: bool, output: Option<&Path>, extra_module_paths: &[PathBuf]) -> Result<()> {
     let entry_points = ["index.bxs", "main.bxs", "Application.bx"];
     let mut entry_file = None;
     for ep in entry_points {
@@ -289,7 +317,7 @@ fn process_directory(path: &Path, is_build: bool, target: Option<&str>, keep_sym
         }
     }
     let entry_file = entry_file.context("No entry point found in directory")?;
-    process_file(&entry_file, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output)
+    process_file(&entry_file, is_build, target, keep_symbols, no_shaking, no_std_lib, strip_source, output, extra_module_paths)
 }
 
 /// Recursively clear embedded source text from a chunk tree.

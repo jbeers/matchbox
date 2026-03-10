@@ -1,0 +1,19 @@
+// Integration test: verify module BIFs and class imports via bxModules prefix
+
+import bxModules.greetings.models.Greeter as Greeter;
+
+// 1. BIF provided by the module (injected as extra prelude)
+msg = greetUser("World")
+if (msg != "Hello, World!") {
+    throw "greetUser BIF returned unexpected value: " & msg
+}
+
+// 2. Class imported from the module via bxModules path
+g = new Greeter()
+g.init("Matchbox")
+result = g.getMessage()
+if (result != "Greetings from Matchbox!") {
+    throw "Greeter.getMessage() returned unexpected value: " & result
+}
+
+println("Module integration test passed!")
