@@ -348,14 +348,13 @@ impl Compiler {
                     if *operator == "==" {
                         if let (ExpressionKind::Identifier(name), ExpressionKind::Literal(lit)) = (&left.kind, &right.kind) {
                             if let Some(slot) = self.resolve_local(name) {
+                                // Only apply LOCAL_JUMP_IF_NE_CONST for value-typed constants
+                                // (numbers, bools, null). Strings are heap-allocated GC objects
+                                // and require content comparison — bitwise BxValue equality fails
+                                // because the argument and the constant are different allocations.
                                 let const_idx = match lit {
                                     Literal::Number(n) => Some(self.chunk.add_constant(Constant::Number(*n))),
                                     Literal::Boolean(b) => Some(self.chunk.add_constant(Constant::Boolean(*b))),
-                                    Literal::String(parts) if parts.len() == 1 => {
-                                        if let StringPart::Text(t) = &parts[0] {
-                                            Some(self.chunk.add_constant(Constant::String(BoxString::new(t))))
-                                        } else { None }
-                                    },
                                     Literal::Null => Some(self.chunk.add_constant(Constant::Null)),
                                     _ => None,
                                 };

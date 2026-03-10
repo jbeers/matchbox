@@ -13,4 +13,32 @@ if (y > 5) {
     println("y is NOT greater than 5")
 }
 
+// Regression: LOCAL_JUMP_IF_NE_CONST optimization must NOT be applied for
+// string literals — strings are heap-allocated GC objects and require content
+// comparison, not bitwise pointer equality.
+function checkLang(lang) {
+    result = "unknown"
+    if (lang == "en") { result = "english" }
+    return result
+}
+if (checkLang("en") != "english") { throw "if: string == param comparison failed (true branch)" }
+if (checkLang("fr") != "unknown") { throw "if: string == param comparison failed (false branch)" }
+
+// Regression: return from inside an if-block must propagate.
+function earlyReturn(x) {
+    if (x == "stop") { return "stopped" }
+    return "continued"
+}
+if (earlyReturn("stop") != "stopped") { throw "if: return from if-block did not propagate" }
+if (earlyReturn("go") != "continued") { throw "if: fallthrough return failed" }
+
+// Number == still uses the fast path (value-typed, safe for bitwise compare).
+function checkNum(n) {
+    result = "other"
+    if (n == 7) { result = "seven" }
+    return result
+}
+if (checkNum(7) != "seven") { throw "if: number == param comparison failed" }
+if (checkNum(8) != "other") { throw "if: number == false branch failed" }
+
 println("If test complete")
