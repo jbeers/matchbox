@@ -45,6 +45,7 @@ fn main() {
     println!("cargo:rerun-if-changed=crates/matchbox-runner/Cargo.toml");
     println!("cargo:rerun-if-changed=crates/matchbox-vm/src/vm/mod.rs");
     println!("cargo:rerun-if-changed=crates/matchbox-vm/src/vm/opcode.rs");
+    println!("cargo:rerun-if-changed=crates/matchbox-vm/src/bifs");
     println!("cargo:rerun-if-changed=crates/matchbox-vm/src/lib.rs");
     println!("cargo:rerun-if-changed=crates/matchbox-vm/Cargo.toml");
     println!("cargo:rerun-if-changed=build.rs");
@@ -53,8 +54,16 @@ fn main() {
     stubs_rs_content.push_str("pub fn get_stub(target: &str) -> Option<&'static [u8]> {\n");
     stubs_rs_content.push_str("    let mut stubs: HashMap<&str, &[u8]> = HashMap::new();\n");
 
+    // Get enabled features to pass to the stub build
+    let mut features = Vec::new();
+    if env::var("CARGO_FEATURE_BIF_IO").is_ok() { features.push("bif-io"); }
+    if env::var("CARGO_FEATURE_BIF_HTTP").is_ok() { features.push("bif-http"); }
+    if env::var("CARGO_FEATURE_BIF_ZIP").is_ok() { features.push("bif-zip"); }
+    if env::var("CARGO_FEATURE_BIF_CRYPTO").is_ok() { features.push("bif-crypto"); }
+    if env::var("CARGO_FEATURE_BIF_CLI").is_ok() { features.push("bif-cli"); }
+
     // Helper closure to build and copy a stub
-    let build_stub = |target: Option<&str>, dest_name: &str, src_name: &str, alias: &str, stubs_rs: &mut String| {
+    let build_stub = |target: Option<&str>, dest_name: &str, src_name: &str, alias: &str, stubs_rs: &mut String, enabled_features: &[&str]| {
         let dest_path = stub_dest_dir.join(dest_name);
 
         // Determine whether we need (re)build: missing stub, zero-length stub,
@@ -64,6 +73,7 @@ fn main() {
             Path::new(&root_dir).join("crates/matchbox-runner/Cargo.toml"),
             Path::new(&root_dir).join("crates/matchbox-vm/src/vm/mod.rs"),
             Path::new(&root_dir).join("crates/matchbox-vm/src/vm/opcode.rs"),
+            Path::new(&root_dir).join("crates/matchbox-vm/src/bifs/mod.rs"),
             Path::new(&root_dir).join("crates/matchbox-vm/src/lib.rs"),
             Path::new(&root_dir).join("crates/matchbox-vm/Cargo.toml"),
         ];
@@ -86,6 +96,10 @@ fn main() {
                .current_dir(&runner_dir)
                .env("CARGO_TARGET_DIR", &stub_target_dir);
                
+            if !enabled_features.is_empty() {
+                cmd.arg("--features").arg(enabled_features.join(","));
+            }
+
             if let Some(t) = target {
                 cmd.arg("--target").arg(t);
             }
@@ -138,7 +152,7 @@ fn main() {
     let host = env::var("TARGET").unwrap_or_else(|_| "unknown".to_string());
     
     // Always build WASI if possible
-    build_stub(Some("wasm32-wasip1"), "runner_stub_wasip1.wasm", "matchbox_runner.wasm", "wasi", &mut stubs_rs_content);
+    build_stub(Some("wasm32-wasip1"), "runner_stub_wasip1.wasm", "matchbox_runner.wasm", "wasi", &mut stubs_rs_content, &features);
 
     if cfg!(feature = "cross-compile") {
         let targets = vec![
@@ -160,7 +174,7 @@ fn main() {
                 continue;
             }
             
-            build_stub(Some(target), dest, src, target, &mut stubs_rs_content);
+            build_stub(Some(target), dest, src, target, &mut stubs_rs_content, &features);
             if target == host {
                 stubs_rs_content.push_str(&format!("    stubs.insert(\"host\", include_bytes!(\"../stubs/{}\"));\n", dest));
             }
@@ -168,7 +182,7 @@ fn main() {
     } else {
         let native_src_name = if cfg!(windows) { "matchbox_runner.exe" } else { "matchbox_runner" };
         let dest_name = format!("runner_stub_{}", host);
-        build_stub(None, &dest_name, native_src_name, "host", &mut stubs_rs_content);
+        build_stub(None, &dest_name, native_src_name, "host", &mut stubs_rs_content, &features);
         stubs_rs_content.push_str(&format!("    stubs.insert(\"{}\", include_bytes!(\"../stubs/{}\"));\n", host, dest_name));
     }
 

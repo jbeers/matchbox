@@ -71,7 +71,7 @@ update = { expression }
 
 if_keyword = @{ "if" ~ !ASCII_ALPHANUMERIC }
 else_keyword = @{ "else" ~ !ASCII_ALPHANUMERIC }
-if_statement = { if_keyword ~ "(" ~ expression ~ ")" ~ block ~ (else_keyword ~ block)? }
+if_statement = { if_keyword ~ "(" ~ expression ~ ")" ~ block ~ (else_keyword ~ (if_statement | block))? }
 block = { "{" ~ statement* ~ "}" }
 
 try_keyword = @{ "try" ~ !ASCII_ALPHANUMERIC }

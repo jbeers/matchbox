@@ -397,7 +397,9 @@ impl VM {
         if a == b { return true; }
         if let (Some(id_a), Some(id_b)) = (a.as_gc_id(), b.as_gc_id()) {
             match (self.heap.get(id_a), self.heap.get(id_b)) {
-                (GcObject::String(s1), GcObject::String(s2)) => s1 == s2,
+                (GcObject::String(s1), GcObject::String(s2)) => {
+                    s1.to_string().to_lowercase() == s2.to_string().to_lowercase()
+                }
                 _ => false,
             }
         } else {
@@ -497,6 +499,8 @@ impl VM {
                     "len" | "length" => Some("len".to_string()),
                     "ucase" | "touppercase" => Some("ucase".to_string()),
                     "lcase" | "tolowercase" => Some("lcase".to_string()),
+                    "split" => Some("listtoarray".to_string()),
+                    "indexof" => Some("indexof".to_string()),
                     _ => None,
                 },
                 GcObject::Array(_) => match name {

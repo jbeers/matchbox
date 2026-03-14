@@ -332,12 +332,21 @@ fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
             let mut else_branch = None;
 
             if let Some(_else_kw) = inner_rules.next() {
-                let else_block_rule = inner_rules.next().unwrap();
-                else_branch = Some(parse_block(else_block_rule)?);
+                let else_rule = inner_rules.next().unwrap();
+                match else_rule.as_rule() {
+                    Rule::block => {
+                        else_branch = Some(parse_block(else_rule)?);
+                    }
+                    Rule::if_statement => {
+                        else_branch = Some(vec![parse_statement(else_rule)?]);
+                    }
+                    _ => bail!("Unexpected rule in else branch: {:?}", else_rule.as_rule()),
+                }
             }
-            
+
             Ok(Statement::new(StatementKind::If { condition, then_branch, else_branch }, line))
         }
+
         Rule::try_catch => {
             let mut inner_rules = pair.into_inner();
             let _try_kw = inner_rules.next().unwrap();
@@ -439,21 +448,65 @@ fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
             Ok(Expression::new(ExpressionKind::Assignment { target, value: Box::new(value) }, line))
         }
         Rule::binary_expr => {
-            let mut rules = pair.into_inner();
-            let mut left = parse_primary(rules.next().unwrap())?;
-            
-            while let Some(op) = rules.next() {
-                let operator = op.as_str().to_string();
-                let right = parse_primary(rules.next().unwrap())?;
-                left = Expression::new(ExpressionKind::Binary {
-                    left: Box::new(left),
-                    operator,
-                    right: Box::new(right),
-                }, line);
-            }
-            Ok(left)
+            let mut rules: Vec<_> = pair.into_inner().collect();
+            parse_binary_precedence(&mut rules, 0, line)
         }
+
         _ => bail!("Unexpected expression rule: {:?}", rule),
+    }
+}
+
+fn parse_binary_precedence(rules: &mut [pest::iterators::Pair<Rule>], min_precedence: u8, line: u32) -> Result<Expression> {
+    // This is a simple implementation of Pratt parsing for a flat list of rules: [primary, op, primary, op, primary]
+    // Since we can't easily consume from the slice in recursion without complex logic,
+    // we'll use a slightly different approach or just fix the bvm.bxs for now.
+    
+    // Actually, I'll just implement a simple one that works for the current grammar structure.
+    let mut left = parse_primary(rules[0].clone())?;
+    let mut i = 1;
+    
+    while i < rules.len() {
+        let op_str = rules[i].as_str();
+        let prec = get_precedence(op_str);
+        if prec < min_precedence {
+            break;
+        }
+        
+        let op = op_str.to_string();
+        i += 1;
+        
+        // Find how far we can go with higher precedence
+        let mut j = i;
+        while j + 1 < rules.len() && get_precedence(rules[j+1].as_str()) > prec {
+            j += 2;
+        }
+        
+        let right = if j == i {
+            parse_primary(rules[i].clone())?
+        } else {
+            parse_binary_precedence(&mut rules[i..j+1], prec + 1, line)?
+        };
+        
+        left = Expression::new(ExpressionKind::Binary {
+            left: Box::new(left),
+            operator: op,
+            right: Box::new(right),
+        }, line);
+        
+        i = j + 1;
+    }
+    
+    Ok(left)
+}
+
+fn get_precedence(op: &str) -> u8 {
+    match op {
+        "||" => 1,
+        "&&" => 2,
+        "==" | "!=" | "<" | ">" | "<=" | ">=" => 3,
+        "+" | "-" | "&" => 4,
+        "*" | "/" => 5,
+        _ => 0,
     }
 }
 

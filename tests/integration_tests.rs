@@ -56,6 +56,17 @@ script_test!(vm_polymorphic_ic, "vm_polymorphic_ic.bxs");
 script_test!(vm_fiber_priority, "vm_fiber_priority.bxs");
 
 #[test]
+#[cfg(all(feature = "bif-io", feature = "bif-http", feature = "bif-zip", feature = "bif-crypto", feature = "bif-cli"))]
+fn test_bvm_features() {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests/scripts/bvm_features.bxs");
+    
+    if let Err(e) = process_file(&path, false, None, Vec::new(), false, false, false, None, &[]) {
+        panic!("Script bvm_features.bxs failed: {}", e);
+    }
+}
+
+#[test]
 fn test_strip_source() {
     let mut script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     script_path.push("tests/scripts/vm_functions.bxs");
