@@ -1,0 +1,10 @@
+// Test range operators create arrays
+var r = 1..5;
+var l = len(r);
+if (l != 5) { throw "len wrong"; }
+
+// Right-exclusive
+var r2 = 1..<4;
+if (len(r2) != 3) { throw "r2 len wrong"; }
+
+println("range operators OK");

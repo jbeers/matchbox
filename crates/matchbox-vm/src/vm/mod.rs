@@ -2830,6 +2830,40 @@ impl VM {
                     let b_true = self.is_truthy(b);
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true == b_true));
                 }
+                op::RANGE => {
+                    let right_excl_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left_excl_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let end_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let start_val = self.fibers[fiber_idx].stack.pop().unwrap();
+
+                    let right_excl = right_excl_val.is_bool() && right_excl_val.as_bool();
+                    let left_excl = left_excl_val.is_bool() && left_excl_val.as_bool();
+
+                    if !start_val.is_number() || !end_val.is_number() {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Range bounds must be numbers")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+
+                    let start = start_val.as_number() as i64;
+                    let end = end_val.as_number() as i64;
+                    let s = if left_excl { start + 1 } else { start };
+                    let e = if right_excl { end - 1 } else { end };
+
+                    // Expand range into array
+                    let mut arr = Vec::new();
+                    if s <= e {
+                        for i in s..=e {
+                            arr.push(BxValue::new_number(i as f64));
+                        }
+                    } else {
+                        for i in (e..=s).rev() {
+                            arr.push(BxValue::new_number(i as f64));
+                        }
+                    }
+                    let id = self.heap.alloc(GcObject::Array(arr));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
                 op::POP => {
                     self.fibers[fiber_idx].stack.pop();
                 }

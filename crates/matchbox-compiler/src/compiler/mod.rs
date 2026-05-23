@@ -1576,6 +1576,42 @@ impl Compiler {
                     "xor" => self.chunk.emit0(op::XOR_OP, expr.line),
                     "eqv" => self.chunk.emit0(op::EQV_OP, expr.line),
                     "^" => self.chunk.emit0(op::POW, expr.line),
+                    ".." => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        let idx = self.chunk.add_constant(Constant::Boolean(false));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        let idx = self.chunk.add_constant(Constant::Boolean(false));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        self.chunk.emit0(op::RANGE, expr.line);
+                    }
+                    "..<" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        let idx = self.chunk.add_constant(Constant::Boolean(false));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        let idx = self.chunk.add_constant(Constant::Boolean(true));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        self.chunk.emit0(op::RANGE, expr.line);
+                    }
+                    ">.." => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        let idx = self.chunk.add_constant(Constant::Boolean(true));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        let idx = self.chunk.add_constant(Constant::Boolean(false));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        self.chunk.emit0(op::RANGE, expr.line);
+                    }
+                    ">..<" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        let idx = self.chunk.add_constant(Constant::Boolean(true));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        let idx = self.chunk.add_constant(Constant::Boolean(true));
+                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
+                        self.chunk.emit0(op::RANGE, expr.line);
+                    }
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())
@@ -2106,6 +2142,23 @@ impl Compiler {
             }
         }
         None
+    }
+
+    fn compile_range(
+        &mut self,
+        expr: &Expression,
+        left: &Expression,
+        right: &Expression,
+        left_exclusive: bool,
+        right_exclusive: bool,
+    ) {
+        self.compile_expression(left).unwrap();
+        self.compile_expression(right).unwrap();
+        let left_excl_idx = self.chunk.add_constant(Constant::Boolean(left_exclusive));
+        self.chunk.emit1(op::CONSTANT, left_excl_idx, expr.line);
+        let right_excl_idx = self.chunk.add_constant(Constant::Boolean(right_exclusive));
+        self.chunk.emit1(op::CONSTANT, right_excl_idx, expr.line);
+        self.chunk.emit0(op::RANGE, expr.line);
     }
 
     fn compile_expression_as_statement(&mut self, expr: &Expression) -> Result<()> {

@@ -501,11 +501,16 @@ impl<'a> Lexer<'a> {
         while self.pos < self.source.len() && self.current_char().is_ascii_digit() {
             self.advance();
         }
-        // Optional decimal part
+        // Optional decimal part — only consume dot if followed by a digit
         if self.pos < self.source.len() && self.current_char() == '.' {
-            self.advance();
-            while self.pos < self.source.len() && self.current_char().is_ascii_digit() {
-                self.advance();
+            // Peek ahead: only consume dot if next char is a digit
+            if self.pos + 1 < self.source.len()
+                && self.source.as_bytes()[self.pos + 1].is_ascii_digit()
+            {
+                self.advance(); // consume dot
+                while self.pos < self.source.len() && self.current_char().is_ascii_digit() {
+                    self.advance();
+                }
             }
         }
         let end = self.pos;
