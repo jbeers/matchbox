@@ -127,6 +127,8 @@ script_test!(vm_rethrow, "vm_rethrow.bxs");
 script_test!(vm_labeled_break_continue, "vm_labeled_break_continue.bxs");
 script_test!(vm_include, "vm_include.bxs");
 script_test!(vm_not_statement, "vm_not_statement.bxs");
+script_test!(vm_access_modifiers, "vm_access_modifiers.bxs");
+script_test!(vm_destructuring, "vm_destructuring.bxs");
 
 #[test]
 #[cfg(feature = "bif-tui")]

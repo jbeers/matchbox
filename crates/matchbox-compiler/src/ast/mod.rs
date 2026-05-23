@@ -94,6 +94,10 @@ pub enum StatementKind {
     },
     Not(Expression),
     Include(Expression),
+    Destructure {
+        source: Expression,
+        bindings: Vec<(String, Option<String>)>, // (source_name, local_name?)
+    },
     TryCatch {
         try_branch: Vec<Statement>,
         catches: Vec<CatchBlock>,

@@ -1,0 +1,24 @@
+// Test access modifiers and modifiers
+remote function getData() {
+    return "data from remote";
+}
+println(getData()); // expect data from remote
+
+package function internalHelper() {
+    return "package-level";
+}
+println(internalHelper()); // expect package-level
+
+// Static function test (simplified)
+static function getStatic() {
+    return "static value";
+}
+println(getStatic()); // expect static value
+
+// Abstract and final — just verify parsing
+abstract function noBody();
+
+final function finalMethod() {
+    return "final";
+}
+println(finalMethod()); // expect final

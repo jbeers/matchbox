@@ -295,6 +295,9 @@ fn collect_esp32_unsupported_features_in_stmt(
                 collect_esp32_unsupported_features_in_expr(d, findings, embedded_web_enabled);
             }
         }
+        StatementKind::Destructure { source, .. } => {
+            collect_esp32_unsupported_features_in_expr(source, findings, embedded_web_enabled);
+        }
         StatementKind::DoWhile { condition, body } => {
             collect_esp32_unsupported_features_in_expr(condition, findings, embedded_web_enabled);
             for statement in body {

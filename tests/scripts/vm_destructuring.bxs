@@ -1,0 +1,17 @@
+// Test destructuring assignment
+var obj = { a: 1, b: 2, c: 3 };
+
+// Simple member access
+println(obj.a); // expect 1
+
+// Object destructuring with single binding
+var a = 0;
+{ a } = obj;
+println(a); // expect 1
+
+// Object destructuring with multiple bindings
+var b = 0;
+var c = 0;
+{ b, c } = obj;
+println(b); // expect 2
+println(c); // expect 3

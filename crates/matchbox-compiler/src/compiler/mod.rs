@@ -482,6 +482,32 @@ impl Compiler {
                 self.chunk.emit0(op::POP, stmt.line as u32);
                 Ok(())
             }
+            StatementKind::Destructure { source, bindings } => {
+                // Compile source expression and store in a temp variable
+                // Use a different approach: compile a destructure helper
+                // For now, just evaluate the source and compile each member access
+                for (src_name, local_name) in bindings {
+                    let bind_name = local_name.as_ref().unwrap_or(src_name);
+                    // Compile: bind_name = source.src_name
+                    // Generate MemberAccess expression and compile it
+                    let member_expr = Expression::new(
+                        ExpressionKind::MemberAccess {
+                            base: Box::new(source.clone()),
+                            member: src_name.clone(),
+                        },
+                        source.line,
+                    );
+                    self.compile_expression(&member_expr)?;
+                    // Assign to variable
+                    if let Some(local_idx) = self.resolve_local(bind_name) {
+                        self.chunk.emit1(op::SET_LOCAL, local_idx as u32, source.line);
+                    } else {
+                        let bind_idx = self.chunk.add_constant(Constant::String(BoxString::new(bind_name.as_str())));
+                        self.chunk.emit1(op::DEFINE_GLOBAL, bind_idx, source.line);
+                    }
+                }
+                Ok(())
+            }
             StatementKind::TryCatch {
                 try_branch,
                 catches,
@@ -1077,6 +1103,10 @@ impl Compiler {
                 params,
                 body,
             } => {
+                if let FunctionBody::Abstract = body {
+                    // Abstract function — skip compilation (no body to emit)
+                    return Ok(());
+                }
                 let func = self.compile_function(&name, &params, &body)?;
                 let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                 if self.is_repl && is_last {
@@ -2562,6 +2592,9 @@ impl DependencyTracker {
             }
             StatementKind::Not(expr) | StatementKind::Include(expr) => {
                 self.track_expression(expr);
+            }
+            StatementKind::Destructure { source, bindings: _ } => {
+                self.track_expression(source);
             }
             StatementKind::VariableDecl { value, .. } => {
                 self.track_expression(value);

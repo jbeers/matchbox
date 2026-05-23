@@ -124,6 +124,11 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Break) => self.parse_break(line),
             Some(TokenKind::Switch) => self.parse_switch(line),
             Some(TokenKind::Var) => self.parse_var_decl(line),
+            Some(TokenKind::LeftBrace) | Some(TokenKind::LeftBracket)
+                if self.is_destructure_assignment() =>
+            {
+                return self.parse_destructure_assignment(line);
+            }
             Some(_) => {
                 let expr = self.parse_expression()?;
                 // Consume optional semicolon
@@ -289,6 +294,13 @@ impl<'a> Parser<'a> {
         } else {
             None
         };
+
+        // Consume non-access modifiers: static, abstract, final
+        while matches!(self.peek_kind(),
+            Some(TokenKind::Static) | Some(TokenKind::Abstract) | Some(TokenKind::Final)
+        ) {
+            self.pos += 1;
+        }
 
         let return_type = if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Function) {
             Some(self.advance_lexeme().unwrap_or_default())
@@ -773,6 +785,66 @@ impl<'a> Parser<'a> {
         }
     }
 
+
+    fn is_destructure_assignment(&self) -> bool {
+        let start = self.pos;
+        let mut i = start + 1; // skip { or [
+        let open = self.tokens[start].kind;
+        let close = if open == TokenKind::LeftBrace { TokenKind::RightBrace } else { TokenKind::RightBracket };
+        if i >= self.tokens.len() { return false; }
+        if self.tokens[i].kind != TokenKind::Identifier { return false; }
+        // Find the matching closing brace/bracket
+        while i < self.tokens.len() && self.tokens[i].kind != close {
+            i += 1;
+        }
+        if i >= self.tokens.len() { return false; }
+        // After closing brace, must be =
+        i += 1;
+        i < self.tokens.len() && self.tokens[i].kind == TokenKind::Equal
+    }
+
+    fn parse_destructure_assignment(&mut self, line: u32) -> Result<Statement> {
+        let is_object = self.peek_is(TokenKind::LeftBrace);
+        self.pos += 1; // { or [
+        let close = if is_object { TokenKind::RightBrace } else { TokenKind::RightBracket };
+
+        let mut bindings: Vec<(String, Option<String>)> = Vec::new(); // (source_name, local_name)
+        loop {
+            if self.peek_is(close) { self.pos += 1; break; }
+            if self.peek_is(TokenKind::DotDotDot) {
+                self.pos += 1;
+                let _rest = self.expect_get(TokenKind::Identifier)?;
+                if self.peek_is(TokenKind::Comma) { self.pos += 1; }
+                continue;
+            }
+            let source_name = self.expect_get(TokenKind::Identifier)?;
+            let local_name = if self.peek_is(TokenKind::Colon) {
+                self.pos += 1;
+                Some(self.expect_get(TokenKind::Identifier)?)
+            } else {
+                None
+            };
+            bindings.push((source_name, local_name));
+            if self.peek_is(TokenKind::Comma) {
+                self.pos += 1;
+                if self.peek_is(close) { self.pos += 1; break; }
+            } else {
+                self.expect(close)?;
+                break;
+            }
+        }
+
+        self.expect(TokenKind::Equal)?;
+        let source = self.parse_expression()?;
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+
+        // Desugar: for each binding, emit: localName = source.sourceName
+        Ok(Statement::new(
+            StatementKind::Destructure { source, bindings },
+            line,
+        ))
+    }
+
     fn parse_assignment_target(&mut self) -> Result<AssignmentTarget> {
         let name = self.expect_get(TokenKind::Identifier)?;
         let mut has_accessors = false;
@@ -1250,6 +1322,79 @@ impl<'a> Parser<'a> {
         } else {
             Ok(FunctionBody::Expression(Box::new(self.parse_expression()?)))
         }
+    }
+
+    fn is_destructure_pattern(&self) -> bool {
+        // Look ahead: identifier (, identifier)* } =  (no : after identifiers)
+        let mut i = self.pos;
+        if i >= self.tokens.len() || self.tokens[i].kind != TokenKind::Identifier {
+            return false;
+        }
+        i += 1;
+        // After the first identifier, check for : or = (struct literal) vs } or , (destructure)
+        if i >= self.tokens.len() { return false; }
+        if self.tokens[i].kind == TokenKind::Colon || self.tokens[i].kind == TokenKind::Equal {
+            return false; // This is a struct literal { key: val }
+        }
+        if self.tokens[i].kind == TokenKind::Comma {
+            // Struct could also have comma, so check further
+            i += 1;
+            if i >= self.tokens.len() { return false; }
+            if self.tokens[i].kind == TokenKind::Identifier {
+                i += 1;
+                if i >= self.tokens.len() { return false; }
+                // After second identifier, check for } or , (destructure) vs : (struct)
+                return self.tokens[i].kind != TokenKind::Colon
+                    && self.tokens[i].kind != TokenKind::Equal;
+            }
+        }
+        // Single identifier — must be followed by } to be destructure
+        i < self.tokens.len() && self.tokens[i].kind == TokenKind::RightBrace
+    }
+
+    fn parse_destructure_expr(&mut self, line: u32) -> Result<Expression> {
+        // Parse { a, b, ...rest } as destructuring pattern
+        let mut bindings: Vec<String> = Vec::new();
+        loop {
+            if self.peek_is(TokenKind::RightBrace) {
+                self.pos += 1;
+                break;
+            }
+            if self.peek_is(TokenKind::DotDotDot) {
+                self.pos += 1; // ...
+                let _rest = self.expect_get(TokenKind::Identifier)?;
+                // rest binding — skip for now
+                if self.peek_is(TokenKind::Comma) { self.pos += 1; }
+                continue;
+            }
+            let name = self.expect_get(TokenKind::Identifier)?;
+            // Check for rename: { sourceName: localName }
+            if self.peek_is(TokenKind::Colon) {
+                self.pos += 1; // :
+                let _local_name = self.expect_get(TokenKind::Identifier)?;
+                bindings.push(name); // use source name for member access
+            } else {
+                bindings.push(name);
+            }
+            if self.peek_is(TokenKind::Comma) {
+                self.pos += 1;
+                if self.peek_is(TokenKind::RightBrace) {
+                    self.pos += 1;
+                    break;
+                }
+            } else {
+                self.expect(TokenKind::RightBrace)?;
+                break;
+            }
+        }
+
+        // This will be followed by = value in parse_binary
+        // Store the binding names so parse_binary can desugar
+        // For now, just return a marker expression
+        Ok(Expression::new(
+            ExpressionKind::Identifier(bindings.join(",")),
+            line,
+        ))
     }
 
     fn is_throw_struct(&self) -> bool {
