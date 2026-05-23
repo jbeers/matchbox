@@ -118,7 +118,7 @@ fn collect_esp32_unsupported_features_in_stmt(
 
     match &stmt.kind {
         StatementKind::Import { .. } | StatementKind::Continue | StatementKind::Break
-        | StatementKind::Rethrow | StatementKind::Not(_) | StatementKind::Include(_) => {}
+        | StatementKind::Rethrow | StatementKind::Not(_) |         StatementKind::Include(_) | StatementKind::BufferOutput(_) => {}
         StatementKind::ClassDecl { members, .. } => {
             for member in members {
                 if let ast::ClassMember::Statement(statement) = member {

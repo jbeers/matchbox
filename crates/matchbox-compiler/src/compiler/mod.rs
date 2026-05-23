@@ -477,7 +477,7 @@ impl Compiler {
                 self.chunk.emit0(op::POP, stmt.line as u32);
                 Ok(())
             }
-            StatementKind::Include(expr) => {
+            StatementKind::Include(expr) | StatementKind::BufferOutput(expr) => {
                 self.compile_expression(expr)?;
                 self.chunk.emit0(op::POP, stmt.line as u32);
                 Ok(())
@@ -2590,7 +2590,7 @@ impl DependencyTracker {
                     self.track_expression(d);
                 }
             }
-            StatementKind::Not(expr) | StatementKind::Include(expr) => {
+            StatementKind::Not(expr) | StatementKind::Include(expr) | StatementKind::BufferOutput(expr) => {
                 self.track_expression(expr);
             }
             StatementKind::Destructure { source, bindings: _ } => {

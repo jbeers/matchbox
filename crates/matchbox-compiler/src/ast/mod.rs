@@ -98,6 +98,7 @@ pub enum StatementKind {
         source: Expression,
         bindings: Vec<(String, Option<String>)>, // (source_name, local_name?)
     },
+    BufferOutput(Expression), // Write expression to output buffer (templates)
     TryCatch {
         try_branch: Vec<Statement>,
         catches: Vec<CatchBlock>,

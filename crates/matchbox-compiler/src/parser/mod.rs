@@ -2,14 +2,15 @@ use crate::ast::*;
 use crate::tokenizer::*;
 use anyhow::{bail, Result};
 
+pub mod template;
+
 #[cfg(feature = "bxm")]
 pub mod bxm;
 
 #[cfg(feature = "bxm")]
 pub fn parse_bxm(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
-    let transpiled = bxm::transpile_bxm(source);
-    let label = filename.map(|f| format!("transpiled from {}", f));
-    parse(&transpiled, label.as_deref())
+    // Use the new template parser
+    template::parse_template(source, filename)
 }
 
 pub fn parse(source: &str, _filename: Option<&str>) -> Result<Vec<Statement>> {
