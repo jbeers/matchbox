@@ -1567,6 +1567,12 @@ impl Compiler {
                     "<=" => self.chunk.emit0(op::LESS_EQUAL, expr.line),
                     ">" => self.chunk.emit0(op::GREATER, expr.line),
                     ">=" => self.chunk.emit0(op::GREATER_EQUAL, expr.line),
+                    "b|" => self.chunk.emit0(op::BIT_OR, expr.line),
+                    "b&" => self.chunk.emit0(op::BIT_AND, expr.line),
+                    "b^" => self.chunk.emit0(op::BIT_XOR, expr.line),
+                    "b<<" => self.chunk.emit0(op::BIT_SHL, expr.line),
+                    "b>>" => self.chunk.emit0(op::BIT_SHR, expr.line),
+                    "b>>>" => self.chunk.emit0(op::BIT_USHR, expr.line),
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())

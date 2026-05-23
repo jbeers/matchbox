@@ -74,6 +74,14 @@ pub mod op {
     pub const FOR_LOOP_STEP: u8 = 63;  // 3-word: op0=slot, w1=const_idx, w2=offset — increment local, compare < const, jump back if true
     pub const JUMP_IF_NULL: u8 = 64;
     pub const MODULO: u8 = 65;
+    // Bitwise operators
+    pub const BIT_OR: u8 = 66;
+    pub const BIT_AND: u8 = 67;
+    pub const BIT_XOR: u8 = 68;
+    pub const BIT_NOT: u8 = 69;
+    pub const BIT_SHL: u8 = 70;
+    pub const BIT_SHR: u8 = 71;
+    pub const BIT_USHR: u8 = 72;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -144,6 +152,13 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::FOR_LOOP_STEP           => "FOR_LOOP_STEP",
         op::JUMP_IF_NULL            => "JUMP_IF_NULL",
         op::MODULO                  => "MODULO",
+        op::BIT_OR                  => "BIT_OR",
+        op::BIT_AND                 => "BIT_AND",
+        op::BIT_XOR                 => "BIT_XOR",
+        op::BIT_NOT                 => "BIT_NOT",
+        op::BIT_SHL                 => "BIT_SHL",
+        op::BIT_SHR                 => "BIT_SHR",
+        op::BIT_USHR                => "BIT_USHR",
         _                           => "UNKNOWN",
     }
 }

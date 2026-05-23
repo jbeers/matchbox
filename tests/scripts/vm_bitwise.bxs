@@ -1,0 +1,17 @@
+// Test bitwise operators with verification
+var a = 5 b| 3;
+if (a != 7) { throw "Expected 5 b| 3 = 7, got " & a; }
+
+var b = 5 b& 3;
+if (b != 1) { throw "Expected 5 b& 3 = 1, got " & b; }
+
+var c = 5 b^ 3;
+if (c != 6) { throw "Expected 5 b^ 3 = 6, got " & c; }
+
+var d = 8 b<< 1;
+if (d != 16) { throw "Expected 8 b<< 1 = 16, got " & d; }
+
+var e = 8 b>> 1;
+if (e != 4) { throw "Expected 8 b>> 1 = 4, got " & e; }
+
+println("bitwise operators OK");

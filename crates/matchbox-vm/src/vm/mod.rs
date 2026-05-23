@@ -335,11 +335,57 @@ pub struct CallFrame {
 pub struct BxFiber {
     pub stack: Vec<BxValue>,
     pub frames: Vec<CallFrame>,
+    pub variables: Rc<RefCell<HashMap<String, BxValue>>>,
     pub future_id: usize,
     pub wait_until: Option<Instant>,
     pub yield_requested: bool,
     pub priority: u8,
     pub root_stack: Vec<BxValue>,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DebugLocation {
+    pub function: String,
+    pub filename: String,
+    pub line: u32,
+    pub frame_depth: usize,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugStepStatus {
+    Paused,
+    Completed,
+    RuntimeError,
+    BudgetExhausted,
+    Blocked,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebugStepResult {
+    pub status: DebugStepStatus,
+    pub location: Option<DebugLocation>,
+    pub value: Option<serde_json::Value>,
+    pub instructions: u64,
+    pub error: Option<String>,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DebugPauseReason {
+    Line,
+    Budget,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug)]
+struct DebugRunState {
+    start: Option<DebugLocation>,
+    executed: u64,
+    budget: u64,
+    pause: Option<DebugPauseReason>,
 }
 
 enum NativeCompletion {
@@ -358,6 +404,7 @@ pub struct VM {
     pub fibers: Vec<BxFiber>,
     pub global_names: HashMap<u32, usize>,
     pub global_values: Vec<BxValue>,
+    pub script_variables: Rc<RefCell<HashMap<String, BxValue>>>,
     pub current_fiber_idx: Option<usize>,
     pub shapes: ShapeRegistry,
     pub heap: Heap,
@@ -370,6 +417,8 @@ pub struct VM {
     native_future_tx: Sender<NativeFutureMessage>,
     native_future_rx: Receiver<NativeFutureMessage>,
     pending_native_futures: HashMap<usize, usize>,
+    #[cfg(feature = "debugger")]
+    debug_run: Option<DebugRunState>,
     #[cfg(feature = "jit")]
     pub jit: Option<Box<jit::JitState>>,
     #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -901,6 +950,17 @@ impl BxVM for VM {
 }
 
 impl VM {
+    fn new_variables_scope() -> Rc<RefCell<HashMap<String, BxValue>>> {
+        Rc::new(RefCell::new(HashMap::new()))
+    }
+
+    fn current_variables_scope(&self) -> Rc<RefCell<HashMap<String, BxValue>>> {
+        self.current_fiber_idx
+            .and_then(|idx| self.fibers.get(idx))
+            .map(|fiber| Rc::clone(&fiber.variables))
+            .unwrap_or_else(|| Rc::clone(&self.script_variables))
+    }
+
     pub fn interpret_sync(&mut self, mut chunk: Chunk) -> Result<BxValue> {
         chunk.ensure_caches();
         let chunk_for_func = chunk.clone();
@@ -954,6 +1014,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: Vec::new(),
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1104,6 +1165,7 @@ impl VM {
             fibers: Vec::new(),
             global_names: HashMap::new(),
             global_values: Vec::new(),
+            script_variables: Self::new_variables_scope(),
             current_fiber_idx: None,
             shapes: ShapeRegistry::new(),
             heap: Heap::new(),
@@ -1116,6 +1178,8 @@ impl VM {
             native_future_tx,
             native_future_rx,
             pending_native_futures: HashMap::new(),
+            #[cfg(feature = "debugger")]
+            debug_run: None,
             #[cfg(feature = "jit")]
             jit: None,
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -1522,6 +1586,7 @@ impl VM {
                 promoted_constants: Vec::new(),
             }],
 
+            variables: Self::new_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1612,6 +1677,199 @@ impl VM {
         Ok(())
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn start_debug_chunk(&mut self, mut chunk: Chunk) -> Result<BxValue> {
+        chunk.ensure_caches();
+        let chunk_for_func = chunk.clone();
+        let chunk_rc = Rc::new(RefCell::new(chunk));
+        let function = Rc::new(BxCompiledFunction {
+            name: "script".to_string(),
+            arity: 0,
+            min_arity: 0,
+            params: Vec::new(),
+            captured_receiver: None,
+            chunk: chunk_for_func,
+        });
+
+        let future_id = self.heap.alloc(GcObject::Future(BxFuture {
+            value: BxValue::new_null(),
+            status: FutureStatus::Pending,
+            error_handler: None,
+        }));
+
+        let fiber = BxFiber {
+            stack: Vec::with_capacity(256),
+            frames: vec![CallFrame {
+                function,
+                chunk: chunk_rc,
+                ip: 0,
+                stack_base: 0,
+                receiver: None,
+                handlers: Vec::new(),
+                promoted_constants: Vec::new(),
+            }],
+            variables: Self::new_variables_scope(),
+            future_id,
+            wait_until: None,
+            yield_requested: false,
+            priority: 0,
+            root_stack: Vec::new(),
+        };
+
+        self.fibers.push(fiber);
+        Ok(BxValue::new_ptr(future_id))
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_step_source_line(
+        &mut self,
+        instruction_budget: u64,
+        value_path: Option<&str>,
+    ) -> DebugStepResult {
+        let budget = instruction_budget.max(1);
+        if self.fibers.is_empty() {
+            return DebugStepResult {
+                status: DebugStepStatus::Completed,
+                location: None,
+                value: value_path.and_then(|path| self.debug_get_value_json(path).ok()),
+                instructions: 0,
+                error: None,
+            };
+        }
+
+        self.drain_native_completions();
+        self.debug_run = Some(DebugRunState {
+            start: None,
+            executed: 0,
+            budget,
+            pause: None,
+        });
+
+        self.current_fiber_idx = Some(0);
+        let run_result = self.run_fiber(0, None);
+        self.current_fiber_idx = None;
+
+        let state = self.debug_run.take();
+        let instructions = state.as_ref().map(|s| s.executed).unwrap_or(0);
+        let pause = state.and_then(|s| s.pause);
+        let value = value_path.and_then(|path| self.debug_get_value_json(path).ok());
+
+        match run_result {
+            Ok(Some(result)) => {
+                let fiber = self.fibers.swap_remove(0);
+                if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                    f.value = result;
+                    f.status = FutureStatus::Completed;
+                }
+                DebugStepResult {
+                    status: DebugStepStatus::Completed,
+                    location: None,
+                    value,
+                    instructions,
+                    error: None,
+                }
+            }
+            Ok(None) => {
+                let status = match pause {
+                    Some(DebugPauseReason::Budget) => DebugStepStatus::BudgetExhausted,
+                    Some(DebugPauseReason::Line) => DebugStepStatus::Paused,
+                    None => DebugStepStatus::Blocked,
+                };
+                DebugStepResult {
+                    status,
+                    location: self.debug_current_location(),
+                    value,
+                    instructions,
+                    error: None,
+                }
+            }
+            Err(err) => {
+                let message = err.to_string();
+                if !self.fibers.is_empty() {
+                    let err_id = self.string_new(message.clone());
+                    let fiber = self.fibers.swap_remove(0);
+                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                        f.status = FutureStatus::Failed(BxValue::new_ptr(err_id));
+                    }
+                }
+                DebugStepResult {
+                    status: DebugStepStatus::RuntimeError,
+                    location: None,
+                    value,
+                    instructions,
+                    error: Some(message),
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_current_location(&self) -> Option<DebugLocation> {
+        let fiber_idx = self.current_fiber_idx.unwrap_or(0);
+        let frame = self.fibers.get(fiber_idx)?.frames.last()?;
+        self.debug_location_at_ip(fiber_idx, frame.ip)
+    }
+
+    #[cfg(feature = "debugger")]
+    fn debug_location_at_ip(&self, fiber_idx: usize, ip: usize) -> Option<DebugLocation> {
+        let fiber = self.fibers.get(fiber_idx)?;
+        let frame = fiber.frames.last()?;
+        let chunk = frame.chunk.borrow();
+        let line = if ip < chunk.lines.len() {
+            chunk.lines[ip]
+        } else if ip > 0 && ip - 1 < chunk.lines.len() {
+            chunk.lines[ip - 1]
+        } else {
+            0
+        };
+
+        Some(DebugLocation {
+            function: frame.function.name.clone(),
+            filename: chunk.filename.clone(),
+            line,
+            frame_depth: fiber.frames.len(),
+        })
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_get_value_json(&self, path: &str) -> Result<serde_json::Value> {
+        let mut parts = path.split('.');
+        let root = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Value path cannot be empty"))?;
+        if !root.eq_ignore_ascii_case("variables") {
+            anyhow::bail!("Only variables.* paths are supported by the debugger inspector");
+        }
+
+        let fiber_idx = self.current_fiber_idx.unwrap_or(0);
+        let fiber = self
+            .fibers
+            .get(fiber_idx)
+            .ok_or_else(|| anyhow::anyhow!("No active debug fiber"))?;
+        let first = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Value path must include a variables member"))?;
+        let mut value = fiber
+            .variables
+            .borrow()
+            .get(&first.to_lowercase())
+            .copied()
+            .unwrap_or(BxValue::new_null());
+
+        for part in parts {
+            let Some(id) = value.as_gc_id() else {
+                return Ok(serde_json::Value::Null);
+            };
+            value = match self.heap.get(id) {
+                GcObject::Struct(_) => self.struct_get(id, part),
+                GcObject::NativeObject(obj) => obj.borrow().get_property(part),
+                _ => BxValue::new_null(),
+            };
+        }
+
+        Ok(self.bx_to_json(&value))
+    }
+
     pub fn future_state(&self, future: BxValue) -> Result<HostFutureState> {
         let id = future.as_gc_id().ok_or_else(|| anyhow::anyhow!("Value is not a future"))?;
         match self.heap.get(id) {
@@ -1675,6 +1933,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: Vec::new(),
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1892,10 +2151,49 @@ impl VM {
             if ip >= code_len {
                 return Ok(Some(BxValue::new_null()));
             }
+
+            #[cfg(feature = "debugger")]
+            {
+                let loc = self.debug_location_at_ip(fiber_idx, ip);
+                let mut pause_reason = None;
+                if let Some(state) = self.debug_run.as_mut() {
+                    if state.executed >= state.budget {
+                        pause_reason = Some(DebugPauseReason::Budget);
+                    } else if let Some(loc) = loc {
+                        match &state.start {
+                            Some(start)
+                                if state.executed > 0
+                                    && (start.line != loc.line
+                                        || start.frame_depth != loc.frame_depth
+                                        || start.function != loc.function) =>
+                            {
+                                pause_reason = Some(DebugPauseReason::Line);
+                            }
+                            Some(_) => {}
+                            None => state.start = Some(loc),
+                        }
+                    }
+
+                    if let Some(reason) = pause_reason {
+                        state.pause = Some(reason);
+                    }
+                }
+
+                if pause_reason.is_some() {
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip = ip;
+                    return Ok(None);
+                }
+            }
+
             // SAFETY: ip < code_len; pointer is valid for the Rc<Chunk> lifetime.
             let word0 = unsafe { *code_ptr.add(ip) };
             let ip_at_start = ip;
             ip += 1;
+
+            #[cfg(feature = "debugger")]
+            if let Some(state) = self.debug_run.as_mut() {
+                state.executed += 1;
+            }
 
             let opcode = (word0 & 0xFF) as u8;
             let op0 = word0 >> 8;
@@ -2424,6 +2722,89 @@ impl VM {
                         frame_changed = true; continue 'quantum;
                     }
                 }
+                op::BIT_OR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) | (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise OR.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_AND => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) & (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise AND.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_XOR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) ^ (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise XOR.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_NOT => {
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() {
+                        let result = !(a.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operand must be a number for bitwise NOT.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_SHL => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) << (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift left.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_SHR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) >> (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift right.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_USHR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as u64) >> (b.as_number() as u64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise unsigned shift right.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
                 op::POP => {
                     self.fibers[fiber_idx].stack.pop();
                 }
@@ -2602,6 +2983,15 @@ impl VM {
                                 }
                             }
                         }
+
+                        if found.is_none() && name == "variables" {
+                            let proxy = VariablesScopeProxy {
+                                variables: Rc::clone(&self.fibers[fiber_idx].variables),
+                            };
+                            found = Some(BxValue::new_ptr(
+                                self.heap.alloc(GcObject::NativeObject(Rc::new(RefCell::new(proxy))))
+                            ));
+                        }
                         
                         if found.is_none() {
                             found = self.get_global(&name);
@@ -2629,9 +3019,7 @@ impl VM {
                             }
                         }
                     } else {
-                        flush_ip!();
-                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.fibers[fiber_idx].variables.borrow_mut().insert(name, val);
                     }
                 }
 
@@ -4241,6 +4629,7 @@ impl VM {
                             handlers: Vec::new(),
                             promoted_constants: vec![None; constant_count],
                         }],
+                        variables: self.current_variables_scope(),
                         future_id,
                         wait_until: None,
                         yield_requested: false,
@@ -4325,6 +4714,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: vec![None; constant_count],
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -5338,6 +5728,7 @@ impl VM {
         for fiber in &self.fibers {
             roots.extend(fiber.stack.iter().cloned());
             roots.extend(fiber.root_stack.iter().cloned());
+            roots.extend(fiber.variables.borrow().values().copied());
             for frame in &fiber.frames {
                 if let Some(recv) = &frame.receiver {
                     roots.push(*recv);
@@ -5348,6 +5739,7 @@ impl VM {
         }
         // 2. Globals
         roots.extend(self.global_values.iter().cloned());
+        roots.extend(self.script_variables.borrow().values().copied());
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
         roots.extend(self.callback_registry.borrow().values().cloned());
         for completion in &self.native_completions {
