@@ -4355,6 +4355,30 @@ impl VM {
                         print!("{s}");
                     }
                 }
+                op::CONTAINS => {
+                    let needle = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let haystack = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let needle_s = self.to_string(needle);
+                    let result = if let Some(id) = haystack.as_gc_id() {
+                        match self.heap.get(id) {
+                            GcObject::String(s) => {
+                                s.to_string().contains(&needle_s)
+                            }
+                            GcObject::Array(arr) => arr.iter().any(|v| *v == needle),
+                            GcObject::Struct(s) => {
+                                let intern_id = self.interner.intern(&needle_s);
+                                self.shapes.get_index(s.shape_id, intern_id).is_some()
+                            }
+                            _ => false,
+                        }
+                    } else if haystack.is_number() {
+                        false
+                    } else {
+                        let hs = self.to_string(haystack);
+                        hs.contains(&needle_s)
+                    };
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
+                }
                 _ => {
                     bail!("Unknown opcode: {}", opcode);
                 }

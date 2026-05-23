@@ -1644,6 +1644,19 @@ impl Compiler {
                         self.chunk.emit1(op::CONSTANT, idx, expr.line);
                         self.chunk.emit0(op::RANGE, expr.line);
                     }
+                    "contains" | "ct" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CONTAINS, expr.line);
+                    }
+                    "instanceof" | "castas" => {
+                        // Type-check/cast operators — evaluate both, push true for now
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::POP, expr.line);
+                        let t_idx = self.chunk.add_constant(Constant::Boolean(true));
+                        self.chunk.emit1(op::CONSTANT, t_idx, expr.line);
+                    }
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())
