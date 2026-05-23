@@ -131,6 +131,15 @@ impl<'a> Lexer<'a> {
             }
             match self.current_mode() {
                 LexerMode::DefaultScript => {
+                    // Check for </bx:script> while in template script mode
+                    if self.mode_stack_contains(LexerMode::TemplateScript) {
+                        if self.source[self.pos..].starts_with("</bx:script>") {
+                            self.pos += 12; self.col += 12;
+                            self.pop_mode(); // DefaultScript
+                            self.pop_mode(); // TemplateScript
+                            continue; // Back to template mode
+                        }
+                    }
                     self.skip_whitespace_and_comments();
                     if self.pos >= self.source.len() { break; }
                     let ch = self.current_char();
@@ -181,7 +190,27 @@ impl<'a> Lexer<'a> {
                 let start = self.pos;
                 self.advance(); // consume <
                 let rest = &self.source[self.pos..];
-                if rest.starts_with("bx:") {
+                if rest.starts_with("bx:script") || rest.starts_with("bx:output") {
+                    // Check which tag
+                    let is_script = rest.starts_with("bx:script");
+                    if is_script {
+                        // <bx:script ...> — skip past opening > and switch to script mode
+                        self.push_mode(LexerMode::TemplateScript);
+                        // Skip to > to find end of opening tag
+                        while self.pos < self.source.len() && self.current_char() != '>' {
+                            self.advance();
+                        }
+                        if self.pos < self.source.len() { self.advance(); } // skip >
+                        // Script content is parsed in DefaultScript mode
+                        return; // Don't tokenize as template — the main loop will switch to script
+                    } else {
+                        // <bx:output ...> — parse component normally, push output mode
+                        self.push_mode(LexerMode::TemplateOutput);
+                        self.pos += 3; self.col += 3; // skip bx:
+                        self.tokenize_component_name(start);
+                        return;
+                    }
+                } else if rest.starts_with("bx:") {
                     self.push_mode(LexerMode::TemplateComponentName);
                     self.pos += 3; self.col += 3; // skip bx:
                     self.tokenize_component_name(start);
@@ -207,9 +236,43 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 if self.pos < self.source.len() && self.current_char() == '#' {
                     self.advance();
-                    // Escaped hash — emit as ContentText with #
+                    // Escaped hash — emit as ContentText with ##
                     let hash_start = self.pos - 2;
                     self.push_token(TokenKind::ContentText, hash_start, self.pos, self.line, self.col.saturating_sub(2));
+                } else if self.mode_stack_contains(LexerMode::TemplateOutput) {
+                    // Expression interpolation in output mode: #expr#
+                    // Parse the expression tokens inline
+                    let mut depth: i32 = 1;
+                    while self.pos < self.source.len() && depth > 0 {
+                        let c = self.current_char();
+                        if c == '#' {
+                            self.advance();
+                            if self.pos < self.source.len() && self.current_char() == '#' {
+                                self.advance();
+                                continue;
+                            }
+                            depth -= 1;
+                            if depth == 0 { break; }
+                        } else if is_ident_start(c) {
+                            self.tokenize_ident_or_bitwise();
+                            continue;
+                        } else if c.is_ascii_digit() {
+                            self.tokenize_number();
+                            continue;
+                        } else if c == '"' || c == '\'' {
+                            self.tokenize_string(c);
+                            continue;
+                        } else if !c.is_whitespace() {
+                            let op_start = self.pos;
+                            let op_start_line = self.line;
+                            let op_start_col = self.col;
+                            let kind = self.read_operator_or_punct_inline();
+                            self.push_token(kind, op_start, self.pos, op_start_line, op_start_col);
+                            continue;
+                        } else {
+                            self.advance();
+                        }
+                    }
                 } else {
                     // Single # — emit as ContentText
                     self.push_token(TokenKind::ContentText, self.pos - 1, self.pos, self.line, self.col.saturating_sub(1));
@@ -515,6 +578,16 @@ impl<'a> Lexer<'a> {
         let start_line = self.line;
         let start_col = self.col;
         let ch = self.advance().unwrap();
+        let kind = self.read_op_kind(ch);
+        self.push_token(kind, start, self.pos, start_line, start_col);
+    }
+
+    fn read_operator_or_punct_inline(&mut self) -> TokenKind {
+        let ch = self.advance().unwrap();
+        self.read_op_kind(ch)
+    }
+
+    fn read_op_kind(&mut self, ch: char) -> TokenKind {
 
         let kind = match ch {
             '{' => TokenKind::LeftBrace,
@@ -541,10 +614,9 @@ impl<'a> Lexer<'a> {
             '?' => self.tokenize_question(),
             '&' => self.tokenize_ampersand(),
             '|' => self.tokenize_pipe(),
-            _ => TokenKind::Eof, // unknown char, skip
+            _ => TokenKind::Eof,
         };
-        let end = self.pos;
-        self.push_token(kind, start, end, start_line, start_col);
+        kind
     }
 
     fn next_char_matches(&self, expected: char) -> bool {
