@@ -20,6 +20,7 @@ Completed on the current branch:
 - Added `cst::parse_template()` with source-gap preservation.
 - Added stable CST node ids and descendant traversal helpers.
 - Added explicit CST error nodes for unmatched braces.
+- Added typed CST node kinds for common statements such as variable declarations, returns, conditionals, loops, try/catch, function/class/interface declarations, and related control statements.
 
 ## Problem
 
@@ -27,24 +28,20 @@ The CST is now useful enough to preserve source and identify broad script struct
 
 Important missing pieces:
 
-- No typed statement kinds beyond generic `Statement`.
 - No expression-level CST nodes.
-- No parent pointers, node ids, or stable traversal/index APIs.
-- No syntax error nodes or recovery model.
 - No comment attachment policy for formatter use.
 - No incremental parsing strategy.
-- Template CST is lossless, but mostly flat.
+- Template CST still needs richer structure beyond interpolation and script-island boundaries.
 
 ## Solution
 
 Continue in vertical slices:
 
-1. Add specific statement node kinds for common script statements, starting with low-risk boundaries such as `VariableDecl`, `Return`, `If`, `For`, `Function`, and `Class`.
-2. Add expression node grouping for parenthesized expressions, calls, member access, arrays, structs, and binary expression spans.
-3. Add `SyntaxTree` traversal helpers that do not expose implementation details unnecessarily.
-4. Add explicit error nodes for unmatched braces, unterminated strings, and unexpected EOF.
-5. Add comment/trivia association helpers for formatter consumers.
-6. Only then consider incremental parsing data structures.
+1. Add expression node grouping for parenthesized expressions, calls, member access, arrays, structs, and binary expression spans.
+2. Add `SyntaxTree` traversal helpers that do not expose implementation details unnecessarily.
+3. Add explicit error nodes for unterminated strings and unexpected EOF.
+4. Add comment/trivia association helpers for formatter consumers.
+5. Only then consider incremental parsing data structures.
 
 ## Test
 
@@ -59,7 +56,7 @@ assert_eq!(tree.to_source(), "if (x) { return x; }");
 ## Acceptance Criteria
 
 - [x] CST round-trips exact source for scripts and templates.
-- [ ] Common statement nodes have stable, queryable syntax kinds.
+- [x] Common statement nodes have stable, queryable syntax kinds.
 - [ ] Common expression nodes have stable, queryable syntax kinds.
 - [x] Comments and whitespace remain accessible as trivia.
 - [x] Error nodes preserve malformed source without panicking.

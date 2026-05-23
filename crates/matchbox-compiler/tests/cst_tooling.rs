@@ -57,7 +57,7 @@ fn script_cst_preserves_tokens_trivia_and_source_text() {
 }
 
 #[test]
-fn script_cst_groups_top_level_statements_with_source_spans() {
+fn script_cst_groups_typed_top_level_statements_with_source_spans() {
     let source = "var x = 1;\nreturn x;";
 
     let tree = matchbox_compiler::cst::parse_script(source);
@@ -72,9 +72,9 @@ fn script_cst_groups_top_level_statements_with_source_spans() {
         .collect();
 
     assert_eq!(statements.len(), 2);
-    assert_eq!(statements[0].kind, SyntaxKind::Statement);
+    assert_eq!(statements[0].kind, SyntaxKind::VariableDecl);
     assert_eq!(tree.text(statements[0].span), "var x = 1;\n");
-    assert_eq!(statements[1].kind, SyntaxKind::Statement);
+    assert_eq!(statements[1].kind, SyntaxKind::Return);
     assert_eq!(tree.text(statements[1].span), "return x;");
     assert_eq!(tree.to_source(), source);
 }
@@ -84,19 +84,22 @@ fn script_cst_keeps_braced_blocks_as_one_top_level_statement() {
     let source = "if (x) { var y = 1; }\nvar z = 2;";
 
     let tree = matchbox_compiler::cst::parse_script(source);
-    let statement_text: Vec<&str> = tree
+    let statement_kinds: Vec<_> = tree
         .root()
         .children
         .iter()
         .filter_map(|element| match element {
-            SyntaxElement::Node(node) => Some(tree.text(node.span)),
+            SyntaxElement::Node(node) => Some((node.kind, tree.text(node.span))),
             _ => None,
         })
         .collect();
 
     assert_eq!(
-        statement_text,
-        vec!["if (x) { var y = 1; }\n", "var z = 2;"]
+        statement_kinds,
+        vec![
+            (SyntaxKind::If, "if (x) { var y = 1; }\n"),
+            (SyntaxKind::VariableDecl, "var z = 2;")
+        ]
     );
     assert_eq!(tree.to_source(), source);
 }
@@ -128,7 +131,9 @@ fn script_cst_groups_nested_block_statements() {
         .children
         .iter()
         .filter_map(|element| match element {
-            SyntaxElement::Node(node) if node.kind == SyntaxKind::Statement => {
+            SyntaxElement::Node(node)
+                if node.kind == SyntaxKind::VariableDecl || node.kind == SyntaxKind::If =>
+            {
                 Some(tree.text(node.span))
             }
             _ => None,
@@ -238,7 +243,7 @@ fn template_cst_exposes_interpolation_and_script_island_nodes() {
         .expect("nested script CST");
     let script_statement = script_body
         .children_nodes()
-        .find(|node| node.kind == SyntaxKind::Statement)
+        .find(|node| node.kind == SyntaxKind::VariableDecl)
         .expect("nested script statement");
     assert!(tree.text(script_statement.span).contains("var x = 1;"));
 

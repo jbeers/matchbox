@@ -4,6 +4,25 @@ use crate::tokenizer::{lex, lex_template, Span, SyntaxToken, TokenKind, Trivia};
 pub enum SyntaxKind {
     Root,
     Statement,
+    VariableDecl,
+    Return,
+    Throw,
+    Continue,
+    Break,
+    Rethrow,
+    Assert,
+    Param,
+    Include,
+    Not,
+    If,
+    For,
+    While,
+    Do,
+    Try,
+    Switch,
+    FunctionDecl,
+    ClassDecl,
+    InterfaceDecl,
     Block,
     Interpolation,
     ScriptIsland,
@@ -622,7 +641,7 @@ fn push_current_group(
         let span = span_for_elements(current);
         let node = SyntaxNode {
             id: SyntaxNodeId::default(),
-            kind: SyntaxKind::Statement,
+            kind: statement_kind_for_elements(current),
             span,
             children: std::mem::take(current),
         };
@@ -630,6 +649,46 @@ fn push_current_group(
     } else {
         children.append(current);
     }
+}
+
+fn statement_kind_for_elements(elements: &[SyntaxElement]) -> SyntaxKind {
+    for element in elements {
+        match element {
+            SyntaxElement::Token(token) => {
+                return match token.kind {
+                    TokenKind::Var => SyntaxKind::VariableDecl,
+                    TokenKind::Return => SyntaxKind::Return,
+                    TokenKind::Throw => SyntaxKind::Throw,
+                    TokenKind::Continue => SyntaxKind::Continue,
+                    TokenKind::Break => SyntaxKind::Break,
+                    TokenKind::Rethrow => SyntaxKind::Rethrow,
+                    TokenKind::Assert => SyntaxKind::Assert,
+                    TokenKind::Param => SyntaxKind::Param,
+                    TokenKind::Include => SyntaxKind::Include,
+                    TokenKind::Not => SyntaxKind::Not,
+                    TokenKind::If => SyntaxKind::If,
+                    TokenKind::For => SyntaxKind::For,
+                    TokenKind::While => SyntaxKind::While,
+                    TokenKind::Do => SyntaxKind::Do,
+                    TokenKind::Try => SyntaxKind::Try,
+                    TokenKind::Switch => SyntaxKind::Switch,
+                    TokenKind::Function => SyntaxKind::FunctionDecl,
+                    TokenKind::Class => SyntaxKind::ClassDecl,
+                    TokenKind::Interface => SyntaxKind::InterfaceDecl,
+                    _ => SyntaxKind::Statement,
+                };
+            }
+            SyntaxElement::Node(node) => {
+                let kind = node.kind;
+                if kind != SyntaxKind::Block && kind != SyntaxKind::Error {
+                    return kind;
+                }
+            }
+            SyntaxElement::Trivia(_) | SyntaxElement::Source(_) => {}
+        }
+    }
+
+    SyntaxKind::Statement
 }
 
 fn span_for_elements(elements: &[SyntaxElement]) -> Span {
