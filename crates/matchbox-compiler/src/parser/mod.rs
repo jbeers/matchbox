@@ -170,7 +170,11 @@ impl<'a> Parser<'a> {
 
         match self.peek_kind() {
             Some(TokenKind::Import) => self.parse_import(line),
-            Some(TokenKind::Class) => self.parse_class(line),
+            Some(TokenKind::Class) | Some(TokenKind::Abstract) | Some(TokenKind::Final)
+                if self.is_class_decl() =>
+            {
+                self.parse_class(line)
+            }
             Some(TokenKind::Interface) => self.parse_interface(line),
             Some(TokenKind::Function) | Some(TokenKind::At)
             | Some(TokenKind::Public) | Some(TokenKind::Private)
@@ -241,6 +245,21 @@ impl<'a> Parser<'a> {
         false
     }
 
+    fn is_class_decl(&self) -> bool {
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::Abstract | TokenKind::Final => {
+                    i += 1;
+                    continue;
+                }
+                TokenKind::Class => return true,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     // ---- Statement parsers ----
 
     fn parse_import(&mut self, line: u32) -> Result<Statement> {
@@ -273,7 +292,16 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class(&mut self, line: u32) -> Result<Statement> {
-        self.pos += 1; // class
+        let mut modifiers = crate::ast::ClassModifiers::default();
+        while matches!(self.peek_kind(), Some(TokenKind::Abstract) | Some(TokenKind::Final)) {
+            match self.peek_kind() {
+                Some(TokenKind::Abstract) => modifiers.is_abstract = true,
+                Some(TokenKind::Final) => modifiers.is_final = true,
+                _ => {}
+            }
+            self.pos += 1;
+        }
+        self.expect(TokenKind::Class)?;
         let name = if self.peek_is(TokenKind::Identifier) {
             self.advance_lexeme().unwrap_or_default()
         } else {
@@ -323,7 +351,7 @@ impl<'a> Parser<'a> {
         }
         self.pos += 1; // }
         Ok(Statement::new(
-            StatementKind::ClassDecl { name, extends, accessors, implements, members },
+            StatementKind::ClassDecl { name, modifiers, extends, accessors, implements, members },
             line,
         ))
     }
@@ -358,20 +386,27 @@ impl<'a> Parser<'a> {
             attributes.push(Attribute { name: attr_name, args });
         }
 
-        let access_modifier = if matches!(self.peek_kind(),
-            Some(TokenKind::Public) | Some(TokenKind::Private)
-            | Some(TokenKind::Remote) | Some(TokenKind::Package)
-        ) {
-            Some(self.advance_lexeme().unwrap_or_default())
-        } else {
-            None
-        };
-
-        // Consume non-access modifiers: static, abstract, final
-        while matches!(self.peek_kind(),
-            Some(TokenKind::Static) | Some(TokenKind::Abstract) | Some(TokenKind::Final)
-        ) {
-            self.pos += 1;
+        let mut modifiers = crate::ast::FunctionModifiers::default();
+        loop {
+            match self.peek_kind() {
+                Some(TokenKind::Public) | Some(TokenKind::Private)
+                | Some(TokenKind::Remote) | Some(TokenKind::Package) => {
+                    modifiers.access = Some(self.advance_lexeme().unwrap_or_default());
+                }
+                Some(TokenKind::Static) => {
+                    modifiers.is_static = true;
+                    self.pos += 1;
+                }
+                Some(TokenKind::Abstract) => {
+                    modifiers.is_abstract = true;
+                    self.pos += 1;
+                }
+                Some(TokenKind::Final) => {
+                    modifiers.is_final = true;
+                    self.pos += 1;
+                }
+                _ => break,
+            }
         }
 
         let return_type = if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Function) {
@@ -397,7 +432,7 @@ impl<'a> Parser<'a> {
         };
 
         Ok(Statement::new(
-            StatementKind::FunctionDecl { name, attributes, access_modifier, return_type, params, body },
+            StatementKind::FunctionDecl { name, attributes, modifiers, return_type, params, body },
             line,
         ))
     }
@@ -1710,7 +1745,15 @@ mod tests {
     fn parse_function_decl() {
         let ast = parse("function foo(x) { return x; }\n", None).unwrap();
         assert_eq!(ast.len(), 1);
-        assert!(matches!(ast[0].kind, StatementKind::FunctionDecl { .. }));
+        match &ast[0].kind {
+            StatementKind::FunctionDecl { modifiers, .. } => {
+                assert_eq!(modifiers.access, None);
+                assert!(!modifiers.is_static);
+                assert!(!modifiers.is_abstract);
+                assert!(!modifiers.is_final);
+            }
+            other => panic!("Expected FunctionDecl, got {:?}", other),
+        }
     }
 
     #[test]
@@ -1752,7 +1795,43 @@ mod tests {
     fn parse_class() {
         let ast = parse("class Foo { property name; function bar() { } }\n", None).unwrap();
         assert_eq!(ast.len(), 1);
-        assert!(matches!(ast[0].kind, StatementKind::ClassDecl { .. }));
+        match &ast[0].kind {
+            StatementKind::ClassDecl { modifiers, .. } => {
+                assert!(!modifiers.is_abstract);
+                assert!(!modifiers.is_final);
+            }
+            other => panic!("Expected ClassDecl, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_modifiers() {
+        let ast = parse(
+            "abstract final class Foo { public static final function bar() { } }\n",
+            None,
+        )
+        .unwrap();
+        assert_eq!(ast.len(), 1);
+        match &ast[0].kind {
+            StatementKind::ClassDecl { modifiers, members, .. } => {
+                assert!(modifiers.is_abstract);
+                assert!(modifiers.is_final);
+                assert_eq!(members.len(), 1);
+                match &members[0] {
+                    ClassMember::Statement(stmt) => match &stmt.kind {
+                        StatementKind::FunctionDecl { modifiers, .. } => {
+                            assert_eq!(modifiers.access.as_deref(), Some("public"));
+                            assert!(modifiers.is_static);
+                            assert!(modifiers.is_final);
+                            assert!(!modifiers.is_abstract);
+                        }
+                        other => panic!("Expected FunctionDecl, got {:?}", other),
+                    },
+                    other => panic!("Expected statement member, got {:?}", other),
+                }
+            }
+            other => panic!("Expected ClassDecl, got {:?}", other),
+        }
     }
 
     #[test]

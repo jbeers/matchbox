@@ -409,6 +409,7 @@ mod tests {
         // 2. Create a BoxLang Class "User" with a public "name" property
         let class = Rc::new(RefCell::new(BxClass {
             name: "User".to_string(),
+            modifiers: crate::types::ClassModifiers::default(),
             extends: None,
             implements: Vec::new(),
             constructor: BxCompiledFunction {
@@ -416,6 +417,7 @@ mod tests {
                 arity: 0,
                 min_arity: 0,
                 params: Vec::new(),
+                modifiers: crate::types::FunctionModifiers::default(),
                 captured_receiver: None,
                 chunk: Chunk::default(),
             },

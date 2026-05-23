@@ -1293,6 +1293,7 @@ impl VM {
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
             captured_receiver: None,
             chunk: chunk_for_func,
         });
@@ -1888,6 +1889,7 @@ impl VM {
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
             captured_receiver: None,
             chunk: chunk_for_func,
         });
@@ -2011,6 +2013,7 @@ impl VM {
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
             captured_receiver: None,
             chunk: chunk_for_func,
         });

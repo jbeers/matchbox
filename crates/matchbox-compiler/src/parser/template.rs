@@ -504,7 +504,7 @@ impl<'a> TemplateParser<'a> {
         Ok(Some(Statement::new(StatementKind::FunctionDecl {
             name: String::new(),
             attributes: vec![],
-            access_modifier: None,
+            modifiers: FunctionModifiers::default(),
             return_type: None,
             params: vec![],
             body: FunctionBody::Block(body),

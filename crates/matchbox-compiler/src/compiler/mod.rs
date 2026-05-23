@@ -1,10 +1,11 @@
 use crate::ast::{
-    ClassMember, Expression, ExpressionKind, FunctionBody, Literal, Statement, StatementKind,
-    StringPart,
+    ClassMember, Expression, ExpressionKind, FunctionBody, FunctionModifiers as AstFunctionModifiers,
+    Literal, Statement, StatementKind, StringPart,
 };
 use anyhow::{bail, Result};
 use matchbox_vm::types::{
-    box_string::BoxString, BxClass, BxCompiledFunction, BxInterface, Constant,
+    box_string::BoxString, BxClass, BxCompiledFunction, BxInterface, ClassModifiers as VmClassModifiers,
+    Constant, FunctionModifiers as VmFunctionModifiers,
 };
 use matchbox_vm::vm::opcode::op;
 use matchbox_vm::Chunk;
@@ -137,6 +138,7 @@ impl Compiler {
             }
             StatementKind::ClassDecl {
                 name,
+                modifiers: class_modifiers,
                 extends,
                 accessors,
                 implements,
@@ -190,7 +192,7 @@ impl Compiler {
                             StatementKind::FunctionDecl {
                                 name: func_name,
                                 attributes: _,
-                                access_modifier: _,
+                                modifiers,
                                 return_type: _,
                                 params,
                                 body,
@@ -207,8 +209,12 @@ impl Compiler {
                                 method_compiler.current_line = inner_stmt.line as u32;
                                 method_compiler.class_methods = class_method_names.clone();
                                 method_compiler.class_has_init_map = self.class_has_init_map.clone();
-                                let mut func =
-                                    method_compiler.compile_function(&func_name, &params, &body)?;
+                                let func = method_compiler.compile_function(
+                                    &func_name,
+                                    &params,
+                                    &body,
+                                    modifiers.clone(),
+                                )?;
                                 methods.insert(func_name.to_lowercase(), func);
                             }
                             _ => {
@@ -240,6 +246,7 @@ impl Compiler {
                                 arity: 0,
                                 min_arity: 0,
                                 params: Vec::new(),
+                                modifiers: VmFunctionModifiers::default(),
                                 captured_receiver: None,
                                 chunk: getter_chunk,
                             };
@@ -262,6 +269,7 @@ impl Compiler {
                                 arity: 1,
                                 min_arity: 1,
                                 params: vec!["val".to_string()],
+                                modifiers: VmFunctionModifiers::default(),
                                 captured_receiver: None,
                                 chunk: setter_chunk,
                             };
@@ -312,6 +320,7 @@ impl Compiler {
                     arity: 0,
                     min_arity: 0,
                     params: Vec::new(),
+                    modifiers: VmFunctionModifiers::default(),
                     captured_receiver: None,
                     chunk: constructor_compiler.chunk,
                 };
@@ -322,6 +331,10 @@ impl Compiler {
 
                 let class = BxClass {
                     name: name.clone(),
+                    modifiers: VmClassModifiers {
+                        is_abstract: class_modifiers.is_abstract,
+                        is_final: class_modifiers.is_final,
+                    },
                     extends: extends.as_ref().map(|s| s.to_lowercase()),
                     implements: implements.iter().map(|s| s.to_lowercase()).collect(),
                     constructor,
@@ -343,7 +356,7 @@ impl Compiler {
                     if let StatementKind::FunctionDecl {
                         name: func_name,
                         attributes: _,
-                        access_modifier: _,
+                        modifiers: _,
                         return_type: _,
                         params,
                         body,
@@ -359,7 +372,12 @@ impl Compiler {
                             method_compiler.module_paths = self.module_paths.clone();
                             method_compiler.source_dir = self.source_dir.clone();
                             method_compiler.current_line = member.line;
-                            let func = method_compiler.compile_function(func_name, params, body)?;
+                            let func = method_compiler.compile_function(
+                                func_name,
+                                params,
+                                body,
+                                AstFunctionModifiers::default(),
+                            )?;
                             Some(func)
                         };
                         methods.insert(func_name.to_lowercase(), method);
@@ -1159,7 +1177,7 @@ impl Compiler {
             StatementKind::FunctionDecl {
                 name,
                 attributes: _,
-                access_modifier: _,
+                modifiers,
                 return_type: _,
                 params,
                 body,
@@ -1168,7 +1186,7 @@ impl Compiler {
                     // Abstract function — skip compilation (no body to emit)
                     return Ok(());
                 }
-                let func = self.compile_function(&name, &params, &body)?;
+                let func = self.compile_function(&name, &params, &body, modifiers.clone())?;
                 let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                 if self.is_repl && is_last {
                     self.chunk.emit1(op::CONSTANT, func_idx, stmt.line as u32);
@@ -1540,7 +1558,12 @@ impl Compiler {
                 }
                 Literal::Function { params, body } => {
                     let anon_name = format!("anonymous@{}@{}", expr.line, self.chunk.code.len());
-                    let func = self.compile_function(&anon_name, &params, &body)?;
+                    let func = self.compile_function(
+                        &anon_name,
+                        &params,
+                        &body,
+                        AstFunctionModifiers::default(),
+                    )?;
                     let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                     self.chunk.emit1(op::CONSTANT, func_idx, expr.line);
                     Ok(())
@@ -2197,6 +2220,7 @@ impl Compiler {
         name: &str,
         params: &[crate::ast::FunctionParam],
         body: &crate::ast::FunctionBody,
+        modifiers: AstFunctionModifiers,
     ) -> Result<BxCompiledFunction> {
         let mut sub_compiler = Compiler::with_chunk(self.chunk.new_sub_chunk());
         // Source text lives only in the root chunk to avoid N copies per file.
@@ -2317,6 +2341,12 @@ impl Compiler {
             arity: (params.len() + 1) as u32, // +1 for the implicit `arguments` local
             min_arity,
             params: params.iter().map(|p| p.name.to_lowercase()).collect(),
+            modifiers: VmFunctionModifiers {
+                access: modifiers.access,
+                is_static: modifiers.is_static,
+                is_abstract: modifiers.is_abstract,
+                is_final: modifiers.is_final,
+            },
             captured_receiver: None,
             chunk: sub_compiler.chunk,
         })

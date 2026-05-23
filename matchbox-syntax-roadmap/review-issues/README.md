@@ -37,3 +37,5 @@ R006 has been implemented in code. Function-call spread, struct spread, and inva
 R007 has been implemented in code. Destructuring now evaluates its source once, handles object and array patterns, and is covered by both runtime and script integration tests.
 
 R008 has been implemented in code. `assert` now preserves optional custom messages, evaluates them only on failure, and still falls back to the default message when none is supplied.
+
+R009 has been implemented in code. Class and function modifiers are now preserved in the AST and carried into compiled class/function metadata for future enforcement work.

@@ -358,12 +358,27 @@ pub enum Constant {
     StringArray(Vec<String>),
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct FunctionModifiers {
+    pub access: Option<String>,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ClassModifiers {
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxCompiledFunction {
     pub name: String,
     pub arity: u32,     // Total parameters
     pub min_arity: u32, // Required parameters
     pub params: Vec<String>, // Parameter names
+    pub modifiers: FunctionModifiers,
     /// Captured `this` for closures created inside class contexts.
     #[serde(skip)]
     pub captured_receiver: Option<BxValue>,
@@ -374,6 +389,7 @@ pub struct BxCompiledFunction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxClass {
     pub name: String,
+    pub modifiers: ClassModifiers,
     pub extends: Option<String>,
     pub implements: Vec<String>,
     pub constructor: BxCompiledFunction,

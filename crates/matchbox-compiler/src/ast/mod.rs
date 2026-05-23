@@ -24,6 +24,20 @@ pub struct Attribute {
     pub args: Vec<Argument>,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FunctionModifiers {
+    pub access: Option<String>,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClassModifiers {
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
     Import {
@@ -32,6 +46,7 @@ pub enum StatementKind {
     },
     ClassDecl {
         name: String,
+        modifiers: ClassModifiers,
         extends: Option<String>,
         accessors: bool,
         implements: Vec<String>,
@@ -44,7 +59,7 @@ pub enum StatementKind {
     FunctionDecl {
         name: String,
         attributes: Vec<Attribute>,
-        access_modifier: Option<String>,
+        modifiers: FunctionModifiers,
         return_type: Option<String>,
         params: Vec<FunctionParam>,
         body: FunctionBody,
