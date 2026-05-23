@@ -1,4 +1,18 @@
-// Test spread in array literal (parsing only for now)
+// Test spread in array literal
 var base = [2, 3];
-// var expanded = [1, ...base, 4]; // TODO: enable when compiler supports
-println("spread parsing OK");
+var expanded = [1, ...base, 4];
+
+var l = len(expanded);
+if (l != 4) { throw "len wrong"; }
+
+// Test nested array (not spread)
+var nested = [[1, 2], 3];
+if (len(nested) != 2) { throw "nested len wrong"; }
+
+// Test multiple spreads
+var a = [1, 2];
+var b = [3, 4];
+var merged = [...a, ...b];
+if (len(merged) != 4) { throw "merged len wrong"; }
+
+println("spread arrays OK");

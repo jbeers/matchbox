@@ -88,6 +88,7 @@ pub mod op {
     pub const RANGE: u8 = 76;
     pub const BUFFER_WRITE: u8 = 77;
     pub const CONTAINS: u8 = 78;
+    pub const ARRAY_SPREAD: u8 = 79;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -171,6 +172,7 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::RANGE                   => "RANGE",
         op::BUFFER_WRITE            => "BUFFER_WRITE",
         op::CONTAINS                => "CONTAINS",
+        op::ARRAY_SPREAD            => "ARRAY_SPREAD",
         _                           => "UNKNOWN",
     }
 }

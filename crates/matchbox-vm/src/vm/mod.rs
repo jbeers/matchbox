@@ -3133,6 +3133,34 @@ impl VM {
                     let id = self.heap.alloc(GcObject::Array(items));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
+                op::ARRAY_SPREAD => {
+                    let count = op0;
+                    let mut result = Vec::new();
+                    let mut pairs = Vec::with_capacity(count as usize * 2);
+                    for _ in 0..(count * 2) {
+                        pairs.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                    }
+                    pairs.reverse();
+                    for chunk in pairs.chunks(2) {
+                        let should_spread = chunk[0].is_bool() && chunk[0].as_bool();
+                        let val = chunk[1];
+                        if should_spread {
+                            if let Some(id) = val.as_gc_id() {
+                                if let GcObject::Array(arr) = self.heap.get(id) {
+                                    result.extend(arr.iter().copied());
+                                } else {
+                                    result.push(val);
+                                }
+                            } else {
+                                result.push(val);
+                            }
+                        } else {
+                            result.push(val);
+                        }
+                    }
+                    let id = self.heap.alloc(GcObject::Array(result));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
                 op::STRUCT => {
                     let count = op0;
                     let mut shape_id = self.shapes.get_root();

@@ -1444,10 +1444,27 @@ impl Compiler {
                     Ok(())
                 }
                 Literal::Array(items) => {
-                    for item in items {
-                        self.compile_expression(item)?;
+                    let has_spread = items.iter().any(|i| matches!(i.kind, ExpressionKind::Spread(_)));
+                    if has_spread {
+                        let count = items.len() as u32;
+                        for item in items {
+                            let (is_spread, inner) = match &item.kind {
+                                ExpressionKind::Spread(expr) => (true, expr.as_ref()),
+                                _ => (false, item),
+                            };
+                            // Push spread marker (boolean)
+                            let marker_idx = self.chunk.add_constant(Constant::Boolean(is_spread));
+                            self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            // Push the value
+                            self.compile_expression(inner)?;
+                        }
+                        self.chunk.emit1(op::ARRAY_SPREAD, count, expr.line);
+                    } else {
+                        for item in items {
+                            self.compile_expression(item)?;
+                        }
+                        self.chunk.emit1(op::ARRAY, items.len() as u32, expr.line);
                     }
-                    self.chunk.emit1(op::ARRAY, items.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Struct(members) => {
