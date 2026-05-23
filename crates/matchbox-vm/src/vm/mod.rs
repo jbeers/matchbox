@@ -1204,6 +1204,87 @@ impl VM {
             .unwrap_or_else(|| Rc::clone(&self.script_variables))
     }
 
+    fn flatten_spread_array_value(&self, val: BxValue) -> Result<Vec<BxValue>> {
+        if let Some(id) = val.as_gc_id() {
+            if let GcObject::Array(arr) = self.heap.get(id) {
+                Ok(arr.iter().copied().collect())
+            } else {
+                bail!(
+                    "Cannot spread value of type [{}] into an array literal.",
+                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                )
+            }
+        } else {
+            bail!(
+                "Cannot spread value of type [{}] into an array literal.",
+                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+            )
+        }
+    }
+
+    fn flatten_spread_struct_entries(&self, val: BxValue) -> Result<Vec<(String, BxValue)>> {
+        if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::Struct(_) => {
+                    let keys = self.struct_key_array(id);
+                    let mut entries = Vec::with_capacity(keys.len());
+                    for key in keys {
+                        entries.push((key.clone(), self.struct_get(id, &key)));
+                    }
+                    Ok(entries)
+                }
+                GcObject::Array(arr) => {
+                    let mut entries = Vec::with_capacity(arr.len());
+                    for (idx, item) in arr.iter().enumerate() {
+                        entries.push(((idx + 1).to_string(), *item));
+                    }
+                    Ok(entries)
+                }
+                _ => bail!(
+                    "Cannot spread value of type [{}] into a struct literal.",
+                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                ),
+            }
+        } else {
+            bail!(
+                "Cannot spread value of type [{}] into a struct literal.",
+                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+            )
+        }
+    }
+
+    fn flatten_encoded_named_spread_args(
+        &mut self,
+        fiber_idx: usize,
+        arg_count: u32,
+    ) -> Result<(Vec<BxValue>, Vec<String>)> {
+        let mut chunks: Vec<Vec<(String, BxValue)>> = Vec::with_capacity(arg_count as usize);
+        for _ in 0..arg_count {
+            let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+            if !marker.is_bool() {
+                bail!("Internal VM error: spread argument marker must be boolean");
+            }
+            let key_val = self.fibers[fiber_idx].stack.pop().unwrap();
+            let value = self.fibers[fiber_idx].stack.pop().unwrap();
+            if marker.as_bool() {
+                chunks.push(self.flatten_spread_struct_entries(value)?);
+            } else {
+                chunks.push(vec![(self.to_string(key_val), value)]);
+            }
+        }
+
+        chunks.reverse();
+        let mut args = Vec::new();
+        let mut names = Vec::new();
+        for chunk in chunks {
+            for (name, value) in chunk {
+                names.push(name);
+                args.push(value);
+            }
+        }
+        Ok((args, names))
+    }
+
     pub fn interpret_sync(&mut self, mut chunk: Chunk) -> Result<BxValue> {
         chunk.ensure_caches();
         let chunk_for_func = chunk.clone();
@@ -3388,20 +3469,44 @@ impl VM {
                         let should_spread = chunk[0].is_bool() && chunk[0].as_bool();
                         let val = chunk[1];
                         if should_spread {
-                            if let Some(id) = val.as_gc_id() {
-                                if let GcObject::Array(arr) = self.heap.get(id) {
-                                    result.extend(arr.iter().copied());
-                                } else {
-                                    result.push(val);
-                                }
-                            } else {
-                                result.push(val);
-                            }
+                            result.extend(self.flatten_spread_array_value(val)?);
                         } else {
                             result.push(val);
                         }
                     }
                     let id = self.heap.alloc(GcObject::Array(result));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
+                op::STRUCT_SPREAD => {
+                    let count = op0;
+                    let mut resolved: Vec<(String, BxValue)> = Vec::new();
+                    for _ in 0..count {
+                        let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if !marker.is_bool() {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Internal error: struct spread marker must be boolean")?;
+                            frame_changed = true; continue 'quantum;
+                        }
+                        if marker.as_bool() {
+                            let spread_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                            let mut spread_entries = self.flatten_spread_struct_entries(spread_val)?;
+                            spread_entries.reverse();
+                            resolved.extend(spread_entries);
+                        } else {
+                            let value = self.fibers[fiber_idx].stack.pop().unwrap();
+                            let key_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                            resolved.push((self.to_string(key_val), value));
+                        }
+                    }
+                    resolved.reverse();
+                    let mut shape_id = self.shapes.get_root();
+                    let mut props = Vec::with_capacity(resolved.len());
+                    for (key, value) in resolved {
+                        let key_id = self.interner.intern(&key);
+                        shape_id = self.shapes.transition(shape_id, key_id);
+                        props.push(value);
+                    }
+                    let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
                 op::STRUCT => {
@@ -4150,6 +4255,48 @@ impl VM {
                     frame_changed = true;
                     continue 'quantum;
                 }
+                op::CALL_SPREAD => {
+                    let count = op0 as usize;
+                    let mut flattened_chunks: Vec<Vec<BxValue>> = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if !marker.is_bool() {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Internal error: call spread marker must be boolean")?;
+                            frame_changed = true; continue 'quantum;
+                        }
+                        let value = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if marker.as_bool() {
+                            flattened_chunks.push(self.flatten_spread_array_value(value)?);
+                        } else {
+                            flattened_chunks.push(vec![value]);
+                        }
+                    }
+                    flattened_chunks.reverse();
+                    let flattened_len: usize = flattened_chunks.iter().map(|chunk| chunk.len()).sum();
+                    for chunk in flattened_chunks {
+                        for value in chunk {
+                            self.fibers[fiber_idx].stack.push(value);
+                        }
+                    }
+                    flush_ip!();
+                    self.execute_call(fiber_idx, flattened_len, None)?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    frame_changed = true;
+                    continue 'quantum;
+                }
+                op::CALL_NAMED_SPREAD => {
+                    let count = op0;
+                    let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, count)?;
+                    for value in args {
+                        self.fibers[fiber_idx].stack.push(value);
+                    }
+                    flush_ip!();
+                    self.execute_call(fiber_idx, names.len(), Some(names))?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    frame_changed = true;
+                    continue 'quantum;
+                }
                 op::CALL_NAMED => {
                     let total_count = op0;
                     let names_idx = next_word!();
@@ -4166,6 +4313,22 @@ impl VM {
                     flush_ip!();
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
                     if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    frame_changed = true;
+                    continue 'quantum;
+                }
+                op::INVOKE_NAMED_SPREAD => {
+                    let name_idx = op0;
+                    let total_count = next_word!();
+                    let _unused = next_word!();
+                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                    let name = self.interner.resolve(name_id).to_string();
+                    let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, total_count)?;
+                    for value in args {
+                        self.fibers[fiber_idx].stack.push(value);
+                    }
+                    flush_ip!();
+                    self.execute_invoke(fiber_idx, name, names.len(), Some(names), ip_at_start)?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
                     frame_changed = true;
                     continue 'quantum;
                 }

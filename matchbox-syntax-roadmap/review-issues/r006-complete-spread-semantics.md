@@ -4,6 +4,7 @@
 **Priority:** Medium  
 **Related issue:** `c008-spread-desugaring.md`
 **Related files:** `crates/matchbox-compiler/src/parser/mod.rs`, `crates/matchbox-compiler/src/compiler/mod.rs`, `crates/matchbox-vm/src/vm/mod.rs`
+**Status:** Resolved in code
 
 ## Problem
 
@@ -45,9 +46,8 @@ if (merged.a != 1 || merged.b != 2 || merged.c != 3 || merged.d != 4) {
 
 ## Acceptance Criteria
 
-- [ ] Spread in function arguments works.
-- [ ] Mixed spread and normal function arguments work.
-- [ ] Spread in struct literals works.
-- [ ] Invalid spread values have defined behavior and tests.
-- [ ] Existing array spread tests continue to pass.
-
+- [x] Spread in function arguments works.
+- [x] Mixed spread and normal function arguments work.
+- [x] Spread in struct literals works.
+- [x] Invalid spread values have defined behavior and tests.
+- [x] Existing array spread tests continue to pass.

@@ -31,3 +31,7 @@ The remaining CST/tooling work is tracked in R011 and R012. The compiler/runtime
 R001, R002, R003, and R004 have been implemented in code and the corresponding issue files have been updated to reflect that status.
 
 R005 has been implemented in code. Keyword lookup is case-insensitive, the common single-token aliases map to the canonical compiler forms, and the BoxLang phrase operators are covered by parser lookahead and compiler lowering.
+
+R006 has been implemented in code. Function-call spread, struct spread, and invalid spread behavior are covered by runtime tests, and existing array spread behavior still passes.
+
+R007 has been implemented in code. Destructuring now evaluates its source once, handles object and array patterns, and is covered by both runtime and script integration tests.

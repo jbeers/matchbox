@@ -95,6 +95,7 @@ pub enum StatementKind {
     Not(Expression),
     Include(Expression),
     Destructure {
+        kind: DestructureKind,
         source: Expression,
         bindings: Vec<(String, Option<String>)>, // (source_name, local_name?)
     },
@@ -121,6 +122,12 @@ pub struct SwitchCase {
 pub struct CatchBlock {
     pub exception_var: String,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DestructureKind {
+    Object,
+    Array,
 }
 
 #[derive(Debug, Clone, PartialEq)]

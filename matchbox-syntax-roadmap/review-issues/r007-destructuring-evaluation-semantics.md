@@ -3,6 +3,7 @@
 **Type:** Correctness / CPU  
 **Priority:** Medium  
 **Related files:** `crates/matchbox-compiler/src/parser/mod.rs`, `crates/matchbox-compiler/src/compiler/mod.rs`
+**Status:** Resolved in code
 
 ## Problem
 
@@ -36,9 +37,8 @@ Implementation outline:
 
 ## Acceptance Criteria
 
-- [ ] Destructuring source expressions evaluate exactly once.
-- [ ] Object destructuring reads members by key.
-- [ ] Array destructuring reads 1-based array indexes.
-- [ ] Renamed object bindings work.
-- [ ] Tests cover side-effecting source expressions.
-
+- [x] Destructuring source expressions evaluate exactly once.
+- [x] Object destructuring reads members by key.
+- [x] Array destructuring reads 1-based array indexes.
+- [x] Renamed object bindings work.
+- [x] Tests cover side-effecting source expressions.

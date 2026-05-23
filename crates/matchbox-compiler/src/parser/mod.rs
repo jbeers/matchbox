@@ -918,7 +918,11 @@ impl<'a> Parser<'a> {
 
         // Desugar: for each binding, emit: localName = source.sourceName
         Ok(Statement::new(
-            StatementKind::Destructure { source, bindings },
+            StatementKind::Destructure {
+                kind: if is_object { DestructureKind::Object } else { DestructureKind::Array },
+                source,
+                bindings,
+            },
             line,
         ))
     }
@@ -1404,13 +1408,22 @@ impl<'a> Parser<'a> {
         let mut members = Vec::new();
         loop {
             let line = self.peek_line();
-            let key = self.parse_expression()?;
-            if !matches!(self.peek_kind(), Some(TokenKind::Colon) | Some(TokenKind::Equal)) {
-                bail!("Expected ':' or '=' in struct literal");
+            if self.peek_is(TokenKind::DotDotDot) {
+                self.pos += 1;
+                let spread = self.parse_expression()?;
+                members.push((
+                    Expression::new(ExpressionKind::Spread(Box::new(spread)), line),
+                    Expression::new(ExpressionKind::Literal(Literal::Null), line),
+                ));
+            } else {
+                let key = self.parse_expression()?;
+                if !matches!(self.peek_kind(), Some(TokenKind::Colon) | Some(TokenKind::Equal)) {
+                    bail!("Expected ':' or '=' in struct literal");
+                }
+                self.pos += 1;
+                let value = self.parse_expression()?;
+                members.push((key, value));
             }
-            self.pos += 1;
-            let value = self.parse_expression()?;
-            members.push((key, value));
             if self.peek_is(TokenKind::Comma) {
                 self.pos += 1;
                 if self.peek_is(TokenKind::RightBrace) { break; }

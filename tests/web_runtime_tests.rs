@@ -182,6 +182,101 @@ fn test_phrase_word_operators() {
 }
 
 #[test]
+fn test_function_and_struct_spread() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        function sum(a, b, c) {
+            return a + b + c;
+        }
+
+        var args = [1, 2];
+        if (sum(...args, 3) != 6) {
+            throw "function spread failed";
+        }
+
+        var base = { b: 2, c: 3 };
+        var merged = { a: 1, ...base, d: 4 };
+        if (merged.a != 1 || merged.b != 2 || merged.c != 3 || merged.d != 4) {
+            throw "struct spread failed";
+        }
+
+        writeOutput("ok");
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
+fn test_destructuring_evaluates_source_once_and_handles_arrays() {
+    let mut vm = VM::new();
+
+    let source = r#"
+        var calls = 0;
+
+        function makeStruct() {
+            calls = calls + 1;
+            return { a: 1, b: 2 };
+        }
+
+        function makeArray() {
+            calls = calls + 1;
+            return [10, 20];
+        }
+
+        var first = 0;
+        var second = 0;
+        { a: first, b: second } = makeStruct();
+        if (first != 1 || second != 2) {
+            throw "object destructuring failed";
+        }
+
+        var left = 0;
+        var right = 0;
+        [left, right] = makeArray();
+        if (left != 10 || right != 20) {
+            throw "array destructuring failed";
+        }
+
+        if (calls != 2) {
+            throw "destructuring source evaluated wrong number of times: " & calls;
+        }
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+}
+
+#[test]
+fn test_invalid_spread_values_error() {
+    let mut vm = VM::new();
+    let source = r#"
+        var bad = [...1];
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    let err = vm.interpret(chunk).unwrap_err();
+    let err_text = err.to_string();
+    assert!(
+        err_text.contains("Cannot spread value of type"),
+        "unexpected error: {err_text}"
+    );
+}
+
+#[test]
 fn test_weak_typing_addition() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

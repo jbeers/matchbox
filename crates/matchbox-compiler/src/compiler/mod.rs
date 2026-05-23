@@ -526,30 +526,34 @@ impl Compiler {
                 self.chunk.emit0(op::BUFFER_WRITE, stmt.line as u32);
                 Ok(())
             }
-            StatementKind::Destructure { source, bindings } => {
-                // Compile source expression and store in a temp variable
-                // Use a different approach: compile a destructure helper
-                // For now, just evaluate the source and compile each member access
-                for (src_name, local_name) in bindings {
+            StatementKind::Destructure { kind, source, bindings } => {
+                self.compile_expression(source)?;
+                for (idx, (src_name, local_name)) in bindings.iter().enumerate() {
+                    self.chunk.emit0(op::DUP, source.line);
+                    match kind {
+                        crate::ast::DestructureKind::Object => {
+                            let name_idx = self
+                                .chunk
+                                .add_constant(Constant::String(BoxString::new(src_name.as_str())));
+                            self.chunk.emit1(op::MEMBER, name_idx, source.line);
+                        }
+                        crate::ast::DestructureKind::Array => {
+                            let index_idx = self.chunk.add_constant(Constant::Number((idx + 1) as f64));
+                            self.chunk.emit1(op::CONSTANT, index_idx, source.line);
+                            self.chunk.emit0(op::INDEX, source.line);
+                        }
+                    }
                     let bind_name = local_name.as_ref().unwrap_or(src_name);
-                    // Compile: bind_name = source.src_name
-                    // Generate MemberAccess expression and compile it
-                    let member_expr = Expression::new(
-                        ExpressionKind::MemberAccess {
-                            base: Box::new(source.clone()),
-                            member: src_name.clone(),
-                        },
-                        source.line,
-                    );
-                    self.compile_expression(&member_expr)?;
-                    // Assign to variable
                     if let Some(local_idx) = self.resolve_local(bind_name) {
-                        self.chunk.emit1(op::SET_LOCAL, local_idx as u32, source.line);
+                        self.chunk.emit1(op::SET_LOCAL_POP, local_idx as u32, source.line);
                     } else {
-                        let bind_idx = self.chunk.add_constant(Constant::String(BoxString::new(bind_name.as_str())));
+                        let bind_idx = self
+                            .chunk
+                            .add_constant(Constant::String(BoxString::new(bind_name.as_str())));
                         self.chunk.emit1(op::DEFINE_GLOBAL, bind_idx, source.line);
                     }
                 }
+                self.chunk.emit0(op::POP, source.line);
                 Ok(())
             }
             StatementKind::TryCatch {
@@ -1482,20 +1486,50 @@ impl Compiler {
                     Ok(())
                 }
                 Literal::Struct(members) => {
-                    for (key_expr, val_expr) in members {
-                        match &key_expr.kind {
-                            ExpressionKind::Identifier(name) => {
-                                let idx = self
-                                    .chunk
-                                    .add_constant(Constant::String(BoxString::new(name.as_str())));
-                                self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                    let has_spread = members.iter().any(|(key_expr, _)| matches!(key_expr.kind, ExpressionKind::Spread(_)));
+                    if has_spread {
+                        for (key_expr, val_expr) in members {
+                            match &key_expr.kind {
+                                ExpressionKind::Spread(inner) => {
+                                    self.compile_expression(inner)?;
+                                    let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                ExpressionKind::Identifier(name) => {
+                                    let idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(BoxString::new(name.as_str())));
+                                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                                    self.compile_expression(val_expr)?;
+                                    let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                _ => {
+                                    self.compile_expression(key_expr)?;
+                                    self.compile_expression(val_expr)?;
+                                    let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
                             }
-                            _ => self.compile_expression(key_expr)?,
                         }
-                        self.compile_expression(val_expr)?;
+                        self.chunk
+                            .emit1(op::STRUCT_SPREAD, members.len() as u32, expr.line);
+                    } else {
+                        for (key_expr, val_expr) in members {
+                            match &key_expr.kind {
+                                ExpressionKind::Identifier(name) => {
+                                    let idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(BoxString::new(name.as_str())));
+                                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                                }
+                                _ => self.compile_expression(key_expr)?,
+                            }
+                            self.compile_expression(val_expr)?;
+                        }
+                        self.chunk
+                            .emit1(op::STRUCT, members.len() as u32, expr.line);
                     }
-                    self.chunk
-                        .emit1(op::STRUCT, members.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Function { params, body } => {
@@ -1897,34 +1931,107 @@ impl Compiler {
                     member,
                 } = &base.kind
                 {
+                    let has_spread = args
+                        .iter()
+                        .any(|arg| matches!(arg.value.kind, ExpressionKind::Spread(_)));
                     self.compile_expression(member_base)?;
-                    for arg in args {
-                        self.compile_expression(&arg.value)?;
-                    }
                     let name_idx = self
                         .chunk
                         .add_constant(Constant::String(BoxString::new(member.as_str())));
-                    if has_named {
-                        let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
+                    if has_spread {
+                        for arg in args {
+                            match &arg.value.kind {
+                                ExpressionKind::Spread(inner) => {
+                                    self.compile_expression(inner)?;
+                                    let key_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(BoxString::new("")));
+                                    self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                    let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                _ => {
+                                    self.compile_expression(&arg.value)?;
+                                    let key_idx = self.chunk.add_constant(Constant::String(BoxString::new(
+                                        arg.name.as_deref().unwrap_or(""),
+                                    )));
+                                    self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                    let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                            }
+                        }
                         self.chunk.emit3(
-                            op::INVOKE_NAMED,
+                            op::INVOKE_NAMED_SPREAD,
                             name_idx as u32,
                             args.len() as u32,
-                            names_idx as u32,
+                            0,
                             expr.line,
                         );
                     } else {
-                        self.chunk
-                            .emit2(op::INVOKE, name_idx as u32, args.len() as u32, expr.line);
+                        for arg in args {
+                            self.compile_expression(&arg.value)?;
+                        }
+                        if has_named {
+                            let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
+                            self.chunk.emit3(
+                                op::INVOKE_NAMED,
+                                name_idx as u32,
+                                args.len() as u32,
+                                names_idx as u32,
+                                expr.line,
+                            );
+                        } else {
+                            self.chunk
+                                .emit2(op::INVOKE, name_idx as u32, args.len() as u32, expr.line);
+                        }
                     }
                     return Ok(());
                 }
 
                 self.compile_expression(base)?;
-                for arg in args {
-                    self.compile_expression(&arg.value)?;
-                }
-                if has_named {
+                let has_spread = args.iter().any(|arg| matches!(arg.value.kind, ExpressionKind::Spread(_)));
+                if has_spread && has_named {
+                    for arg in args {
+                        match &arg.value.kind {
+                            ExpressionKind::Spread(inner) => {
+                                self.compile_expression(inner)?;
+                                let key_idx = self.chunk.add_constant(Constant::String(BoxString::new(
+                                    arg.name.as_deref().unwrap_or(""),
+                                )));
+                                self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                            _ => {
+                                self.compile_expression(&arg.value)?;
+                                let key_idx = self
+                                    .chunk
+                                    .add_constant(Constant::String(BoxString::new(arg.name.as_deref().unwrap_or(""))));
+                                self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                        }
+                    }
+                    self.chunk.emit1(op::CALL_NAMED_SPREAD, args.len() as u32, expr.line);
+                } else if has_spread {
+                    for arg in args {
+                        match &arg.value.kind {
+                            ExpressionKind::Spread(inner) => {
+                                self.compile_expression(inner)?;
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                            _ => {
+                                self.compile_expression(&arg.value)?;
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                        }
+                    }
+                    self.chunk.emit1(op::CALL_SPREAD, args.len() as u32, expr.line);
+                } else if has_named {
                     let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                     self.chunk.emit2(
                         op::CALL_NAMED,
@@ -1933,6 +2040,9 @@ impl Compiler {
                         expr.line,
                     );
                 } else {
+                    for arg in args {
+                        self.compile_expression(&arg.value)?;
+                    }
                     self.chunk.emit1(op::CALL, args.len() as u32, expr.line);
                 }
                 Ok(())
@@ -2732,7 +2842,7 @@ impl DependencyTracker {
             StatementKind::Not(expr) | StatementKind::Include(expr) | StatementKind::BufferOutput(expr) => {
                 self.track_expression(expr);
             }
-            StatementKind::Destructure { source, bindings: _ } => {
+            StatementKind::Destructure { source, bindings: _, .. } => {
                 self.track_expression(source);
             }
             StatementKind::VariableDecl { value, .. } => {
