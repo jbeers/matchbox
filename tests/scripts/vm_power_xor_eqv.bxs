@@ -1,0 +1,17 @@
+// Test power, xor, eqv operators
+var a = 2 ^ 3;
+if (a != 8) { throw "Expected 2 ^ 3 = 8, got " & a; }
+
+var b = true xor false;
+if (b != true) { throw "Expected true xor false = true"; }
+
+var c = true xor true;
+if (c != false) { throw "Expected true xor true = false"; }
+
+var d = true eqv true;
+if (d != true) { throw "Expected true eqv true = true"; }
+
+var e = true eqv false;
+if (e != false) { throw "Expected true eqv false = false"; }
+
+println("power/xor/eqv operators OK");

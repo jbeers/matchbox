@@ -2805,6 +2805,31 @@ impl VM {
                         frame_changed = true; continue 'quantum;
                     }
                 }
+                op::POW => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number().powf(b.as_number())));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for power.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::XOR_OP => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a_true = self.is_truthy(a);
+                    let b_true = self.is_truthy(b);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true != b_true));
+                }
+                op::EQV_OP => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a_true = self.is_truthy(a);
+                    let b_true = self.is_truthy(b);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true == b_true));
+                }
                 op::POP => {
                     self.fibers[fiber_idx].stack.pop();
                 }

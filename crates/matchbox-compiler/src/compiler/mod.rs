@@ -1573,6 +1573,9 @@ impl Compiler {
                     "b<<" => self.chunk.emit0(op::BIT_SHL, expr.line),
                     "b>>" => self.chunk.emit0(op::BIT_SHR, expr.line),
                     "b>>>" => self.chunk.emit0(op::BIT_USHR, expr.line),
+                    "xor" => self.chunk.emit0(op::XOR_OP, expr.line),
+                    "eqv" => self.chunk.emit0(op::EQV_OP, expr.line),
+                    "^" => self.chunk.emit0(op::POW, expr.line),
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())
