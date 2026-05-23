@@ -131,6 +131,7 @@ script_test!(vm_access_modifiers, "vm_access_modifiers.bxs");
 script_test!(vm_bitwise, "vm_bitwise.bxs");
 script_test!(vm_power_xor_eqv, "vm_power_xor_eqv.bxs");
 script_test!(vm_ranges, "vm_ranges.bxs");
+script_test!(vm_assert_param_rethrow, "vm_assert_param_rethrow.bxs");
 script_test!(vm_destructuring, "vm_destructuring.bxs");
 
 #[test]

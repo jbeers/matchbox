@@ -449,27 +449,59 @@ impl Compiler {
                 Ok(())
             }
             StatementKind::Rethrow => {
+                let msg_idx = self.chunk.add_constant(Constant::String(BoxString::new("Rethrown exception")));
+                self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
                 self.chunk.emit0(op::THROW, stmt.line as u32);
                 Ok(())
             }
-            StatementKind::Assert { condition, message } => {
-                // Compile condition, jump past throw if truthy
+            StatementKind::Assert { condition, message: _ } => {
+                // Compile: condition, JUMP_IF_FALSE to throw, POP, JUMP end, throw: POP + THROW
                 self.compile_expression(condition)?;
-                let skip_jump_pos = self.chunk.code.len();
+                let jif_idx = self.chunk.code.len();
                 self.chunk.emit1(op::JUMP_IF_FALSE, 0, stmt.line as u32);
-                // Condition was truthy — pop and continue
+                // Truthy path
                 self.chunk.emit0(op::POP, stmt.line as u32);
-                Ok(()) // For MVP: assertions that pass are no-ops
-                // TODO: emit throw for falsy case at skip_jump_pos
+                let jump_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
+                // Falsy path
+                let falsy_target = self.chunk.code.len();
+                self.chunk.code[jif_idx] = op::JUMP_IF_FALSE as u32 | (((falsy_target - jif_idx - 1) as u32) << 8);
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                let msg_idx = self.chunk.add_constant(Constant::String(BoxString::new("Assertion failed")));
+                self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
+                self.chunk.emit0(op::THROW, stmt.line as u32);
+                // End
+                let end_target = self.chunk.code.len();
+                self.chunk.code[jump_idx] = op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
+                Ok(())
             }
-            StatementKind::Param { name, default: _ } => {
-                // MVP: just declare the variable with null if not set
-                if self.resolve_local(&name).is_none() {
-                    let null_idx = self.chunk.add_constant(Constant::Null);
-                    let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name)));
-                    self.chunk.emit1(op::CONSTANT, null_idx, stmt.line as u32);
-                    self.chunk.emit1(op::DEFINE_GLOBAL, name_idx, stmt.line as u32);
+            StatementKind::Param { name, default } => {
+                let name_const = BoxString::new(name.as_str());
+                let name_idx = self.chunk.add_constant(Constant::String(name_const));
+                self.chunk.emit1(op::GET_GLOBAL, name_idx, stmt.line as u32);
+                let jn_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_NULL, 0, stmt.line as u32);
+                // Variable exists — pop and skip to end
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                let jump_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
+                // Variable is null/undefined
+                let null_target = self.chunk.code.len();
+                self.chunk.code[jn_idx] = op::JUMP_IF_NULL as u32 | (((null_target - jn_idx - 1) as u32) << 8);
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                if let Some(def) = default {
+                    self.compile_expression(def)?;
+                    let name_idx2 = self.chunk.add_constant(Constant::String(BoxString::new(name.as_str())));
+                    self.chunk.emit1(op::DEFINE_GLOBAL, name_idx2, stmt.line as u32);
+                } else {
+                    // No default — throw error
+                    let err_idx = self.chunk.add_constant(Constant::String(BoxString::new(&format!("Required param '{}' not set", name))));
+                    self.chunk.emit1(op::CONSTANT, err_idx, stmt.line as u32);
+                    self.chunk.emit0(op::THROW, stmt.line as u32);
                 }
+                // End
+                let end_target = self.chunk.code.len();
+                self.chunk.code[jump_idx] = op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
                 Ok(())
             }
             StatementKind::Not(expr) => {
