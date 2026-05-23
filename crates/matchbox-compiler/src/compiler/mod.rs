@@ -461,7 +461,7 @@ impl Compiler {
                 self.chunk.emit0(op::THROW, stmt.line as u32);
                 Ok(())
             }
-            StatementKind::Assert { condition, message: _ } => {
+            StatementKind::Assert { condition, message } => {
                 // Compile: condition, JUMP_IF_FALSE to throw, POP, JUMP end, throw: POP + THROW
                 self.compile_expression(condition)?;
                 let jif_idx = self.chunk.code.len();
@@ -474,8 +474,14 @@ impl Compiler {
                 let falsy_target = self.chunk.code.len();
                 self.chunk.code[jif_idx] = op::JUMP_IF_FALSE as u32 | (((falsy_target - jif_idx - 1) as u32) << 8);
                 self.chunk.emit0(op::POP, stmt.line as u32);
-                let msg_idx = self.chunk.add_constant(Constant::String(BoxString::new("Assertion failed")));
-                self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
+                if let Some(message) = message {
+                    self.compile_expression(message)?;
+                } else {
+                    let msg_idx = self
+                        .chunk
+                        .add_constant(Constant::String(BoxString::new("Assertion failed")));
+                    self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
+                }
                 self.chunk.emit0(op::THROW, stmt.line as u32);
                 // End
                 let end_target = self.chunk.code.len();

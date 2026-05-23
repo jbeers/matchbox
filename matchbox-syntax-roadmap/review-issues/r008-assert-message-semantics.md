@@ -1,5 +1,7 @@
 # R008: Preserve `assert` Message Semantics
 
+Status: Implemented
+
 **Type:** Correctness / Compatibility  
 **Priority:** Medium  
 **Related files:** `crates/matchbox-compiler/src/parser/mod.rs`, `crates/matchbox-compiler/src/compiler/mod.rs`
@@ -35,8 +37,7 @@ try {
 
 ## Acceptance Criteria
 
-- [ ] Message expression is evaluated only on assertion failure.
-- [ ] Custom message appears in the thrown exception.
-- [ ] Default message still works when no message is supplied.
-- [ ] Integration tests cover both forms.
-
+- [x] Message expression is evaluated only on assertion failure.
+- [x] Custom message appears in the thrown exception.
+- [x] Default message still works when no message is supplied.
+- [x] Integration tests cover both forms.

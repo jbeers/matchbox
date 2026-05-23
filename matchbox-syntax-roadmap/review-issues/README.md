@@ -35,3 +35,5 @@ R005 has been implemented in code. Keyword lookup is case-insensitive, the commo
 R006 has been implemented in code. Function-call spread, struct spread, and invalid spread behavior are covered by runtime tests, and existing array spread behavior still passes.
 
 R007 has been implemented in code. Destructuring now evaluates its source once, handles object and array patterns, and is covered by both runtime and script integration tests.
+
+R008 has been implemented in code. `assert` now preserves optional custom messages, evaluates them only on failure, and still falls back to the default message when none is supplied.
