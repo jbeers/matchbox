@@ -477,9 +477,14 @@ impl Compiler {
                 self.chunk.emit0(op::POP, stmt.line as u32);
                 Ok(())
             }
-            StatementKind::Include(expr) | StatementKind::BufferOutput(expr) => {
+            StatementKind::Include(expr) => {
                 self.compile_expression(expr)?;
                 self.chunk.emit0(op::POP, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::BufferOutput(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit0(op::PRINT, stmt.line as u32);
                 Ok(())
             }
             StatementKind::Destructure { source, bindings } => {

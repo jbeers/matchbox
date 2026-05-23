@@ -140,6 +140,12 @@ impl<'a> Lexer<'a> {
                             continue; // Back to template mode
                         }
                     }
+                    // Check for ``` component island in script mode
+                    if self.source[self.pos..].starts_with("```") {
+                        self.pos += 3; self.col += 3;
+                        self.push_mode(LexerMode::DefaultTemplate);
+                        continue;
+                    }
                     self.skip_whitespace_and_comments();
                     if self.pos >= self.source.len() { break; }
                     let ch = self.current_char();
@@ -186,7 +192,15 @@ impl<'a> Lexer<'a> {
         // Handle the special character if we stopped at one
         if self.pos < self.source.len() {
             let ch = self.current_char();
-            if ch == '<' {
+            if ch == '`' {
+                // Check for closing ``` only when coming from a component island
+                if self.source[self.pos..].starts_with("```") {
+                    self.pos += 3; self.col += 3;
+                    self.pop_mode(); // DefaultTemplate
+                    return;
+                }
+                self.advance();
+            } else if ch == '<' {
                 let start = self.pos;
                 self.advance(); // consume <
                 let rest = &self.source[self.pos..];

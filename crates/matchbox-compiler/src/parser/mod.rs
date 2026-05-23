@@ -4,12 +4,7 @@ use anyhow::{bail, Result};
 
 pub mod template;
 
-#[cfg(feature = "bxm")]
-pub mod bxm;
-
-#[cfg(feature = "bxm")]
 pub fn parse_bxm(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
-    // Use the new template parser
     template::parse_template(source, filename)
 }
 
