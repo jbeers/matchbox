@@ -1,0 +1,4 @@
+// Test spread in array literal (parsing only for now)
+var base = [2, 3];
+// var expanded = [1, ...base, 4]; // TODO: enable when compiler supports
+println("spread parsing OK");

@@ -361,7 +361,13 @@ impl<'a> Parser<'a> {
             return Ok(args);
         }
         loop {
-            if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Equal) {
+            if self.peek_is(TokenKind::DotDotDot) {
+                self.pos += 1;
+                let value = self.parse_expression()?;
+                args.push(Argument { name: None, value: Expression::new(
+                    ExpressionKind::Spread(Box::new(value)), 0,
+                ) });
+            } else if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Equal) {
                 let name = self.advance_lexeme().unwrap_or_default();
                 self.pos += 1; // =
                 let value = self.parse_expression()?;
@@ -1257,7 +1263,13 @@ impl<'a> Parser<'a> {
                 }
                 let mut items = Vec::new();
                 loop {
-                    items.push(self.parse_expression()?);
+                    if self.peek_is(TokenKind::DotDotDot) {
+                        self.pos += 1;
+                        let expr = self.parse_expression()?;
+                        items.push(Expression::new(ExpressionKind::Spread(Box::new(expr)), line));
+                    } else {
+                        items.push(self.parse_expression()?);
+                    }
                     if self.peek_is(TokenKind::Comma) { self.pos += 1; } else { break; }
                 }
                 self.expect(TokenKind::RightBracket)?;

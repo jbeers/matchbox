@@ -395,6 +395,9 @@ fn collect_esp32_unsupported_features_in_expr(
             collect_esp32_unsupported_features_in_target(target, findings, embedded_web_enabled);
         }
         ExpressionKind::Identifier(_) => {}
+        ExpressionKind::Spread(expr) => {
+            collect_esp32_unsupported_features_in_expr(expr, findings, embedded_web_enabled);
+        }
         ExpressionKind::Literal(literal) => match literal {
             Literal::String(parts) => {
                 for part in parts {

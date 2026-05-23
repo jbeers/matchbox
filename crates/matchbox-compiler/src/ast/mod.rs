@@ -196,6 +196,7 @@ pub enum ExpressionKind {
         base: Box<Expression>,
         operator: String,
     },
+    Spread(Box<Expression>),
     Identifier(String),
     Literal(Literal),
 }

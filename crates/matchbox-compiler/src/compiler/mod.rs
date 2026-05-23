@@ -1714,6 +1714,10 @@ impl Compiler {
                     op::JUMP as u32 | (((end_target - jmp_end_idx - 1) as u32) << 8);
                 Ok(())
             }
+            ExpressionKind::Spread(expr) => {
+                self.compile_expression(expr)?;
+                Ok(())
+            }
             ExpressionKind::Identifier(name) => {
                 let lower_name = name.to_lowercase();
                 let is_js_import = self
@@ -2795,6 +2799,9 @@ impl DependencyTracker {
             },
             ExpressionKind::Identifier(name) => {
                 self.used_symbols.insert(name.to_lowercase());
+            }
+            ExpressionKind::Spread(expr) => {
+                self.track_expression(expr);
             }
             _ => {}
         }
