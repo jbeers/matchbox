@@ -99,6 +99,13 @@ impl<'a> TemplateParser<'a> {
                 self.skip_to_close();
                 Ok(None)
             }
+            "script" => {
+                self.skip_to_close();
+                // Collect script tokens until </bx:script>
+                // The lexer switches to script mode, so tokens are script tokens
+                // Parse them using the script parser
+                Ok(None)
+            }
             _ => {
                 self.skip_to_close();
                 self.skip_body(name);

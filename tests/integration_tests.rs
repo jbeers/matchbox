@@ -133,6 +133,7 @@ script_test!(vm_power_xor_eqv, "vm_power_xor_eqv.bxs");
 script_test!(vm_ranges, "vm_ranges.bxs");
 script_test!(vm_assert_param_rethrow, "vm_assert_param_rethrow.bxs");
 script_test!(vm_contains, "vm_contains.bxs");
+script_test!(vm_functional_bif, "vm_functional_bif.bxs");
 script_test!(vm_destructuring, "vm_destructuring.bxs");
 
 #[test]

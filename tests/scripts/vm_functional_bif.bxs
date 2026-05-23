@@ -1,0 +1,10 @@
+// Test functional BIF reference ::method
+var fn = ::ucase;
+var result = fn("hello");
+if (result != "HELLO") { throw "Expected HELLO, got " & result; }
+
+// Call directly
+var direct = ::ucase("world");
+if (direct != "WORLD") { throw "Expected WORLD, got " & direct; }
+
+println("functional BIF OK");

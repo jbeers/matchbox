@@ -1,0 +1,4 @@
+<bx:script>
+    var name = "World";
+</bx:script>
+<bx:output>Hello #name#!</bx:output>
