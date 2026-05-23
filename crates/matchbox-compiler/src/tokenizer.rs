@@ -44,7 +44,35 @@ pub enum TokenKind {
     InterpStart,
     InterpEnd,
 
+    // Template tokens
+    ContentText,
+
     Eof,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LexerMode {
+    DefaultScript,
+    DefaultTemplate,
+    TemplatePossibleComponent,
+    TemplateComponentName,
+    TemplateComponentMode,
+    TemplateAttrValue,
+    TemplateUnquotedValue,
+    TemplateOutput,
+    TemplateEndComponent,
+    TemplateComment,
+    TemplateScript,
+}
+
+pub fn tokenize(source: &str) -> Vec<Token> {
+    let mut lexer = Lexer::new(source, LexerMode::DefaultScript);
+    lexer.tokenize()
+}
+
+pub fn tokenize_template(source: &str) -> Vec<Token> {
+    let mut lexer = Lexer::new(source, LexerMode::DefaultTemplate);
+    lexer.tokenize()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,48 +83,133 @@ pub struct Span {
     pub col: u32,
 }
 
-pub fn tokenize(source: &str) -> Vec<Token> {
-    let mut lexer = Lexer::new(source);
-    lexer.tokenize()
-}
-
 struct Lexer<'a> {
     source: &'a str,
     pos: usize,
     line: u32,
     col: u32,
     tokens: Vec<Token>,
+    mode_stack: Vec<LexerMode>,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(source: &'a str, initial_mode: LexerMode) -> Self {
         Self {
             source,
             pos: 0,
             line: 1,
             col: 1,
             tokens: Vec::new(),
+            mode_stack: vec![initial_mode],
         }
     }
 
+    fn current_mode(&self) -> LexerMode {
+        *self.mode_stack.last().unwrap_or(&LexerMode::DefaultScript)
+    }
+
+    fn push_mode(&mut self, mode: LexerMode) {
+        self.mode_stack.push(mode);
+    }
+
+    fn pop_mode(&mut self) -> Option<LexerMode> {
+        self.mode_stack.pop()
+    }
+
+    fn mode_stack_contains(&self, mode: LexerMode) -> bool {
+        self.mode_stack.contains(&mode)
+    }
+
     fn tokenize(&mut self) -> Vec<Token> {
-        while self.pos < self.source.len() {
-            self.skip_whitespace_and_comments();
+        loop {
             if self.pos >= self.source.len() {
                 break;
             }
-            let ch = self.current_char();
-            if is_ident_start(ch) {
-                self.tokenize_ident_or_bitwise();
-            } else if ch.is_ascii_digit() {
-                self.tokenize_number();
-            } else if ch == '"' || ch == '\'' {
-                self.tokenize_string(ch);
-            } else {
-                self.tokenize_operator_or_punct();
+            match self.current_mode() {
+                LexerMode::DefaultScript => {
+                    self.skip_whitespace_and_comments();
+                    if self.pos >= self.source.len() { break; }
+                    let ch = self.current_char();
+                    if is_ident_start(ch) {
+                        self.tokenize_ident_or_bitwise();
+                    } else if ch.is_ascii_digit() {
+                        self.tokenize_number();
+                    } else if ch == '"' || ch == '\'' {
+                        self.tokenize_string(ch);
+                    } else {
+                        self.tokenize_operator_or_punct();
+                    }
+                }
+                LexerMode::DefaultTemplate => {
+                    self.tokenize_template_content();
+                }
+                _ => {
+                    // Unhandled mode — skip character
+                    self.advance();
+                }
             }
         }
         std::mem::take(&mut self.tokens)
+    }
+
+    fn tokenize_template_content(&mut self) {
+        // Accumulate literal text until we hit < or #
+        let start = self.pos;
+        let start_line = self.line;
+        let start_col = self.col;
+
+        while self.pos < self.source.len() {
+            let ch = self.current_char();
+            if ch == '<' || ch == '#' || ch == '`' {
+                break;
+            }
+            self.advance();
+        }
+
+        if self.pos > start {
+            self.push_token(TokenKind::ContentText, start, self.pos, start_line, start_col);
+        }
+
+        // Handle the special character if we stopped at one
+        if self.pos < self.source.len() {
+            let ch = self.current_char();
+            if ch == '<' {
+                // Could be start of a component tag
+                let start = self.pos;
+                self.advance();
+                // Check if followed by bx: or /bx:
+                let rest = &self.source[self.pos..];
+                if rest.starts_with("bx:") || rest.starts_with("/bx:") {
+                    // Enter component mode (T002)
+                    // For now, just emit the < as content
+                    self.push_token(TokenKind::Less, start, self.pos, self.line, self.col.saturating_sub(1));
+                } else if rest.starts_with("!---") {
+                    // Template comment (T004)
+                    self.pos += 4; self.col += 4;
+                    // Skip to --->
+                    while self.pos < self.source.len() {
+                        if self.source[self.pos..].starts_with("--->") {
+                            self.pos += 4; self.col += 4;
+                            break;
+                        }
+                        self.advance();
+                    }
+                } else {
+                    self.push_token(TokenKind::Less, start, self.pos, self.line, self.col.saturating_sub(1));
+                }
+            } else if ch == '#' {
+                self.advance();
+                if self.pos < self.source.len() && self.current_char() == '#' {
+                    self.advance();
+                    // Escaped hash — emit as ContentText with #
+                    let hash_start = self.pos - 2;
+                    self.push_token(TokenKind::ContentText, hash_start, self.pos, self.line, self.col.saturating_sub(2));
+                } else {
+                    // Single # — emit as ContentText
+                    self.push_token(TokenKind::ContentText, self.pos - 1, self.pos, self.line, self.col.saturating_sub(1));
+                }
+            }
+        }
     }
 
     fn current_char(&self) -> char {
@@ -885,5 +998,39 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].kind, TokenKind::DotDotDot);
         assert_eq!(tokens[0].lexeme, "...");
+    }
+
+    #[test]
+    fn template_plain_text() {
+        let tokens = tokenize_template("hello");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::ContentText);
+        assert_eq!(tokens[0].lexeme, "hello");
+    }
+
+    #[test]
+    fn template_text_with_whitespace() {
+        let tokens = tokenize_template("hello world");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::ContentText);
+        assert_eq!(tokens[0].lexeme, "hello world");
+    }
+
+    #[test]
+    fn template_hash_hash_escape() {
+        let tokens = tokenize_template("##");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].kind, TokenKind::ContentText);
+        assert_eq!(tokens[0].lexeme, "##");
+    }
+
+    #[test]
+    fn template_comment_skipped() {
+        let tokens = tokenize_template("before<!--- comment --->after");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].kind, TokenKind::ContentText);
+        assert_eq!(tokens[0].lexeme, "before");
+        assert_eq!(tokens[1].kind, TokenKind::ContentText);
+        assert_eq!(tokens[1].lexeme, "after");
     }
 }
