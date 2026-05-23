@@ -1,10 +1,6 @@
-use crate::ast::{
-    AssignmentTarget, ClassMember, Expression, ExpressionKind, Literal, Statement, StatementKind,
-    StringPart,
-};
-use anyhow::{anyhow, bail, Result};
-use pest::Parser;
-use pest_derive::Parser;
+use crate::ast::*;
+use crate::tokenizer::*;
+use anyhow::{bail, Result};
 
 #[cfg(feature = "bxm")]
 pub mod bxm;
@@ -16,823 +12,1249 @@ pub fn parse_bxm(source: &str, filename: Option<&str>) -> Result<Vec<Statement>>
     parse(&transpiled, label.as_deref())
 }
 
-#[derive(Parser)]
-#[grammar = "parser/boxlang.pest"]
-pub struct BxParser;
+pub fn parse(source: &str, _filename: Option<&str>) -> Result<Vec<Statement>> {
+    let tokens = tokenize(source);
+    Parser::new(&tokens).parse_program()
+}
 
-pub fn parse(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
-    let mut ast = Vec::new();
-    let pairs = BxParser::parse(Rule::program, source).map_err(|e| {
-        if let Some(f) = filename {
-            e.with_path(f)
+struct Parser<'a> {
+    tokens: &'a [Token],
+    pos: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn kind(&self, offset: usize) -> Option<TokenKind> {
+        self.tokens.get(self.pos + offset).map(|t| t.kind)
+    }
+
+    fn peek_kind(&self) -> Option<TokenKind> {
+        self.kind(0)
+    }
+
+    fn peek_lexeme(&self) -> Option<&str> {
+        self.tokens.get(self.pos).map(|t| t.lexeme.as_str())
+    }
+
+    fn peek_line(&self) -> u32 {
+        self.tokens.get(self.pos).map(|t| t.span.line).unwrap_or(0)
+    }
+
+    fn peek_is(&self, kind: TokenKind) -> bool {
+        self.peek_kind() == Some(kind)
+    }
+
+    fn advance(&mut self) -> Option<TokenKind> {
+        let kind = self.tokens.get(self.pos).map(|t| t.kind);
+        self.pos += 1;
+        kind
+    }
+
+    fn advance_lexeme(&mut self) -> Option<String> {
+        let lexeme = self.tokens.get(self.pos).map(|t| t.lexeme.clone());
+        self.pos += 1;
+        lexeme
+    }
+
+    fn advance_line(&mut self) -> u32 {
+        let line = self.peek_line();
+        self.pos += 1;
+        line
+    }
+
+    fn expect(&mut self, kind: TokenKind) -> Result<()> {
+        if self.peek_kind() == Some(kind) {
+            self.pos += 1;
+            Ok(())
         } else {
-            e
+            let found = self.peek_kind();
+            bail!("Expected {:?}, found {:?} at line {}", kind, found, self.peek_line());
         }
-    })?;
+    }
 
-    for pair in pairs {
-        if pair.as_rule() == Rule::program {
-            for inner_pair in pair.into_inner() {
-                let line = inner_pair.as_span().start_pos().line_col().0 as u32 as u32;
-                match inner_pair.as_rule() {
-                    Rule::EOI => break,
-                    Rule::import_stmt => {
-                        let mut inner = inner_pair.into_inner();
-                        let _kw = inner.next().unwrap();
-                        let path = inner.next().unwrap().as_str().to_string();
-                        let mut alias = None;
-                        if let Some(pair) = inner.next() {
-                            if pair.as_rule() == Rule::as_keyword {
-                                alias = Some(inner.next().unwrap().as_str().to_string());
-                            }
+    fn expect_get(&mut self, kind: TokenKind) -> Result<String> {
+        if self.peek_kind() == Some(kind) {
+            let lexeme = self.peek_lexeme().unwrap_or("").to_string();
+            self.pos += 1;
+            Ok(lexeme)
+        } else {
+            bail!("Expected {:?}, found {:?}", kind, self.peek_kind());
+        }
+    }
+
+    fn parse_program(&mut self) -> Result<Vec<Statement>> {
+        let mut stmts = Vec::new();
+        while self.peek_kind().is_some() {
+            stmts.push(self.parse_statement()?);
+        }
+        Ok(stmts)
+    }
+
+    fn parse_statement(&mut self) -> Result<Statement> {
+        let line = self.peek_line();
+
+        match self.peek_kind() {
+            Some(TokenKind::Import) => self.parse_import(line),
+            Some(TokenKind::Class) => self.parse_class(line),
+            Some(TokenKind::Interface) => self.parse_interface(line),
+            Some(TokenKind::Function) | Some(TokenKind::At)
+            | Some(TokenKind::Public) | Some(TokenKind::Private)
+            | Some(TokenKind::Remote) | Some(TokenKind::Package)
+            | Some(TokenKind::Static) | Some(TokenKind::Abstract) | Some(TokenKind::Final)
+                if self.is_function_decl() =>
+            {
+                self.parse_function_decl(line)
+            }
+            Some(TokenKind::For) => self.parse_for(line),
+            Some(TokenKind::While) => self.parse_while(line),
+            Some(TokenKind::If) => self.parse_if(line),
+            Some(TokenKind::Try) => self.parse_try(line),
+            Some(TokenKind::Return) => self.parse_return(line),
+            Some(TokenKind::Throw) => self.parse_throw(line),
+            Some(TokenKind::Continue) => self.parse_continue(line),
+            Some(TokenKind::Break) => self.parse_break(line),
+            Some(TokenKind::Switch) => self.parse_switch(line),
+            Some(TokenKind::Var) => self.parse_var_decl(line),
+            Some(_) => {
+                let expr = self.parse_expression()?;
+                // Consume optional semicolon
+                if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+                Ok(Statement::new(StatementKind::Expression(expr), line))
+            }
+            None => bail!("Unexpected EOF"),
+        }
+    }
+
+    fn is_function_decl(&self) -> bool {
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match self.tokens[i].kind {
+                TokenKind::At | TokenKind::Public | TokenKind::Private | TokenKind::Remote
+                | TokenKind::Package | TokenKind::Static | TokenKind::Abstract | TokenKind::Final => {
+                    i += 1;
+                    continue;
+                }
+                TokenKind::Function => return true,
+                TokenKind::Identifier => {
+                    i += 1;
+                    if i < self.tokens.len() && matches!(
+                        self.tokens[i].kind, TokenKind::Function | TokenKind::Identifier
+                    ) {
+                        // Handle "returnType function" or "Public returnType function" patterns
+                        if self.tokens[i].kind == TokenKind::Function {
+                            return true;
                         }
-                        ast.push(Statement::new(StatementKind::Import { path, alias }, line));
+                        // If it's another identifier, skip and continue (skip type name)
+                        continue;
                     }
-                    Rule::statement => {
-                        ast.push(parse_statement(inner_pair)?);
-                    }
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    // ---- Statement parsers ----
+
+    fn parse_import(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // import
+        let mut path = String::new();
+        // Optional prefix (js:, java:, rust:)
+        if self.kind(0) == Some(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Colon) {
+            path.push_str(&self.advance_lexeme().unwrap_or_default());
+            path.push(':');
+            self.pos += 1; // colon
+        }
+        // Dotted path
+        loop {
+            path.push_str(&self.expect_get(TokenKind::Identifier)?);
+            if self.peek_is(TokenKind::Dot) {
+                path.push('.');
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        let alias = if self.peek_is(TokenKind::As) {
+            self.pos += 1; // as
+            Some(self.expect_get(TokenKind::Identifier)?)
+        } else {
+            None
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Import { path, alias }, line))
+    }
+
+    fn parse_class(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // class
+        let name = if self.peek_is(TokenKind::Identifier) {
+            self.advance_lexeme().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let mut extends = None;
+        let mut accessors = false;
+        let mut implements = Vec::new();
+
+        while matches!(self.peek_kind(),
+            Some(TokenKind::Extends) | Some(TokenKind::Accessors) | Some(TokenKind::Implements)
+            | Some(TokenKind::Identifier)
+        ) {
+            let attr_name = self.peek_lexeme().unwrap_or("").to_string();
+            if matches!(attr_name.as_str(), "extends" | "accessors" | "implements") {
+                self.pos += 1; // attr name
+                self.expect(TokenKind::Equal)?;
+                let val = if self.peek_kind() == Some(TokenKind::String) {
+                    let s = self.peek_lexeme().unwrap_or("").to_string();
+                    self.pos += 1;
+                    if s.len() >= 2 { s[1..s.len() - 1].to_string() } else { s }
+                } else {
+                    bail!("Expected string value for '{}'", attr_name);
+                };
+                match attr_name.as_str() {
+                    "extends" => extends = Some(val),
+                    "accessors" => accessors = val.to_lowercase() == "true",
+                    "implements" => implements = val.split(',').map(|s| s.trim().to_string()).collect(),
                     _ => {}
                 }
+            } else {
+                break;
             }
         }
-    }
-    Ok(ast)
-}
 
-fn parse_params(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::FunctionParam>> {
-    let mut params = Vec::new();
-    for param_decl in pair.into_inner() {
-        let mut required = false;
-        let mut type_name = None;
-        let mut name = String::new();
-        let mut default_value = None;
-
-        for inner in param_decl.into_inner() {
-            match inner.as_rule() {
-                Rule::required_keyword => required = true,
-                Rule::type_name => type_name = Some(inner.as_str().to_string()),
-                Rule::identifier => name = inner.as_str().to_string(),
-                Rule::expression => default_value = Some(parse_expression(inner)?),
-                _ => {}
+        self.expect(TokenKind::LeftBrace)?;
+        let mut members = Vec::new();
+        while !self.peek_is(TokenKind::RightBrace) {
+            if self.peek_is(TokenKind::Property) {
+                self.pos += 1; // property
+                let prop_name = self.expect_get(TokenKind::Identifier)?;
+                members.push(ClassMember::Property(prop_name));
+                if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+            } else {
+                members.push(ClassMember::Statement(self.parse_statement()?));
             }
         }
-        params.push(crate::ast::FunctionParam {
-            name,
-            type_name,
-            required,
-            default_value,
-        });
-    }
-    Ok(params)
-}
-
-fn parse_init(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
-    let inner = pair
-        .into_inner()
-        .next()
-        .ok_or_else(|| anyhow!("Empty init"))?;
-    parse_statement(inner)
-}
-
-fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Statement>> {
-    let mut stmts = Vec::new();
-    for inner in pair.into_inner() {
-        stmts.push(parse_statement(inner)?);
-    }
-    Ok(stmts)
-}
-
-fn parse_args(pair: pest::iterators::Pair<Rule>) -> Result<Vec<crate::ast::Argument>> {
-    let mut args = Vec::new();
-    for arg_pair in pair.into_inner() {
-        let mut inner = arg_pair.into_inner();
-        let first = inner.next().ok_or_else(|| anyhow!("Empty arg"))?;
-
-        match first.as_rule() {
-            Rule::identifier => {
-                if let Some(value_pair) = inner.next() {
-                    // named: identifier = expression
-                    let name = Some(first.as_str().to_string());
-                    let value = parse_expression(value_pair)?;
-                    args.push(crate::ast::Argument { name, value });
-                } else {
-                    let value = Expression::new(
-                        ExpressionKind::Identifier(first.as_str().to_string()),
-                        first.as_span().start_pos().line_col().0 as u32,
-                    );
-                    args.push(crate::ast::Argument { name: None, value });
-                }
-            }
-            Rule::expression => {
-                let value = parse_expression(first)?;
-                args.push(crate::ast::Argument { name: None, value });
-            }
-            _ => bail!("Unexpected rule in arg: {:?}", first.as_rule()),
-        }
-    }
-    Ok(args)
-}
-
-fn parse_variable_decl_core(pair: pest::iterators::Pair<Rule>, line: u32) -> Result<Statement> {
-    let mut inner_rules = pair.into_inner();
-    let _kw = inner_rules.next().unwrap(); // var_keyword
-    let assignment_rule = inner_rules.next().unwrap();
-    let mut assignment_inner = assignment_rule.into_inner();
-    let target_rule = assignment_inner.next().unwrap();
-    let target = parse_target(target_rule)?;
-    let next = assignment_inner.next().unwrap();
-    let (op, value_rule) = if next.as_rule() == Rule::compound_op {
-        let op_str = next.as_str().to_string();
-        let value_rule = assignment_inner.next().unwrap();
-        (Some(op_str), value_rule)
-    } else {
-        (None, next)
-    };
-    let value = parse_expression(value_rule)?;
-    let final_value = if let Some(op) = op {
-        let bin_op = &op[..op.len() - 1];
-        Expression::new(
-            ExpressionKind::Binary {
-                left: Box::new(target_to_expression(&target, line)),
-                operator: bin_op.to_string(),
-                right: Box::new(value),
-            },
-            line,
-        )
-    } else {
-        value
-    };
-
-    if let AssignmentTarget::Identifier(name) = target {
+        self.pos += 1; // }
         Ok(Statement::new(
-            StatementKind::VariableDecl {
-                name,
-                value: final_value,
-            },
+            StatementKind::ClassDecl { name, extends, accessors, implements, members },
             line,
         ))
-    } else {
-        bail!("'var' only supported for simple identifiers");
     }
-}
 
-fn parse_attribute(pair: pest::iterators::Pair<Rule>) -> Result<crate::ast::Attribute> {
-    let mut inner = pair.into_inner();
-    let name = inner.next().unwrap().as_str().to_string();
-    let mut args = Vec::new();
-    if let Some(args_rule) = inner.next() {
-        args = parse_args(args_rule)?;
-    }
-    Ok(crate::ast::Attribute { name, args })
-}
-
-fn parse_statement(pair: pest::iterators::Pair<Rule>) -> Result<Statement> {
-    let line = pair.as_span().start_pos().line_col().0 as u32;
-    let rule = pair.as_rule();
-    match rule {
-        Rule::statement => {
-            let inner = pair.into_inner().next().unwrap();
-            parse_statement(inner)
-        }
-        Rule::class_decl => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // class_keyword
-            let mut name = String::new();
-            let mut extends = None;
-            let mut accessors = false;
-            let mut implements = Vec::new();
-            let mut members = Vec::new();
-            for attr_or_member in inner_rules {
-                match attr_or_member.as_rule() {
-                    Rule::identifier => {
-                        name = attr_or_member.as_str().to_string();
-                    }
-                    Rule::class_attr => {
-                        let attr_pair = attr_or_member.into_inner().next().unwrap();
-                        match attr_pair.as_rule() {
-                            Rule::extends_attr => {
-                                let string_rule = attr_pair.into_inner().next().unwrap();
-                                let raw_str = string_rule.as_str().to_string();
-                                if raw_str.len() >= 2
-                                    && (raw_str.starts_with('"') || raw_str.starts_with('\''))
-                                {
-                                    extends = Some(raw_str[1..raw_str.len() - 1].to_string());
-                                } else {
-                                    extends = Some(raw_str);
-                                }
-                            }
-                            Rule::accessors_attr => {
-                                let string_rule = attr_pair.into_inner().next().unwrap();
-                                let raw_str = string_rule.as_str().to_string();
-                                let val = if raw_str.len() >= 2
-                                    && (raw_str.starts_with('"') || raw_str.starts_with('\''))
-                                {
-                                    raw_str[1..raw_str.len() - 1].to_string()
-                                } else {
-                                    raw_str
-                                };
-                                accessors = val.to_lowercase() == "true";
-                            }
-                            Rule::implements_attr => {
-                                let string_rule = attr_pair.into_inner().next().unwrap();
-                                let raw_str = string_rule.as_str().to_string();
-                                let val = if raw_str.len() >= 2
-                                    && (raw_str.starts_with('"') || raw_str.starts_with('\''))
-                                {
-                                    raw_str[1..raw_str.len() - 1].to_string()
-                                } else {
-                                    raw_str
-                                };
-                                implements = val.split(',').map(|s| s.trim().to_string()).collect();
-                            }
-                            _ => bail!("Unexpected class attribute: {:?}", attr_pair.as_rule()),
-                        }
-                    }
-                    Rule::class_member => {
-                        let member_inner = attr_or_member.into_inner().next().unwrap();
-                        match member_inner.as_rule() {
-                            Rule::property => {
-                                let mut prop_inner = member_inner.into_inner();
-                                let _kw = prop_inner.next().unwrap(); // property_keyword
-                                let prop_name = prop_inner.next().unwrap().as_str().to_string();
-                                members.push(ClassMember::Property(prop_name));
-                            }
-                            Rule::statement => {
-                                members
-                                    .push(ClassMember::Statement(parse_statement(member_inner)?));
-                            }
-                            _ => {
-                                bail!("Unexpected class member rule: {:?}", member_inner.as_rule())
-                            }
-                        }
-                    }
-                    _ => bail!(
-                        "Unexpected rule in class_decl: {:?}",
-                        attr_or_member.as_rule()
-                    ),
-                }
-            }
-            Ok(Statement::new(
-                StatementKind::ClassDecl {
-                    name,
-                    extends,
-                    accessors,
-                    implements,
-                    members,
-                },
-                line,
-            ))
-        }
-        Rule::interface_decl => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // interface_keyword
-            let name = inner_rules
-                .next()
-                .map(|p| p.as_str().to_string())
-                .unwrap_or_default();
-            let mut members = Vec::new();
-            for member_pair in inner_rules {
-                let member_inner = member_pair.into_inner().next().unwrap();
-                members.push(parse_statement(member_inner)?);
-            }
-            Ok(Statement::new(
-                StatementKind::InterfaceDecl { name, members },
-                line,
-            ))
-        }
-        Rule::import_stmt => {
-            let mut inner = pair.into_inner();
-            let _kw = inner.next().unwrap();
-            let path = inner.next().unwrap().as_str().to_string();
-            let mut alias = None;
-            if let Some(pair) = inner.next() {
-                if pair.as_rule() == Rule::as_keyword {
-                    alias = Some(inner.next().unwrap().as_str().to_string());
-                }
-            }
-            Ok(Statement::new(StatementKind::Import { path, alias }, line))
-        }
-        Rule::function_decl => {
-            let mut inner_rules = pair.into_inner();
-
-            let mut attributes = Vec::new();
-            let mut access_modifier = None;
-            let mut return_type = None;
-
-            let mut current = inner_rules.next().unwrap();
-            while current.as_rule() == Rule::attribute {
-                attributes.push(parse_attribute(current)?);
-                current = inner_rules.next().unwrap();
-            }
-
-            if current.as_rule() == Rule::access_modifier {
-                access_modifier = Some(current.as_str().to_string());
-                current = inner_rules.next().unwrap();
-            }
-            if current.as_rule() == Rule::type_name {
-                return_type = Some(current.as_str().to_string());
-                current = inner_rules.next().unwrap();
-            }
-
-            // next is function_keyword
-            let _kw = current;
-
-            let name = inner_rules.next().unwrap().as_str().to_string();
-            let mut params = Vec::new();
-
-            let mut next = inner_rules.next();
-            if let Some(n) = next.as_ref() {
-                if n.as_rule() == Rule::params {
-                    params = parse_params(next.take().unwrap())?;
-                    next = inner_rules.next();
-                }
-            }
-
-            let body = if let Some(n) = next {
-                if n.as_rule() == Rule::block {
-                    let body_stmts = parse_block(n)?;
-                    crate::ast::FunctionBody::Block(body_stmts)
-                } else {
-                    crate::ast::FunctionBody::Abstract
-                }
-            } else {
-                crate::ast::FunctionBody::Abstract
-            };
-
-            Ok(Statement::new(
-                StatementKind::FunctionDecl {
-                    name,
-                    attributes,
-                    access_modifier,
-                    return_type,
-                    params,
-                    body,
-                },
-                line,
-            ))
-        }
-        Rule::for_loop => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // for_keyword
-            let loop_type = inner_rules.next().unwrap();
-            let body_rule = inner_rules.next().unwrap();
-            let body = parse_block(body_rule)?;
-
-            match loop_type.as_rule() {
-                Rule::for_in => {
-                    let mut rules = loop_type.into_inner();
-                    let first = rules.next().unwrap();
-                    let item = if first.as_rule() == Rule::var_keyword {
-                        rules.next().unwrap().as_str().to_string()
-                    } else {
-                        first.as_str().to_string()
-                    };
-                    let mut index = None;
-                    let next_rule = rules.next().unwrap();
-                    let collection = if next_rule.as_rule() == Rule::identifier {
-                        index = Some(next_rule.as_str().to_string());
-                        let _in = rules.next().unwrap(); // in_keyword
-                        parse_expression(rules.next().unwrap())?
-                    } else {
-                        // next_rule IS in_keyword
-                        parse_expression(rules.next().unwrap())?
-                    };
-                    Ok(Statement::new(
-                        StatementKind::ForLoop {
-                            item,
-                            index,
-                            collection,
-                            body,
-                        },
-                        line,
-                    ))
-                }
-                Rule::for_classic => {
-                    let rules = loop_type.into_inner();
-                    let mut init = None;
-                    let mut condition = None;
-                    let mut update = None;
-
-                    for rule in rules {
-                        match rule.as_rule() {
-                            Rule::init => init = Some(Box::new(parse_init(rule)?)),
-                            Rule::condition => condition = Some(parse_expression(rule)?),
-                            Rule::update => update = Some(parse_expression(rule)?),
-                            _ => {}
-                        }
-                    }
-                    Ok(Statement::new(
-                        StatementKind::ForClassic {
-                            init,
-                            condition,
-                            update,
-                            body,
-                        },
-                        line,
-                    ))
-                }
-                _ => bail!("Unexpected for_loop variant: {:?}", loop_type.as_rule()),
-            }
-        }
-        Rule::while_loop => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // while_keyword
-            let condition = parse_expression(inner_rules.next().unwrap())?;
-            let body_rule = inner_rules.next().unwrap();
-            let body = parse_block(body_rule)?;
-            Ok(Statement::new(
-                StatementKind::WhileLoop { condition, body },
-                line,
-            ))
-        }
-        Rule::if_statement => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // if_keyword
-            let condition = parse_expression(inner_rules.next().unwrap())?;
-            let then_block_rule = inner_rules.next().unwrap();
-            let then_branch = parse_block(then_block_rule)?;
-            let mut else_branch = None;
-
-            if let Some(_else_kw) = inner_rules.next() {
-                let else_rule = inner_rules.next().unwrap();
-                match else_rule.as_rule() {
-                    Rule::block | Rule::statement => {
-                        else_branch = Some(parse_block(else_rule)?);
-                    }
-                    Rule::if_statement => {
-                        else_branch = Some(vec![parse_statement(else_rule)?]);
-                    }
-                    _ => bail!("Unexpected rule in else branch: {:?}", else_rule.as_rule()),
-                }
-            }
-
-            Ok(Statement::new(
-                StatementKind::If {
-                    condition,
-                    then_branch,
-                    else_branch,
-                },
-                line,
-            ))
-        }
-
-        Rule::try_catch => {
-            let mut inner_rules = pair.into_inner();
-            let _try_kw = inner_rules.next().unwrap();
-            let try_branch = parse_block(inner_rules.next().unwrap())?;
-
-            let mut catches = Vec::new();
-            let mut finally_branch = None;
-
-            for rule in inner_rules {
-                match rule.as_rule() {
-                    Rule::catch_block => {
-                        let mut catch_inner = rule.into_inner();
-                        let _catch_kw = catch_inner.next().unwrap();
-                        let exception_var = catch_inner.next().unwrap().as_str().to_string();
-                        let body = parse_block(catch_inner.next().unwrap())?;
-                        catches.push(crate::ast::CatchBlock {
-                            exception_var,
-                            body,
-                        });
-                    }
-                    Rule::finally_block => {
-                        let mut finally_inner = rule.into_inner();
-                        let _finally_kw = finally_inner.next().unwrap();
-                        finally_branch = Some(parse_block(finally_inner.next().unwrap())?);
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Statement::new(
-                StatementKind::TryCatch {
-                    try_branch,
-                    catches,
-                    finally_branch,
-                },
-                line,
-            ))
-        }
-        Rule::return_stmt => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // return_keyword
-            let expr = if let Some(p) = inner_rules.next() {
-                Some(parse_expression(p)?)
-            } else {
-                None
-            };
-            Ok(Statement::new(StatementKind::Return(expr), line))
-        }
-        Rule::throw_stmt => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // throw_keyword
-            let expr = if let Some(p) = inner_rules.next() {
-                if p.as_rule() == Rule::throw_args {
-                    let mut entries = Vec::new();
-                    for arg_pair in p.into_inner() {
-                        let mut arg_inner = arg_pair.into_inner();
-                        let key_name = arg_inner.next().unwrap().as_str().to_string();
-                        let value = parse_expression(arg_inner.next().unwrap())?;
-                        let key_expr = Expression::new(
-                            ExpressionKind::Literal(Literal::String(vec![StringPart::Text(
-                                key_name,
-                            )])),
-                            line,
-                        );
-                        entries.push((key_expr, value));
-                    }
-                    Some(Expression::new(
-                        ExpressionKind::Literal(Literal::Struct(entries)),
-                        line,
-                    ))
-                } else {
-                    Some(parse_expression(p)?)
-                }
-            } else {
-                None
-            };
-            Ok(Statement::new(StatementKind::Throw(expr), line))
-        }
-        Rule::continue_stmt => Ok(Statement::new(StatementKind::Continue, line)),
-        Rule::break_stmt => Ok(Statement::new(StatementKind::Break, line)),
-        Rule::switch_statement => {
-            let mut inner = pair.into_inner();
-            let _kw = inner.next().unwrap();
-            let value = parse_expression(inner.next().unwrap())?;
-            let mut cases = Vec::new();
-            let mut default_case = None;
-
-            for rule in inner {
-                match rule.as_rule() {
-                    Rule::switch_case => {
-                        let mut case_inner = rule.into_inner();
-                        let _case_kw = case_inner.next().unwrap();
-                        let case_val = parse_expression(case_inner.next().unwrap())?;
-                        let mut body = Vec::new();
-                        for stmt_rule in case_inner {
-                            body.push(parse_statement(stmt_rule)?);
-                        }
-                        cases.push(crate::ast::SwitchCase {
-                            value: case_val,
-                            body,
-                        });
-                    }
-                    Rule::default_case => {
-                        let mut def_inner = rule.into_inner();
-                        let _def_kw = def_inner.next().unwrap();
-                        let mut body = Vec::new();
-                        for stmt_rule in def_inner {
-                            body.push(parse_statement(stmt_rule)?);
-                        }
-                        default_case = Some(body);
-                    }
-                    _ => bail!("Unexpected rule in switch statement: {:?}", rule.as_rule()),
-                }
-            }
-            Ok(Statement::new(
-                StatementKind::Switch {
-                    value,
-                    cases,
-                    default_case,
-                },
-                line,
-            ))
-        }
-        Rule::variable_decl => {
-            let inner = pair.into_inner().next().unwrap(); // variable_decl_core
-            parse_variable_decl_core(inner, line)
-        }
-        Rule::variable_decl_core => parse_variable_decl_core(pair, line),
-        Rule::assignment => {
-            let expr = parse_expression(pair)?;
-            Ok(Statement::new(StatementKind::Expression(expr), line))
-        }
-        Rule::expression_stmt => {
-            let expr = parse_expression(pair.into_inner().next().unwrap())?;
-            Ok(Statement::new(StatementKind::Expression(expr), line))
-        }
-        _ => bail!("Unexpected statement rule: {:?}", rule),
-    }
-}
-
-fn parse_expression(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let line = pair.as_span().start_pos().line_col().0 as u32;
-    let rule = pair.as_rule();
-    match rule {
-        Rule::expression | Rule::init | Rule::condition | Rule::update => {
-            let inner = pair
-                .into_inner()
-                .next()
-                .ok_or_else(|| anyhow!("Empty expression"))?;
-            parse_expression(inner)
-        }
-        Rule::conditional_expr => {
-            let mut inner = pair.into_inner();
-            let binary_pair = inner.next().unwrap();
-            let expr = parse_expression(binary_pair)?;
-            let second_pair = inner.next();
-            if let Some(second) = second_pair {
-                let second_expr = parse_expression(second)?;
-                if let Some(third) = inner.next() {
-                    let third_expr = parse_expression(third)?;
-                    Ok(Expression::new(
-                        ExpressionKind::Ternary {
-                            condition: Box::new(expr),
-                            then_expr: Box::new(second_expr),
-                            else_expr: Box::new(third_expr),
-                        },
-                        line,
-                    ))
-                } else {
-                    Ok(Expression::new(
-                        ExpressionKind::Elvis {
-                            left: Box::new(expr),
-                            right: Box::new(second_expr),
-                        },
-                        line,
-                    ))
-                }
-            } else {
-                Ok(expr)
-            }
-        }
-        Rule::assignment => {
-            let mut rules = pair.into_inner();
-            let target_rule = rules.next().unwrap();
-            let target = parse_target(target_rule)?;
-            let next = rules.next().unwrap();
-            let (op, value_rule) = if next.as_rule() == Rule::compound_op {
-                let op_str = next.as_str().to_string();
-                let value_rule = rules.next().unwrap();
-                (Some(op_str), value_rule)
-            } else {
-                (None, next)
-            };
-            let value = parse_expression(value_rule)?;
-            let final_value = if let Some(op) = op {
-                let bin_op = &op[..op.len() - 1]; // strip '=' from '+=', '-=', etc.
-                Expression::new(
-                    ExpressionKind::Binary {
-                        left: Box::new(target_to_expression(&target, line)),
-                        operator: bin_op.to_string(),
-                        right: Box::new(value),
-                    },
-                    line,
-                )
-            } else {
-                value
-            };
-            Ok(Expression::new(
-                ExpressionKind::Assignment {
-                    target,
-                    value: Box::new(final_value),
-                },
-                line,
-            ))
-        }
-        Rule::binary_expr => {
-            let mut rules: Vec<_> = pair.into_inner().collect();
-            parse_binary_precedence(&mut rules, 0, line)
-        }
-
-        _ => bail!("Unexpected expression rule: {:?}", rule),
-    }
-}
-
-fn parse_binary_precedence(
-    rules: &mut [pest::iterators::Pair<Rule>],
-    min_precedence: u8,
-    line: u32,
-) -> Result<Expression> {
-    // This is a simple implementation of Pratt parsing for a flat list of rules: [primary, op, primary, op, primary]
-    // Since we can't easily consume from the slice in recursion without complex logic,
-    // we'll use a slightly different approach or just fix the bvm.bxs for now.
-
-    // Actually, I'll just implement a simple one that works for the current grammar structure.
-    let mut left = parse_primary(rules[0].clone())?;
-    let mut i = 1;
-
-    while i < rules.len() {
-        let op_str = rules[i].as_str();
-        let prec = get_precedence(op_str);
-        if prec < min_precedence {
-            break;
-        }
-
-        let op = op_str.to_string();
-        i += 1;
-
-        // Find how far we can go with higher precedence
-        let mut j = i;
-        while j + 1 < rules.len() && get_precedence(rules[j + 1].as_str()) > prec {
-            j += 2;
-        }
-
-        let right = if j == i {
-            parse_primary(rules[i].clone())?
+    fn parse_interface(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // interface
+        let name = if self.peek_is(TokenKind::Identifier) {
+            self.advance_lexeme().unwrap_or_default()
         } else {
-            parse_binary_precedence(&mut rules[i..j + 1], prec + 1, line)?
+            String::new()
+        };
+        self.expect(TokenKind::LeftBrace)?;
+        let mut members = Vec::new();
+        while !self.peek_is(TokenKind::RightBrace) {
+            members.push(self.parse_statement()?);
+        }
+        self.pos += 1; // }
+        Ok(Statement::new(StatementKind::InterfaceDecl { name, members }, line))
+    }
+
+    fn parse_function_decl(&mut self, line: u32) -> Result<Statement> {
+        let mut attributes = Vec::new();
+        while self.peek_is(TokenKind::At) {
+            self.pos += 1; // @
+            let attr_name = self.expect_get(TokenKind::Identifier)?;
+            let mut args = Vec::new();
+            if self.peek_is(TokenKind::LeftParen) {
+                self.pos += 1; // (
+                args = self.parse_args()?;
+                self.expect(TokenKind::RightParen)?;
+            }
+            attributes.push(Attribute { name: attr_name, args });
+        }
+
+        let access_modifier = if matches!(self.peek_kind(),
+            Some(TokenKind::Public) | Some(TokenKind::Private)
+            | Some(TokenKind::Remote) | Some(TokenKind::Package)
+        ) {
+            Some(self.advance_lexeme().unwrap_or_default())
+        } else {
+            None
         };
 
-        left = Expression::new(
-            ExpressionKind::Binary {
-                left: Box::new(left),
-                operator: op,
-                right: Box::new(right),
-            },
-            line,
-        );
-
-        i = j + 1;
-    }
-
-    Ok(left)
-}
-
-fn get_precedence(op: &str) -> u8 {
-    match op {
-        "||" => 1,
-        "&&" => 2,
-        "==" | "!=" | "<" | ">" | "<=" | ">=" => 3,
-        "&" => 4,
-        "+" | "-" => 5,
-        "*" | "/" | "%" => 6,
-        _ => 0,
-    }
-}
-
-fn parse_target(pair: pest::iterators::Pair<Rule>) -> Result<AssignmentTarget> {
-    let mut inner = pair.into_inner();
-    let atom_pair = inner.next().unwrap();
-    let mut target_expr = parse_atom(atom_pair)?;
-
-    let accessors: Vec<_> = inner.collect();
-    if accessors.is_empty() {
-        if let ExpressionKind::Identifier(name) = target_expr.kind {
-            return Ok(AssignmentTarget::Identifier(name));
+        let return_type = if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Function) {
+            Some(self.advance_lexeme().unwrap_or_default())
         } else {
-            bail!("Invalid assignment target");
+            None
+        };
+
+        self.expect(TokenKind::Function)?;
+        let name = self.expect_get(TokenKind::Identifier)?;
+        self.expect(TokenKind::LeftParen)?;
+        let params = self.parse_params()?;
+        self.expect(TokenKind::RightParen)?;
+
+        let body = if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1; // {
+            FunctionBody::Block(self.parse_block()?)
+        } else if self.peek_is(TokenKind::Semicolon) {
+            self.pos += 1;
+            FunctionBody::Abstract
+        } else {
+            FunctionBody::Abstract
+        };
+
+        Ok(Statement::new(
+            StatementKind::FunctionDecl { name, attributes, access_modifier, return_type, params, body },
+            line,
+        ))
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<FunctionParam>> {
+        let mut params = Vec::new();
+        if self.peek_is(TokenKind::RightParen) {
+            return Ok(params);
+        }
+        loop {
+            let required = self.peek_is(TokenKind::Required);
+            if required { self.pos += 1; }
+            let type_name = if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Identifier) {
+                Some(self.advance_lexeme().unwrap_or_default())
+            } else {
+                None
+            };
+            let name = self.expect_get(TokenKind::Identifier)?;
+            let default_value = if self.peek_is(TokenKind::Equal) {
+                self.pos += 1; // =
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+            params.push(FunctionParam { name, type_name, required, default_value });
+            if self.peek_is(TokenKind::Comma) {
+                self.pos += 1;
+                if self.peek_is(TokenKind::RightParen) { break; }
+            } else { break; }
+        }
+        Ok(params)
+    }
+
+    fn parse_args(&mut self) -> Result<Vec<Argument>> {
+        let mut args = Vec::new();
+        if self.peek_is(TokenKind::RightParen) {
+            return Ok(args);
+        }
+        loop {
+            if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Equal) {
+                let name = self.advance_lexeme().unwrap_or_default();
+                self.pos += 1; // =
+                let value = self.parse_expression()?;
+                args.push(Argument { name: Some(name), value });
+            } else {
+                let value = self.parse_expression()?;
+                args.push(Argument { name: None, value });
+            }
+            if self.peek_is(TokenKind::Comma) { self.pos += 1; } else { break; }
+        }
+        Ok(args)
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Statement>> {
+        let mut stmts = Vec::new();
+        while !self.peek_is(TokenKind::RightBrace) && self.peek_kind().is_some() {
+            stmts.push(self.parse_statement()?);
+        }
+        self.pos += 1; // }
+        Ok(stmts)
+    }
+
+    fn parse_for(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // for
+        self.expect(TokenKind::LeftParen)?;
+
+        // Determine for-in vs for-classic by looking ahead for semicolons vs 'in'
+        if self.is_for_in() {
+            self.parse_for_in(line)
+        } else {
+            self.parse_for_classic(line)
         }
     }
 
-    for i in 0..accessors.len() - 1 {
-        let postfix = &accessors[i];
-        let postfix_line = postfix.as_span().start_pos().line_col().0 as u32;
-        match postfix.as_rule() {
-            Rule::array_access => {
-                let index_expr = parse_expression(postfix.clone().into_inner().next().unwrap())?;
-                target_expr = Expression::new(
-                    ExpressionKind::ArrayAccess {
-                        base: Box::new(target_expr),
-                        index: Box::new(index_expr),
-                    },
-                    postfix_line,
-                );
+    fn is_for_in(&self) -> bool {
+        // Look ahead to see if this is a for-in pattern
+        let mut i = self.pos;
+        if i < self.tokens.len() && self.tokens[i].kind == TokenKind::Var {
+            i += 1;
+        }
+        // Expect: identifier [, identifier] in
+        if i < self.tokens.len() && self.tokens[i].kind == TokenKind::Identifier {
+            i += 1;
+            if i < self.tokens.len() && self.tokens[i].kind == TokenKind::Comma {
+                i += 1;
+                // After comma must be another identifier then 'in'
+                if i < self.tokens.len() && self.tokens[i].kind == TokenKind::Identifier {
+                    i += 1;
+                    return i < self.tokens.len() && self.tokens[i].kind == TokenKind::In;
+                }
+                return false;
             }
-            Rule::member_access => {
-                let member = postfix
-                    .clone()
-                    .into_inner()
-                    .next()
-                    .unwrap()
-                    .as_str()
-                    .to_string();
-                target_expr = Expression::new(
-                    ExpressionKind::MemberAccess {
-                        base: Box::new(target_expr),
-                        member,
-                    },
-                    postfix_line,
-                );
-            }
-            _ => bail!("Unexpected target postfix rule: {:?}", postfix.as_rule()),
+            // After first identifier, check for 'in'
+            return i < self.tokens.len() && self.tokens[i].kind == TokenKind::In;
+        }
+        // If starts with semicolon, it's for-classic
+        if i < self.tokens.len() && self.tokens[i].kind == TokenKind::Semicolon {
+            return false;
+        }
+        false
+    }
+
+    fn parse_for_in(&mut self, line: u32) -> Result<Statement> {
+        let saw_var = self.peek_is(TokenKind::Var);
+        if saw_var { self.pos += 1; }
+
+        let item = self.expect_get(TokenKind::Identifier)?;
+        let index = if self.peek_is(TokenKind::Comma) {
+            self.pos += 1;
+            Some(self.expect_get(TokenKind::Identifier)?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::In)?;
+        let collection = self.parse_expression()?;
+        self.expect(TokenKind::RightParen)?;
+        let body = self.parse_for_body()?;
+        Ok(Statement::new(
+            StatementKind::ForLoop { item, index, collection, body },
+            line,
+        ))
+    }
+
+    fn parse_for_classic(&mut self, line: u32) -> Result<Statement> {
+        // Parse init
+        let init = if self.peek_is(TokenKind::Semicolon) {
+            None
+        } else {
+            Some(Box::new(self.parse_for_init()?))
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        // Parse condition
+        let condition = if self.peek_is(TokenKind::Semicolon) {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        self.expect(TokenKind::Semicolon)?;
+
+        // Parse update
+        let update = if self.peek_is(TokenKind::RightParen) {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        self.expect(TokenKind::RightParen)?;
+        let body = self.parse_for_body()?;
+        Ok(Statement::new(
+            StatementKind::ForClassic { init, condition, update, body },
+            line,
+        ))
+    }
+
+    fn parse_for_init(&mut self) -> Result<Statement> {
+        if self.peek_is(TokenKind::Var) {
+            let line = self.peek_line();
+            self.pos += 1; // var
+            let name = self.expect_get(TokenKind::Identifier)?;
+            self.expect(TokenKind::Equal)?;
+            let value = self.parse_expression()?;
+            return Ok(Statement::new(
+                StatementKind::VariableDecl { name, value },
+                line,
+            ));
+        }
+        // Assignment or expression (don't consume trailing semicolon)
+        let expr = self.parse_expression()?;
+        Ok(Statement::new(StatementKind::Expression(expr), self.peek_line()))
+    }
+
+    fn parse_for_body(&mut self) -> Result<Vec<Statement>> {
+        if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1; // {
+            self.parse_block()
+        } else {
+            Ok(vec![self.parse_statement()?])
         }
     }
 
-    let last = accessors.last().unwrap();
-    match last.as_rule() {
-        Rule::array_access => {
-            let index_expr = parse_expression(last.clone().into_inner().next().unwrap())?;
-            Ok(AssignmentTarget::Index {
-                base: Box::new(target_expr),
-                index: Box::new(index_expr),
-            })
-        }
-        Rule::member_access => {
-            let member = last
-                .clone()
-                .into_inner()
-                .next()
-                .unwrap()
-                .as_str()
-                .to_string();
-            Ok(AssignmentTarget::Member {
-                base: Box::new(target_expr),
-                member,
-            })
-        }
-        _ => bail!("Invalid assignment target postfix"),
+    fn parse_while(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // while
+        self.expect(TokenKind::LeftParen)?;
+        let condition = self.parse_expression()?;
+        self.expect(TokenKind::RightParen)?;
+        let body = if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1;
+            self.parse_block()?
+        } else {
+            vec![self.parse_statement()?]
+        };
+        Ok(Statement::new(StatementKind::WhileLoop { condition, body }, line))
     }
+
+    fn parse_if(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // if
+        self.expect(TokenKind::LeftParen)?;
+        let condition = self.parse_expression()?;
+        self.expect(TokenKind::RightParen)?;
+        let then_branch = if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1;
+            self.parse_block()?
+        } else {
+            vec![self.parse_statement_no_if()?]
+        };
+        let else_branch = if self.peek_is(TokenKind::Else) {
+            self.pos += 1; // else
+            if self.peek_is(TokenKind::If) {
+                Some(vec![self.parse_if(line)?])
+            } else if self.peek_is(TokenKind::LeftBrace) {
+                self.pos += 1;
+                Some(self.parse_block()?)
+            } else {
+                Some(vec![self.parse_statement()?])
+            }
+        } else {
+            None
+        };
+        Ok(Statement::new(StatementKind::If { condition, then_branch, else_branch }, line))
+    }
+
+    fn parse_statement_no_if(&mut self) -> Result<Statement> {
+        if self.peek_is(TokenKind::If) {
+            bail!("Unexpected 'if' in single-statement context");
+        }
+        self.parse_statement()
+    }
+
+    fn parse_try(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // try
+        self.expect(TokenKind::LeftBrace)?;
+        let try_branch = self.parse_block()?;
+        let mut catches = Vec::new();
+        while self.peek_is(TokenKind::Catch) {
+            self.pos += 1; // catch
+            self.expect(TokenKind::LeftParen)?;
+            let exception_var = self.expect_get(TokenKind::Identifier)?;
+            self.expect(TokenKind::RightParen)?;
+            self.expect(TokenKind::LeftBrace)?;
+            let body = self.parse_block()?;
+            catches.push(CatchBlock { exception_var, body });
+        }
+        let finally_branch = if self.peek_is(TokenKind::Finally) {
+            self.pos += 1; // finally
+            self.expect(TokenKind::LeftBrace)?;
+            Some(self.parse_block()?)
+        } else {
+            None
+        };
+        Ok(Statement::new(StatementKind::TryCatch { try_branch, catches, finally_branch }, line))
+    }
+
+    fn parse_return(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // return
+        let expr = if self.peek_is(TokenKind::Semicolon) || self.peek_kind().is_none() || self.at_statement_boundary() {
+            None
+        } else {
+            Some(self.parse_expression()?)
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Return(expr), line))
+    }
+
+    fn parse_throw(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // throw
+        let expr = if self.peek_is(TokenKind::Semicolon) || self.peek_kind().is_none() || self.at_statement_boundary() {
+            None
+        } else if self.peek_is(TokenKind::LeftParen) && self.is_throw_struct() {
+            self.pos += 1; // (
+            let mut entries = Vec::new();
+            loop {
+                let key_name = if self.peek_is(TokenKind::String) {
+                    let s = self.advance_lexeme().unwrap_or_default();
+                    if s.len() >= 2 { s[1..s.len() - 1].to_string() } else { s }
+                } else {
+                    self.expect_get(TokenKind::Identifier)?
+                };
+                self.expect(TokenKind::Equal)?;
+                let value = self.parse_expression()?;
+                let key_expr = Expression::new(
+                    ExpressionKind::Literal(Literal::String(vec![StringPart::Text(key_name)])),
+                    line,
+                );
+                entries.push((key_expr, value));
+                if self.peek_is(TokenKind::Comma) { self.pos += 1; } else { break; }
+            }
+            self.expect(TokenKind::RightParen)?;
+            Some(Expression::new(ExpressionKind::Literal(Literal::Struct(entries)), line))
+        } else {
+            Some(self.parse_expression()?)
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Throw(expr), line))
+    }
+
+    fn parse_continue(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // continue
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Continue, line))
+    }
+
+    fn parse_break(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // break
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Break, line))
+    }
+
+    fn parse_switch(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // switch
+        self.expect(TokenKind::LeftParen)?;
+        let value = self.parse_expression()?;
+        self.expect(TokenKind::RightParen)?;
+        self.expect(TokenKind::LeftBrace)?;
+        let mut cases = Vec::new();
+        let mut default_case = None;
+        while !self.peek_is(TokenKind::RightBrace) {
+            match self.peek_kind() {
+                Some(TokenKind::Case) => {
+                    self.pos += 1; // case
+                    let case_val = self.parse_expression()?;
+                    self.expect(TokenKind::Colon)?;
+                    let mut body = Vec::new();
+                    while !self.peek_is(TokenKind::Case)
+                        && !self.peek_is(TokenKind::Default)
+                        && !self.peek_is(TokenKind::RightBrace)
+                        && self.peek_kind().is_some()
+                    {
+                        body.push(self.parse_statement()?);
+                    }
+                    cases.push(SwitchCase { value: case_val, body });
+                }
+                Some(TokenKind::Default) => {
+                    self.pos += 1; // default
+                    self.expect(TokenKind::Colon)?;
+                    let mut body = Vec::new();
+                    while !self.peek_is(TokenKind::Case)
+                        && !self.peek_is(TokenKind::Default)
+                        && !self.peek_is(TokenKind::RightBrace)
+                        && self.peek_kind().is_some()
+                    {
+                        body.push(self.parse_statement()?);
+                    }
+                    default_case = Some(body);
+                }
+                _ => bail!("Expected case or default in switch"),
+            }
+        }
+        self.pos += 1; // }
+        Ok(Statement::new(StatementKind::Switch { value, cases, default_case }, line))
+    }
+
+    fn parse_var_decl(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // var
+        let target = self.parse_assignment_target()?;
+        let (op_str, value) = if self.peek_is(TokenKind::Equal) {
+            self.pos += 1;
+            (None, self.parse_expression()?)
+        } else if matches!(self.peek_kind(),
+            Some(TokenKind::PlusEqual) | Some(TokenKind::MinusEqual)
+            | Some(TokenKind::StarEqual) | Some(TokenKind::SlashEqual)
+            | Some(TokenKind::PercentEqual)
+        ) {
+            let op = self.advance_lexeme().unwrap_or_default();
+            let bin_op = op[..op.len() - 1].to_string();
+            (Some(bin_op), self.parse_expression()?)
+        } else {
+            bail!("Expected '=' or compound assignment after var target");
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+
+        let final_value = if let Some(op) = op_str {
+            Expression::new(
+                ExpressionKind::Binary {
+                    left: Box::new(target_to_expression(&target, line)),
+                    operator: op,
+                    right: Box::new(value),
+                },
+                line,
+            )
+        } else {
+            value
+        };
+
+        if let AssignmentTarget::Identifier(name) = target {
+            Ok(Statement::new(StatementKind::VariableDecl { name, value: final_value }, line))
+        } else {
+            bail!("'var' only supports simple identifiers");
+        }
+    }
+
+    fn parse_assignment_target(&mut self) -> Result<AssignmentTarget> {
+        let name = self.expect_get(TokenKind::Identifier)?;
+        let mut has_accessors = false;
+        while matches!(self.peek_kind(), Some(TokenKind::Dot) | Some(TokenKind::LeftBracket)) {
+            has_accessors = true;
+            if self.peek_is(TokenKind::Dot) {
+                self.pos += 1; // .
+                self.expect_get(TokenKind::Identifier)?;
+            } else if self.peek_is(TokenKind::LeftBracket) {
+                self.pos += 1; // [
+                self.parse_expression()?; // index — consumed but not stored in var context
+                self.expect(TokenKind::RightBracket)?;
+            }
+        }
+        if !has_accessors {
+            Ok(AssignmentTarget::Identifier(name))
+        } else {
+            bail!("'var' only supports simple identifiers");
+        }
+    }
+
+    fn at_statement_boundary(&self) -> bool {
+        matches!(self.peek_kind(),
+            Some(TokenKind::RightBrace) | Some(TokenKind::Case) | Some(TokenKind::Default)
+            | Some(TokenKind::Import) | Some(TokenKind::Class) | Some(TokenKind::Interface)
+            | Some(TokenKind::Function) | Some(TokenKind::For) | Some(TokenKind::While)
+            | Some(TokenKind::If) | Some(TokenKind::Try) | Some(TokenKind::Return)
+            | Some(TokenKind::Throw) | Some(TokenKind::Continue) | Some(TokenKind::Break)
+            | Some(TokenKind::Switch) | Some(TokenKind::Var) | None
+        )
+    }
+
+    // ---- Expression parser (Pratt) ----
+
+    fn parse_expression(&mut self) -> Result<Expression> {
+        self.parse_assignment_or_conditional()
+    }
+
+    fn parse_assignment_or_conditional(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
+        let expr = self.parse_binary(0)?;
+
+        if self.peek_is(TokenKind::QuestionColon) {
+            self.pos += 1;
+            let right = self.parse_expression()?;
+            return Ok(Expression::new(
+                ExpressionKind::Elvis { left: Box::new(expr), right: Box::new(right) },
+                line,
+            ));
+        }
+        if self.peek_is(TokenKind::Question) {
+            self.pos += 1;
+            let then_expr = self.parse_expression()?;
+            self.expect(TokenKind::Colon)?;
+            let else_expr = self.parse_expression()?;
+            return Ok(Expression::new(
+                ExpressionKind::Ternary {
+                    condition: Box::new(expr),
+                    then_expr: Box::new(then_expr),
+                    else_expr: Box::new(else_expr),
+                },
+                line,
+            ));
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_binary(&mut self, min_prec: u8) -> Result<Expression> {
+        let line = self.peek_line();
+        let left = self.parse_unary()?;
+
+        self.parse_binary_tail(left, min_prec, line)
+    }
+
+    fn parse_binary_tail(&mut self, mut left: Expression, min_prec: u8, line: u32) -> Result<Expression> {
+        loop {
+            let op_prec = match self.peek_kind() {
+                Some(TokenKind::PipePipe) => 1,
+                Some(TokenKind::AmpAmp) => 2,
+                Some(TokenKind::EqualEqual) | Some(TokenKind::BangEqual)
+                | Some(TokenKind::Less) | Some(TokenKind::Greater)
+                | Some(TokenKind::LessEqual) | Some(TokenKind::GreaterEqual) => 3,
+                Some(TokenKind::Ampersand) => 4,
+                Some(TokenKind::Plus) | Some(TokenKind::Minus) => 5,
+                Some(TokenKind::Star) | Some(TokenKind::Slash) | Some(TokenKind::Percent) => 6,
+                _ => 0,
+            };
+
+            if op_prec == 0 || op_prec < min_prec {
+                break;
+            }
+
+            let op = self.advance_lexeme().unwrap_or_default();
+            let right = self.parse_binary(op_prec + 1)?;
+            let next_line = self.peek_line();
+
+            // Check for compound assignment after binary expression
+            if matches!(self.peek_kind(),
+                Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
+                | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
+                | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+            ) {
+                let assign_op = self.advance_lexeme().unwrap_or_default();
+                let val = self.parse_expression()?;
+                let bin = Expression::new(
+                    ExpressionKind::Binary { left: Box::new(left), operator: op, right: Box::new(right) },
+                    line,
+                );
+                let target = expr_to_assignment_target(&bin)?;
+                let final_val = if &assign_op == "=" { val } else {
+                    let bin_op = assign_op[..assign_op.len() - 1].to_string();
+                    Expression::new(
+                        ExpressionKind::Binary { left: Box::new(val.clone()), operator: bin_op, right: Box::new(val) },
+                        next_line,
+                    )
+                };
+                return Ok(Expression::new(
+                    ExpressionKind::Assignment { target, value: Box::new(final_val) },
+                    next_line,
+                ));
+            }
+
+            left = Expression::new(
+                ExpressionKind::Binary { left: Box::new(left), operator: op, right: Box::new(right) },
+                line,
+            );
+        }
+
+        // Check for simple assignment after primary
+        if matches!(self.peek_kind(),
+            Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
+            | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
+            | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+        ) {
+            let assign_op = self.advance_lexeme().unwrap_or_default();
+            let value = self.parse_expression()?;
+            let target = expr_to_assignment_target(&left)?;
+            let final_val = if &assign_op == "=" { value } else {
+                let bin_op = assign_op[..assign_op.len() - 1].to_string();
+                Expression::new(
+                    ExpressionKind::Binary { left: Box::new(left), operator: bin_op, right: Box::new(value) },
+                    line,
+                )
+            };
+            return Ok(Expression::new(
+                ExpressionKind::Assignment { target, value: Box::new(final_val) },
+                line,
+            ));
+        }
+
+        Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
+        match self.peek_kind() {
+            Some(TokenKind::Bang) => {
+                self.pos += 1;
+                let expr = self.parse_unary()?;
+                Ok(Expression::new(ExpressionKind::UnaryNot(Box::new(expr)), line))
+            }
+            Some(TokenKind::Minus) => {
+                self.pos += 1;
+                let expr = self.parse_unary()?;
+                // If the expression is a Number literal, negate it directly
+                if let ExpressionKind::Literal(Literal::Number(n)) = &expr.kind {
+                    return Ok(Expression::new(
+                        ExpressionKind::Literal(Literal::Number(-n)),
+                        line,
+                    ));
+                }
+                Ok(Expression::new(
+                    ExpressionKind::Binary {
+                        left: Box::new(Expression::new(
+                            ExpressionKind::Literal(Literal::Number(0.0)), line,
+                        )),
+                        operator: "-".to_string(),
+                        right: Box::new(expr),
+                    },
+                    line,
+                ))
+            }
+            Some(TokenKind::PlusPlus) | Some(TokenKind::MinusMinus) => {
+                let op = self.advance_lexeme().unwrap_or_default();
+                let target = self.parse_assignment_target()?;
+                Ok(Expression::new(ExpressionKind::Prefix { operator: op, target }, line))
+            }
+            _ => self.parse_postfix(),
+        }
+    }
+
+    fn parse_postfix(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
+        let mut expr = self.parse_primary()?;
+
+        loop {
+            match self.peek_kind() {
+                Some(TokenKind::LeftParen) => {
+                    self.pos += 1; // (
+                    let args = self.parse_args()?;
+                    self.expect(TokenKind::RightParen)?;
+                    expr = Expression::new(
+                        ExpressionKind::FunctionCall { base: Box::new(expr), args },
+                        line,
+                    );
+                }
+                Some(TokenKind::LeftBracket) => {
+                    self.pos += 1; // [
+                    let index = self.parse_expression()?;
+                    self.expect(TokenKind::RightBracket)?;
+                    expr = Expression::new(
+                        ExpressionKind::ArrayAccess { base: Box::new(expr), index: Box::new(index) },
+                        line,
+                    );
+                }
+                Some(TokenKind::Dot) => {
+                    self.pos += 1; // .
+                    let member = self.expect_get(TokenKind::Identifier)?;
+                    expr = Expression::new(
+                        ExpressionKind::MemberAccess { base: Box::new(expr), member },
+                        line,
+                    );
+                }
+                Some(TokenKind::QuestionDot) => {
+                    self.pos += 1; // ?.
+                    let member = self.expect_get(TokenKind::Identifier)?;
+                    expr = Expression::new(
+                        ExpressionKind::SafeMemberAccess { base: Box::new(expr), member },
+                        line,
+                    );
+                }
+                Some(TokenKind::PlusPlus) | Some(TokenKind::MinusMinus) => {
+                    let operator = self.advance_lexeme().unwrap_or_default();
+                    expr = Expression::new(
+                        ExpressionKind::Postfix { base: Box::new(expr), operator },
+                        line,
+                    );
+                }
+                _ => break,
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_primary(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
+
+        match self.peek_kind() {
+            Some(TokenKind::Number) => {
+                let lexeme = self.advance_lexeme().unwrap_or_default();
+                let n = lexeme.parse::<f64>().unwrap_or(0.0);
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Number(n)), line))
+            }
+            Some(TokenKind::True) => {
+                self.pos += 1;
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Boolean(true)), line))
+            }
+            Some(TokenKind::False) => {
+                self.pos += 1;
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Boolean(false)), line))
+            }
+            Some(TokenKind::Null) => {
+                self.pos += 1;
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Null), line))
+            }
+            Some(TokenKind::String) => {
+                let lexeme = self.advance_lexeme().unwrap_or_default();
+                let parts = parse_string_content(&lexeme);
+                Ok(Expression::new(ExpressionKind::Literal(Literal::String(parts)), line))
+            }
+            Some(TokenKind::StringStart) => {
+                // Fallback: skip to StringEnd, treat as empty string
+                self.pos += 1;
+                while self.peek_kind() != Some(TokenKind::StringEnd) && self.peek_kind().is_some() {
+                    self.pos += 1;
+                }
+                if self.peek_is(TokenKind::StringEnd) { self.pos += 1; }
+                Ok(Expression::new(ExpressionKind::Literal(Literal::String(vec![])), line))
+            }
+            Some(TokenKind::New) => {
+                self.pos += 1; // new
+                let mut class_path = String::new();
+                // Optional prefix: identifier:
+                if self.kind(0) == Some(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Colon) {
+                    class_path.push_str(&self.advance_lexeme().unwrap_or_default());
+                    class_path.push(':');
+                    self.pos += 1; // :
+                }
+                loop {
+                    class_path.push_str(&self.expect_get(TokenKind::Identifier)?);
+                    if self.peek_is(TokenKind::Dot) {
+                        class_path.push('.');
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::LeftParen)?;
+                let args = self.parse_args()?;
+                self.expect(TokenKind::RightParen)?;
+                Ok(Expression::new(ExpressionKind::New { class_path, args }, line))
+            }
+            Some(TokenKind::Identifier) => {
+                let name = self.advance_lexeme().unwrap_or_default();
+                // Check for lambda: identifier => expr
+                if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                    let _ = self.advance_lexeme();
+                    let body = self.parse_lambda_body()?;
+                    return Ok(Expression::new(
+                        ExpressionKind::Literal(Literal::Function {
+                            params: vec![FunctionParam {
+                                name, type_name: None, required: false, default_value: None,
+                            }],
+                            body,
+                        }),
+                        line,
+                    ));
+                }
+                Ok(Expression::new(ExpressionKind::Identifier(name), line))
+            }
+            Some(TokenKind::LeftBrace) => {
+                self.pos += 1; // {
+                if self.peek_is(TokenKind::RightBrace) {
+                    self.pos += 1;
+                    return Ok(Expression::new(ExpressionKind::Literal(Literal::Struct(Vec::new())), line));
+                }
+                let members = self.parse_struct_members()?;
+                self.expect(TokenKind::RightBrace)?;
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Struct(members)), line))
+            }
+            Some(TokenKind::LeftParen) => {
+                self.pos += 1; // (
+                if self.peek_is(TokenKind::RightParen) {
+                    self.pos += 1;
+                    // () => or () ->
+                    if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                        let _ = self.advance_lexeme();
+                        let body = self.parse_lambda_body()?;
+                        return Ok(Expression::new(
+                            ExpressionKind::Literal(Literal::Function { params: vec![], body }),
+                            line,
+                        ));
+                    }
+                    return Ok(Expression::new(ExpressionKind::Literal(Literal::Null), line));
+                }
+                // Check if this is a lambda: (params) => ...
+                if self.is_lambda_params() {
+                    let params = self.parse_params()?;
+                    self.expect(TokenKind::RightParen)?;
+                    let _ = self.advance_lexeme(); // => or ->
+                    let body = self.parse_lambda_body()?;
+                    return Ok(Expression::new(
+                        ExpressionKind::Literal(Literal::Function { params, body }),
+                        line,
+                    ));
+                }
+                // Plain parenthesized expression
+                let expr = self.parse_expression()?;
+                self.expect(TokenKind::RightParen)?;
+                // Check for lambda: (identifier) => ...
+                if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                    let _ = self.advance_lexeme();
+                    let body = self.parse_lambda_body()?;
+                    let params = match &expr.kind {
+                        ExpressionKind::Identifier(name) => vec![FunctionParam {
+                            name: name.clone(), type_name: None, required: false, default_value: None,
+                        }],
+                        _ => bail!("Expected identifier before =>"),
+                    };
+                    return Ok(Expression::new(
+                        ExpressionKind::Literal(Literal::Function { params, body }),
+                        line,
+                    ));
+                }
+                Ok(expr)
+            }
+            Some(TokenKind::Function) => {
+                self.pos += 1; // function
+                self.expect(TokenKind::LeftParen)?;
+                let params = self.parse_params()?;
+                self.expect(TokenKind::RightParen)?;
+                self.expect(TokenKind::LeftBrace)?;
+                let body_stmts = self.parse_block()?;
+                Ok(Expression::new(
+                    ExpressionKind::Literal(Literal::Function {
+                        params,
+                        body: FunctionBody::Block(body_stmts),
+                    }),
+                    line,
+                ))
+            }
+            Some(TokenKind::LeftBracket) => {
+                self.pos += 1; // [
+                if self.peek_is(TokenKind::RightBracket) {
+                    self.pos += 1;
+                    return Ok(Expression::new(ExpressionKind::Literal(Literal::Array(Vec::new())), line));
+                }
+                let mut items = Vec::new();
+                loop {
+                    items.push(self.parse_expression()?);
+                    if self.peek_is(TokenKind::Comma) { self.pos += 1; } else { break; }
+                }
+                self.expect(TokenKind::RightBracket)?;
+                Ok(Expression::new(ExpressionKind::Literal(Literal::Array(items)), line))
+            }
+            _ => bail!("Unexpected token in expression: {:?}", self.peek_kind()),
+        }
+    }
+
+    fn parse_struct_members(&mut self) -> Result<Vec<(Expression, Expression)>> {
+        let mut members = Vec::new();
+        loop {
+            let line = self.peek_line();
+            let key = self.parse_expression()?;
+            if !matches!(self.peek_kind(), Some(TokenKind::Colon) | Some(TokenKind::Equal)) {
+                bail!("Expected ':' or '=' in struct literal");
+            }
+            self.pos += 1;
+            let value = self.parse_expression()?;
+            members.push((key, value));
+            if self.peek_is(TokenKind::Comma) {
+                self.pos += 1;
+                if self.peek_is(TokenKind::RightBrace) { break; }
+            } else {
+                break;
+            }
+        }
+        Ok(members)
+    }
+
+    fn is_lambda_params(&self) -> bool {
+        // Look ahead: identifier (, identifier)* ) => or ->
+        let mut i = self.pos;
+        if i >= self.tokens.len() || self.tokens[i].kind != TokenKind::Identifier {
+            return false;
+        }
+        i += 1;
+        while i < self.tokens.len() && self.tokens[i].kind == TokenKind::Comma {
+            i += 1;
+            if i >= self.tokens.len() || self.tokens[i].kind != TokenKind::Identifier {
+                return false;
+            }
+            i += 1;
+        }
+        if i >= self.tokens.len() || self.tokens[i].kind != TokenKind::RightParen {
+            return false;
+        }
+        i += 1;
+        i < self.tokens.len()
+            && (self.tokens[i].kind == TokenKind::EqualGreater
+                || self.tokens[i].kind == TokenKind::MinusGreater)
+    }
+
+    fn parse_lambda_body(&mut self) -> Result<FunctionBody> {
+        if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1;
+            Ok(FunctionBody::Block(self.parse_block()?))
+        } else {
+            Ok(FunctionBody::Expression(Box::new(self.parse_expression()?)))
+        }
+    }
+
+    fn is_throw_struct(&self) -> bool {
+        // Look ahead: ( identifier (=|:) ... ) is throw struct syntax
+        let mut i = self.pos + 1; // skip (
+        // Skip whitespace conceptually — we're looking at token kind
+        if i < self.tokens.len()
+            && (self.tokens[i].kind == TokenKind::Identifier || self.tokens[i].kind == TokenKind::String)
+        {
+            i += 1;
+            if i < self.tokens.len()
+                && (self.tokens[i].kind == TokenKind::Equal || self.tokens[i].kind == TokenKind::Colon)
+            {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+// Parse string content (between quotes) into StringParts, handling #expr# interpolation
+fn parse_string_content(raw: &str) -> Vec<StringPart> {
+    let inner = if raw.len() >= 2 { &raw[1..raw.len() - 1] } else { return vec![]; };
+
+    let mut parts = Vec::new();
+    let mut text = String::new();
+    let mut i = 0;
+    let bytes = inner.as_bytes();
+
+    while i < bytes.len() {
+        if bytes[i] == b'#' {
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'#' {
+                text.push('#');
+                i += 1;
+                continue;
+            }
+            // Interpolation start
+            if !text.is_empty() {
+                parts.push(StringPart::Text(std::mem::take(&mut text)));
+            }
+            let mut expr = String::new();
+            while i < bytes.len() {
+                if bytes[i] == b'"' {
+                    // Skip over nested string
+                    expr.push('"');
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'"' {
+                        expr.push(bytes[i] as char);
+                        i += 1;
+                    }
+                    if i < bytes.len() { expr.push('"'); i += 1; }
+                    continue;
+                }
+                if bytes[i] == b'\'' {
+                    expr.push('\'');
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'\'' {
+                        expr.push(bytes[i] as char);
+                        i += 1;
+                    }
+                    if i < bytes.len() { expr.push('\''); i += 1; }
+                    continue;
+                }
+                if bytes[i] == b'#' {
+                    i += 1;
+                    if i < bytes.len() && bytes[i] == b'#' {
+                        expr.push_str("##");
+                        i += 1;
+                        continue;
+                    }
+                    // Closing #
+                    break;
+                }
+                expr.push(bytes[i] as char);
+                i += 1;
+            }
+            if !expr.is_empty() {
+                let tokens = crate::tokenizer::tokenize(&expr);
+                let mut p = Parser::new(&tokens);
+                if let Ok(e) = p.parse_expression() {
+                    parts.push(StringPart::Expression(e));
+                }
+            }
+        } else {
+            text.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    if !text.is_empty() {
+        parts.push(StringPart::Text(text));
+    }
+
+    parts
 }
 
 fn target_to_expression(target: &AssignmentTarget, line: u32) -> Expression {
@@ -841,313 +1263,139 @@ fn target_to_expression(target: &AssignmentTarget, line: u32) -> Expression {
             Expression::new(ExpressionKind::Identifier(name.clone()), line)
         }
         AssignmentTarget::Member { base, member } => Expression::new(
-            ExpressionKind::MemberAccess {
-                base: base.clone(),
-                member: member.clone(),
-            },
-            line,
+            ExpressionKind::MemberAccess { base: base.clone(), member: member.clone() }, line,
         ),
         AssignmentTarget::Index { base, index } => Expression::new(
-            ExpressionKind::ArrayAccess {
-                base: base.clone(),
-                index: index.clone(),
-            },
-            line,
+            ExpressionKind::ArrayAccess { base: base.clone(), index: index.clone() }, line,
         ),
     }
 }
 
-fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let mut inner = pair.into_inner();
-    let atom_pair = inner.next().unwrap();
-    let mut expr = parse_atom(atom_pair)?;
-
-    for postfix in inner {
-        let postfix_line = postfix.as_span().start_pos().line_col().0 as u32;
-        match postfix.as_rule() {
-            Rule::function_call_args => {
-                let mut args = Vec::new();
-                if let Some(args_rule) = postfix.into_inner().next() {
-                    args = parse_args(args_rule)?;
-                }
-                expr = Expression::new(
-                    ExpressionKind::FunctionCall {
-                        base: Box::new(expr),
-                        args,
-                    },
-                    postfix_line,
-                );
-            }
-            Rule::array_access => {
-                let index_expr = parse_expression(postfix.into_inner().next().unwrap())?;
-                expr = Expression::new(
-                    ExpressionKind::ArrayAccess {
-                        base: Box::new(expr),
-                        index: Box::new(index_expr),
-                    },
-                    postfix_line,
-                );
-            }
-            Rule::member_access => {
-                let member = postfix.into_inner().next().unwrap().as_str().to_string();
-                expr = Expression::new(
-                    ExpressionKind::MemberAccess {
-                        base: Box::new(expr),
-                        member,
-                    },
-                    postfix_line,
-                );
-            }
-            Rule::safe_member_access => {
-                let member = postfix.into_inner().next().unwrap().as_str().to_string();
-                expr = Expression::new(
-                    ExpressionKind::SafeMemberAccess {
-                        base: Box::new(expr),
-                        member,
-                    },
-                    postfix_line,
-                );
-            }
-            Rule::postfix_op => {
-                let operator = postfix.as_str().to_string();
-                expr = Expression::new(
-                    ExpressionKind::Postfix {
-                        base: Box::new(expr),
-                        operator,
-                    },
-                    postfix_line,
-                );
-            }
-            _ => bail!("Unexpected postfix rule: {:?}", postfix.as_rule()),
-        }
+fn expr_to_assignment_target(expr: &Expression) -> Result<AssignmentTarget> {
+    match &expr.kind {
+        ExpressionKind::Identifier(name) => Ok(AssignmentTarget::Identifier(name.clone())),
+        ExpressionKind::MemberAccess { base, member } => Ok(AssignmentTarget::Member {
+            base: base.clone(), member: member.clone(),
+        }),
+        ExpressionKind::ArrayAccess { base, index } => Ok(AssignmentTarget::Index {
+            base: base.clone(), index: index.clone(),
+        }),
+        _ => bail!("Invalid assignment target"),
     }
-    Ok(expr)
 }
 
-fn parse_atom(pair: pest::iterators::Pair<Rule>) -> Result<Expression> {
-    let line = pair.as_span().start_pos().line_col().0 as u32;
-    let rule = pair.as_rule();
-    match rule {
-        Rule::atom => {
-            let inner = pair.into_inner().next().unwrap();
-            parse_atom(inner)
-        }
-        Rule::unary_not => {
-            let inner = pair.into_inner().next().unwrap();
-            let expr = parse_primary(inner)?;
-            Ok(Expression::new(
-                ExpressionKind::UnaryNot(Box::new(expr)),
-                line,
-            ))
-        }
-        Rule::prefix_op => {
-            let operator = if pair.as_str().starts_with("++") {
-                "++"
-            } else {
-                "--"
-            }
-            .to_string();
-            let mut inner_rules = pair.into_inner();
-            let target = parse_target(inner_rules.next().unwrap())?;
-            Ok(Expression::new(
-                ExpressionKind::Prefix { operator, target },
-                line,
-            ))
-        }
-        Rule::new_expression => {
-            let mut inner_rules = pair.into_inner();
-            let _kw = inner_rules.next().unwrap(); // new_keyword
-            let class_path = inner_rules.next().unwrap().as_str().to_string();
-            let mut args = Vec::new();
-            if let Some(args_rule) = inner_rules.next() {
-                args = parse_args(args_rule)?;
-            }
-            Ok(Expression::new(
-                ExpressionKind::New { class_path, args },
-                line,
-            ))
-        }
-        Rule::literal => {
-            let lit = pair.into_inner().next().unwrap();
-            match lit.as_rule() {
-                Rule::string => {
-                    let mut parts = Vec::new();
-                    for part in lit.into_inner() {
-                        match part.as_rule() {
-                            Rule::string_text_double | Rule::string_text_single => {
-                                parts.push(crate::ast::StringPart::Text(part.as_str().to_string()));
-                            }
-                            Rule::escaped_double_quote => {
-                                parts.push(crate::ast::StringPart::Text("\"".to_string()));
-                            }
-                            Rule::escaped_single_quote => {
-                                parts.push(crate::ast::StringPart::Text("'".to_string()));
-                            }
-                            Rule::escaped_hash => {
-                                parts.push(crate::ast::StringPart::Text("#".to_string()));
-                            }
-                            Rule::interpolation => {
-                                let expr = parse_expression(part.into_inner().next().unwrap())?;
-                                parts.push(crate::ast::StringPart::Expression(expr));
-                            }
-                            _ => bail!("Unexpected string part rule: {:?}", part.as_rule()),
-                        }
-                    }
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::String(parts)),
-                        line,
-                    ))
-                }
-                Rule::number => {
-                    let n = lit.as_str().parse::<f64>()?;
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Number(n)),
-                        line,
-                    ))
-                }
-                Rule::boolean => {
-                    let b = lit.as_str().trim() == "true";
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Boolean(b)),
-                        line,
-                    ))
-                }
-                Rule::null_lit => Ok(Expression::new(
-                    ExpressionKind::Literal(Literal::Null),
-                    line,
-                )),
-                Rule::array_literal => {
-                    let mut items = Vec::new();
-                    for expr in lit.into_inner() {
-                        items.push(parse_expression(expr)?);
-                    }
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Array(items)),
-                        line,
-                    ))
-                }
-                Rule::struct_literal => {
-                    let mut members = Vec::new();
-                    for member_pair in lit.into_inner() {
-                        let mut member_inner = member_pair.into_inner();
-                        let key_pair = member_inner.next().unwrap().into_inner().next().unwrap();
-                        let key_expr = match key_pair.as_rule() {
-                            Rule::identifier => Expression::new(
-                                ExpressionKind::Identifier(key_pair.as_str().to_string()),
-                                line,
-                            ),
-                            Rule::string => {
-                                // Specialized string parsing
-                                let mut parts = Vec::new();
-                                for part in key_pair.into_inner() {
-                                    match part.as_rule() {
-                                        Rule::string_text_double | Rule::string_text_single => {
-                                            parts.push(crate::ast::StringPart::Text(
-                                                part.as_str().to_string(),
-                                            ));
-                                        }
-                                        Rule::escaped_double_quote => {
-                                            parts.push(crate::ast::StringPart::Text(
-                                                "\"".to_string(),
-                                            ));
-                                        }
-                                        Rule::escaped_single_quote => {
-                                            parts.push(crate::ast::StringPart::Text(
-                                                "'".to_string(),
-                                            ));
-                                        }
-                                        Rule::escaped_hash => {
-                                            parts.push(crate::ast::StringPart::Text(
-                                                "#".to_string(),
-                                            ));
-                                        }
-                                        Rule::interpolation => {
-                                            let expr = parse_expression(
-                                                part.into_inner().next().unwrap(),
-                                            )?;
-                                            parts.push(crate::ast::StringPart::Expression(expr));
-                                        }
-                                        _ => bail!(
-                                            "Unexpected string part in struct key: {:?}",
-                                            part.as_rule()
-                                        ),
-                                    }
-                                }
-                                Expression::new(
-                                    ExpressionKind::Literal(Literal::String(parts)),
-                                    line,
-                                )
-                            }
-                            Rule::number => {
-                                let n = key_pair.as_str().parse::<f64>()?;
-                                Expression::new(ExpressionKind::Literal(Literal::Number(n)), line)
-                            }
-                            _ => bail!("Invalid struct key: {:?}", key_pair.as_rule()),
-                        };
-                        let val_expr = parse_expression(member_inner.next().unwrap())?;
-                        members.push((key_expr, val_expr));
-                    }
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Struct(members)),
-                        line,
-                    ))
-                }
-                Rule::anonymous_function => {
-                    let mut inner = lit.into_inner();
-                    let first = inner.next().unwrap();
-                    let (params, body_rule) = if first.as_rule() == Rule::lambda_params {
-                        let params = {
-                            let mut param_inner = first.clone().into_inner();
-                            if let Some(param_rule) = param_inner.next() {
-                                match param_rule.as_rule() {
-                                    Rule::params => parse_params(param_rule)?,
-                                    Rule::identifier => vec![crate::ast::FunctionParam {
-                                        name: param_rule.as_str().to_string(),
-                                        type_name: None,
-                                        required: false,
-                                        default_value: None,
-                                    }],
-                                    _ => vec![],
-                                }
-                            } else {
-                                vec![]
-                            }
-                        };
-                        // Operands like => are literals, not rules, so they don't appear in into_inner()
-                        (params, inner.next().unwrap())
-                    } else {
-                        // first is function_keyword, next is params or block
-                        let mut next = inner.next().unwrap();
-                        let params = if next.as_rule() == Rule::params {
-                            let p = parse_params(next)?;
-                            next = inner.next().unwrap();
-                            p
-                        } else {
-                            vec![]
-                        };
-                        (params, next)
-                    };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-                    let body = if body_rule.as_rule() == Rule::block {
-                        let stmts = parse_block(body_rule)?;
-                        crate::ast::FunctionBody::Block(stmts)
-                    } else {
-                        crate::ast::FunctionBody::Expression(Box::new(parse_expression(body_rule)?))
-                    };
-
-                    Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Function { params, body }),
-                        line,
-                    ))
+    #[test]
+    fn parse_simple_var_decl() {
+        let stmts = parse("var x = 42;", None).unwrap();
+        assert_eq!(stmts.len(), 1);
+        match &stmts[0].kind {
+            StatementKind::VariableDecl { name, value } => {
+                assert_eq!(name, "x");
+                match &value.kind {
+                    ExpressionKind::Literal(Literal::Number(42.0)) => {}
+                    other => panic!("Expected Number(42.0), got {:?}", other),
                 }
-                _ => bail!("Unexpected literal rule: {:?}", lit.as_rule()),
             }
+            other => panic!("Expected VariableDecl, got {:?}", other),
         }
-        Rule::identifier => Ok(Expression::new(
-            ExpressionKind::Identifier(pair.as_str().to_string()),
-            line,
-        )),
-        Rule::expression => parse_expression(pair),
-        _ => bail!("Unexpected atom rule: {:?}", rule),
+    }
+
+    #[test]
+    fn parse_basic_stmts() {
+        let source = "var x = 42;\nreturn x;\nvar y = x + 1;\nreturn y;\n";
+        let ast = parse(source, None).unwrap();
+        assert_eq!(ast.len(), 4);
+        assert!(matches!(ast[0].kind, StatementKind::VariableDecl { .. }));
+        assert!(matches!(ast[1].kind, StatementKind::Return(_)));
+        assert!(matches!(ast[2].kind, StatementKind::VariableDecl { .. }));
+        assert!(matches!(ast[3].kind, StatementKind::Return(_)));
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let ast = parse("if (true) { var x = 1; } else { var x = 2; }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::If { .. }));
+    }
+
+    #[test]
+    fn parse_while_loop() {
+        let ast = parse("var i = 0;\nwhile (i < 10) { i = i + 1; }\n", None).unwrap();
+        assert_eq!(ast.len(), 2);
+        assert!(matches!(ast[1].kind, StatementKind::WhileLoop { .. }));
+    }
+
+    #[test]
+    fn parse_function_decl() {
+        let ast = parse("function foo(x) { return x; }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::FunctionDecl { .. }));
+    }
+
+    #[test]
+    fn parse_for_in() {
+        let ast = parse("for (item in [1,2,3]) { }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::ForLoop { .. }));
+    }
+
+    #[test]
+    fn parse_for_classic() {
+        let ast = parse("for (var i = 0; i < 10; i = i + 1) { }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::ForClassic { .. }));
+    }
+
+    #[test]
+    fn parse_try_catch() {
+        let ast = parse("try { } catch (e) { }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::TryCatch { .. }));
+    }
+
+    #[test]
+    fn parse_switch() {
+        let ast = parse("switch (x) { case 1: break; default: break; }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::Switch { .. }));
+    }
+
+    #[test]
+    fn parse_import() {
+        let ast = parse("import foo.bar.Baz as Qux;\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::Import { .. }));
+    }
+
+    #[test]
+    fn parse_class() {
+        let ast = parse("class Foo { property name; function bar() { } }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::ClassDecl { .. }));
+    }
+
+    #[test]
+    fn parse_interface() {
+        let ast = parse("interface IFoo { function bar(); }\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::InterfaceDecl { .. }));
+    }
+
+    #[test]
+    fn parse_throw() {
+        let ast = parse("throw \"error\";\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::Throw(_)));
+    }
+
+    #[test]
+    fn parse_struct_throw() {
+        let ast = parse("throw(message=\"error\");\n", None).unwrap();
+        assert_eq!(ast.len(), 1);
+        assert!(matches!(ast[0].kind, StatementKind::Throw(_)));
     }
 }

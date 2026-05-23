@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod parser;
 pub mod compiler;
+pub mod tokenizer;
 
 pub const PRELUDE_SOURCE: &str = include_str!("prelude.bxs");
 
