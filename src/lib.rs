@@ -117,7 +117,8 @@ fn collect_esp32_unsupported_features_in_stmt(
     use ast::StatementKind;
 
     match &stmt.kind {
-        StatementKind::Import { .. } | StatementKind::Continue | StatementKind::Break => {}
+        StatementKind::Import { .. } | StatementKind::Continue | StatementKind::Break
+        | StatementKind::Rethrow | StatementKind::Not(_) | StatementKind::Include(_) => {}
         StatementKind::ClassDecl { members, .. } => {
             for member in members {
                 if let ast::ClassMember::Statement(statement) = member {
@@ -180,7 +181,8 @@ fn collect_esp32_unsupported_features_in_stmt(
                 );
             }
         }
-        StatementKind::WhileLoop { condition, body } => {
+        StatementKind::WhileLoop { condition, body }
+        | StatementKind::DoWhile { condition, body } => {
             collect_esp32_unsupported_features_in_expr(condition, findings, embedded_web_enabled);
             for statement in body {
                 collect_esp32_unsupported_features_in_stmt(
@@ -281,6 +283,23 @@ fn collect_esp32_unsupported_features_in_stmt(
         }
         StatementKind::VariableDecl { value, .. } | StatementKind::Expression(value) => {
             collect_esp32_unsupported_features_in_expr(value, findings, embedded_web_enabled);
+        }
+        StatementKind::Assert { condition, message } => {
+            collect_esp32_unsupported_features_in_expr(condition, findings, embedded_web_enabled);
+            if let Some(m) = message {
+                collect_esp32_unsupported_features_in_expr(m, findings, embedded_web_enabled);
+            }
+        }
+        StatementKind::Param { default, .. } => {
+            if let Some(d) = default {
+                collect_esp32_unsupported_features_in_expr(d, findings, embedded_web_enabled);
+            }
+        }
+        StatementKind::DoWhile { condition, body } => {
+            collect_esp32_unsupported_features_in_expr(condition, findings, embedded_web_enabled);
+            for statement in body {
+                collect_esp32_unsupported_features_in_stmt(statement, findings, embedded_web_enabled);
+            }
         }
     }
 }

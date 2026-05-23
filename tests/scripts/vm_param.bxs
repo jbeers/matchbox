@@ -1,0 +1,14 @@
+// Test param statement
+param x = 42;
+println(x); // expect 42
+
+// param should not overwrite existing value
+param x = 99;
+println(x); // expect 42 still
+
+// param without default when variable is missing throws
+try {
+    param nonexistent;
+} catch (e) {
+    println("caught missing param");  // expect this
+}

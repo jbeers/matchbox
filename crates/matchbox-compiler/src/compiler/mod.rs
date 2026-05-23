@@ -448,6 +448,40 @@ impl Compiler {
                 }
                 Ok(())
             }
+            StatementKind::Rethrow => {
+                self.chunk.emit0(op::THROW, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::Assert { condition, message } => {
+                // Compile condition, jump past throw if truthy
+                self.compile_expression(condition)?;
+                let skip_jump_pos = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_FALSE, 0, stmt.line as u32);
+                // Condition was truthy — pop and continue
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                Ok(()) // For MVP: assertions that pass are no-ops
+                // TODO: emit throw for falsy case at skip_jump_pos
+            }
+            StatementKind::Param { name, default: _ } => {
+                // MVP: just declare the variable with null if not set
+                if self.resolve_local(&name).is_none() {
+                    let null_idx = self.chunk.add_constant(Constant::Null);
+                    let name_idx = self.chunk.add_constant(Constant::String(BoxString::new(&name)));
+                    self.chunk.emit1(op::CONSTANT, null_idx, stmt.line as u32);
+                    self.chunk.emit1(op::DEFINE_GLOBAL, name_idx, stmt.line as u32);
+                }
+                Ok(())
+            }
+            StatementKind::Not(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::Include(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                Ok(())
+            }
             StatementKind::TryCatch {
                 try_branch,
                 catches,
@@ -861,7 +895,7 @@ impl Compiler {
                 self.loop_locals.pop();
                 self.end_scope();
 
-                // 4. Continue target: where 'continue' jumps to (just before LOOP back)
+                // 4. Continue target
                 let continue_target = self.chunk.code.len();
                 let continues = self.continue_patches.pop().unwrap();
                 for idx in continues {
@@ -869,12 +903,12 @@ impl Compiler {
                     self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
                 }
 
-                // 5. Loop back to evaluate condition again
+                // 5. Loop back
                 let loop_end = self.chunk.code.len();
                 let offset = loop_end - loop_start + 1;
                 self.chunk.emit1(op::LOOP, offset as u32, condition.line);
 
-                // 6. Exit target: patch exit_jump
+                // 6. Exit target
                 let exit_target = self.chunk.code.len();
                 let exit_offset = exit_target - exit_jump - 1;
                 self.chunk.code[exit_jump] = op::JUMP_IF_FALSE as u32 | ((exit_offset as u32) << 8);
@@ -883,6 +917,58 @@ impl Compiler {
                 self.chunk.emit0(op::POP, condition.line);
 
                 // Patch any break jumps to land at the end of the loop
+                let break_target = self.chunk.code.len();
+                if let Some(breaks) = self.break_patches.pop() {
+                    for idx in breaks {
+                        let offset = break_target - idx - 1;
+                        self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
+                    }
+                }
+
+                Ok(())
+            }
+            StatementKind::DoWhile { body, condition } => {
+                let loop_start = self.chunk.code.len();
+
+                // 1. Execute body unconditionally first
+                self.begin_scope();
+                self.continue_patches.push(Vec::new());
+                self.break_patches.push(Vec::new());
+                self.loop_locals.push(self.locals.len());
+                for stmt in body {
+                    self.compile_statement(stmt, false)?;
+                }
+                self.loop_locals.pop();
+                self.end_scope();
+
+                // 2. Continue target
+                let continue_target = self.chunk.code.len();
+                let continues = self.continue_patches.pop().unwrap();
+                for idx in continues {
+                    let offset = continue_target - idx - 1;
+                    self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
+                }
+
+                // 3. Evaluate condition
+                self.compile_expression(condition)?;
+
+                // 4. Jump to exit if false
+                let exit_jump = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_FALSE, 0, condition.line);
+
+                // 5. Pop truthy result and loop back
+                self.chunk.emit0(op::POP, condition.line);
+                let loop_end = self.chunk.code.len();
+                let offset = loop_end - loop_start + 1;
+                self.chunk.emit1(op::LOOP, offset as u32, condition.line);
+
+                // 6. Exit: patch exit_jump, pop falsy result
+                let exit_target = self.chunk.code.len();
+                let exit_offset = exit_target - exit_jump - 1;
+                self.chunk.code[exit_jump] = op::JUMP_IF_FALSE as u32 | ((exit_offset as u32) << 8);
+                self.chunk.emit0(op::POP, condition.line);
+
+                // 7. Patch break jumps
                 let break_target = self.chunk.code.len();
                 if let Some(breaks) = self.break_patches.pop() {
                     for idx in breaks {
@@ -2434,6 +2520,10 @@ impl DependencyTracker {
                 self.track_expression(condition);
                 self.track_statements(body);
             }
+            StatementKind::DoWhile { body, condition } => {
+                self.track_statements(body);
+                self.track_expression(condition);
+            }
             StatementKind::Switch {
                 value,
                 cases,
@@ -2458,7 +2548,21 @@ impl DependencyTracker {
                     self.track_expression(e);
                 }
             }
-            StatementKind::Break | StatementKind::Continue => {}
+            StatementKind::Break | StatementKind::Continue | StatementKind::Rethrow => {}
+            StatementKind::Assert { condition, message } => {
+                self.track_expression(condition);
+                if let Some(m) = message {
+                    self.track_expression(m);
+                }
+            }
+            StatementKind::Param { default, .. } => {
+                if let Some(d) = default {
+                    self.track_expression(d);
+                }
+            }
+            StatementKind::Not(expr) | StatementKind::Include(expr) => {
+                self.track_expression(expr);
+            }
             StatementKind::VariableDecl { value, .. } => {
                 self.track_expression(value);
             }

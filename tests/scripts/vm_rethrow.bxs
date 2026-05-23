@@ -1,0 +1,11 @@
+// Test rethrow statement
+try {
+    try {
+        throw "inner error";
+    } catch (e) {
+        rethrow;
+    }
+} catch (e) {
+    println("caught rethrown error");  // expect this
+    println(e.message);  // expect "inner error"
+}

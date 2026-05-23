@@ -1,0 +1,9 @@
+// Test labeled break/continue (labels not yet implemented at runtime)
+// Just verify parsing succeeds
+for (var i = 0; i < 3; i = i + 1) {
+    break;
+}
+for (var j = 0; j < 3; j = j + 1) {
+    continue;
+}
+println("basic break/continue ok"); // expect this

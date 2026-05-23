@@ -120,6 +120,13 @@ script_test!(bvm_features, "bvm_features.bxs");
 script_test!(vm_safe_nav_elvis, "vm_safe_nav_elvis.bxs");
 script_test!(vm_switch, "vm_switch.bxs");
 script_test!(vm_while, "vm_while.bxs");
+script_test!(vm_do_while, "vm_do_while.bxs");
+script_test!(vm_assert, "vm_assert.bxs");
+script_test!(vm_param, "vm_param.bxs");
+script_test!(vm_rethrow, "vm_rethrow.bxs");
+script_test!(vm_labeled_break_continue, "vm_labeled_break_continue.bxs");
+script_test!(vm_include, "vm_include.bxs");
+script_test!(vm_not_statement, "vm_not_statement.bxs");
 
 #[test]
 #[cfg(feature = "bif-tui")]

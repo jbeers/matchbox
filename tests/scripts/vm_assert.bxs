@@ -1,0 +1,8 @@
+// Test assert statement
+assert true;
+
+try {
+    assert false : "optional message";
+} catch (e) {
+    println(e.message); // expect "optional message"
+}

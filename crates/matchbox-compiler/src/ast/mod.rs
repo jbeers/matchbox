@@ -65,6 +65,10 @@ pub enum StatementKind {
         condition: Expression,
         body: Vec<Statement>,
     },
+    DoWhile {
+        body: Vec<Statement>,
+        condition: Expression,
+    },
     If {
         condition: Expression,
         then_branch: Vec<Statement>,
@@ -79,6 +83,17 @@ pub enum StatementKind {
     Throw(Option<Expression>),
     Continue,
     Break,
+    Rethrow,
+    Assert {
+        condition: Expression,
+        message: Option<Expression>,
+    },
+    Param {
+        name: String,
+        default: Option<Expression>,
+    },
+    Not(Expression),
+    Include(Expression),
     TryCatch {
         try_branch: Vec<Statement>,
         catches: Vec<CatchBlock>,

@@ -110,10 +110,16 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::For) => self.parse_for(line),
             Some(TokenKind::While) => self.parse_while(line),
+            Some(TokenKind::Do) => self.parse_do_while(line),
             Some(TokenKind::If) => self.parse_if(line),
             Some(TokenKind::Try) => self.parse_try(line),
             Some(TokenKind::Return) => self.parse_return(line),
             Some(TokenKind::Throw) => self.parse_throw(line),
+            Some(TokenKind::Rethrow) => self.parse_rethrow(line),
+            Some(TokenKind::Assert) => self.parse_assert(line),
+            Some(TokenKind::Param) => self.parse_param(line),
+            Some(TokenKind::Include) => self.parse_include(line),
+            Some(TokenKind::Not) => self.parse_not_stmt(line),
             Some(TokenKind::Continue) => self.parse_continue(line),
             Some(TokenKind::Break) => self.parse_break(line),
             Some(TokenKind::Switch) => self.parse_switch(line),
@@ -502,6 +508,22 @@ impl<'a> Parser<'a> {
         Ok(Statement::new(StatementKind::WhileLoop { condition, body }, line))
     }
 
+    fn parse_do_while(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // do
+        let body = if self.peek_is(TokenKind::LeftBrace) {
+            self.pos += 1;
+            self.parse_block()?
+        } else {
+            vec![self.parse_statement()?]
+        };
+        self.expect(TokenKind::While)?;
+        self.expect(TokenKind::LeftParen)?;
+        let condition = self.parse_expression()?;
+        self.expect(TokenKind::RightParen)?;
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::DoWhile { body, condition }, line))
+    }
+
     fn parse_if(&mut self, line: u32) -> Result<Statement> {
         self.pos += 1; // if
         self.expect(TokenKind::LeftParen)?;
@@ -605,14 +627,67 @@ impl<'a> Parser<'a> {
 
     fn parse_continue(&mut self, line: u32) -> Result<Statement> {
         self.pos += 1; // continue
+        // Optional label (Phase 2 feature)
+        if !self.peek_is(TokenKind::Semicolon) && !self.at_statement_boundary() {
+            let _label = self.advance_lexeme();
+        }
         if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
         Ok(Statement::new(StatementKind::Continue, line))
     }
 
     fn parse_break(&mut self, line: u32) -> Result<Statement> {
         self.pos += 1; // break
+        if !self.peek_is(TokenKind::Semicolon) && !self.at_statement_boundary() {
+            let _label = self.advance_lexeme();
+        }
         if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
         Ok(Statement::new(StatementKind::Break, line))
+    }
+
+    fn parse_rethrow(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // rethrow
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Rethrow, line))
+    }
+
+    fn parse_assert(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // assert
+        let condition = self.parse_expression()?;
+        let message = if self.peek_is(TokenKind::Colon) {
+            self.pos += 1;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Assert { condition, message }, line))
+    }
+
+    fn parse_param(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // param
+        let name = self.expect_get(TokenKind::Identifier)?;
+        let default = if self.peek_is(TokenKind::Equal) {
+            self.pos += 1;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Param { name, default }, line))
+    }
+
+    fn parse_include(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // include
+        let expr = self.parse_expression()?;
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Include(expr), line))
+    }
+
+    fn parse_not_stmt(&mut self, line: u32) -> Result<Statement> {
+        self.pos += 1; // not
+        let expr = self.parse_expression()?;
+        if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
+        Ok(Statement::new(StatementKind::Not(expr), line))
     }
 
     fn parse_switch(&mut self, line: u32) -> Result<Statement> {

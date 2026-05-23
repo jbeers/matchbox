@@ -1,0 +1,5 @@
+// Test include statement parsing (runtime include not yet implemented)
+// Just verify parsing succeeds
+var path = "some/file.bxm";
+include path;
+println("include parsed ok"); // expect this

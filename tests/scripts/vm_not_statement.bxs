@@ -1,0 +1,3 @@
+// Test not expression-as-statement
+not false;  // should parse, no-op (negates but doesn't use result)
+println("not parsed ok");  // expect this
