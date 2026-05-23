@@ -194,15 +194,16 @@ impl<'a> Lexer<'a> {
                     // Check which tag
                     let is_script = rest.starts_with("bx:script");
                     if is_script {
-                        // <bx:script ...> — skip past opening > and switch to script mode
+                        // <bx:script ...> — switch to script parsing mode
                         self.push_mode(LexerMode::TemplateScript);
-                        // Skip to > to find end of opening tag
+                        // Skip past opening > to find end of opening tag
                         while self.pos < self.source.len() && self.current_char() != '>' {
                             self.advance();
                         }
                         if self.pos < self.source.len() { self.advance(); } // skip >
-                        // Script content is parsed in DefaultScript mode
-                        return; // Don't tokenize as template — the main loop will switch to script
+                        // Switch to script mode for body content
+                        self.push_mode(LexerMode::DefaultScript);
+                        return; // The main loop will now parse in DefaultScript
                     } else {
                         // <bx:output ...> — parse component normally, push output mode
                         self.push_mode(LexerMode::TemplateOutput);
@@ -262,7 +263,7 @@ impl<'a> Lexer<'a> {
                         } else if c == '"' || c == '\'' {
                             self.tokenize_string(c);
                             continue;
-                        } else if !c.is_whitespace() {
+                        } else if !c.is_ascii_whitespace() {
                             let op_start = self.pos;
                             let op_start_line = self.line;
                             let op_start_col = self.col;
@@ -1234,5 +1235,13 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::ComponentName);
         assert_eq!(tokens[0].lexeme, "if");
         assert_eq!(tokens[1].kind, TokenKind::ComponentClose);
+    }
+
+    #[test]
+    fn template_script_island_tokens() {
+        let tokens = tokenize_template("<bx:script>var x = 1;</bx:script>after");
+        assert!(tokens.iter().any(|t| t.lexeme == "var"));
+        assert!(tokens.iter().any(|t| t.lexeme == "x"));
+        assert!(tokens.iter().any(|t| t.lexeme == "after"));
     }
 }
