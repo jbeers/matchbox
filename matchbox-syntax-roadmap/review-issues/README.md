@@ -39,3 +39,5 @@ R007 has been implemented in code. Destructuring now evaluates its source once, 
 R008 has been implemented in code. `assert` now preserves optional custom messages, evaluates them only on failure, and still falls back to the default message when none is supplied.
 
 R009 has been implemented in code. Class and function modifiers are now preserved in the AST and carried into compiled class/function metadata for future enforcement work.
+
+R010 has been implemented in code. Range creation is now lazy, range iteration is handled without eager array materialization, and `len`/`contains` understand the range type.

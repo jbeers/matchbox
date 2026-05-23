@@ -9,7 +9,7 @@ pub mod jit;
 #[cfg(all(test, target_arch = "wasm32", feature = "js"))]
 mod interop_tests;
 
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
+use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxRange, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
 use self::chunk::{Chunk, IcEntry};
@@ -505,6 +505,7 @@ impl BxVM for VM {
     fn get_len(&self, id: usize) -> usize {
         match self.heap.get(id) {
             GcObject::Array(arr) => arr.len(),
+            GcObject::Range(range) => range.len(),
             GcObject::Struct(s) => s.properties.len(),
             GcObject::String(s) => s.len(),
             GcObject::Bytes(bytes) => bytes.len(),
@@ -545,6 +546,7 @@ impl BxVM for VM {
                 GcObject::Class(class) => Some(class.borrow().name.clone()),
                 GcObject::Interface(interface) => Some(interface.borrow().name.clone()),
                 GcObject::Instance(inst) => Some(inst.class.borrow().name.clone()),
+                GcObject::Range(_) => Some("range".to_string()),
                 _ => None,
             }
         } else {
@@ -639,6 +641,7 @@ impl BxVM for VM {
             "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
             "boolean" | "bool" => val.is_bool(),
             "array" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Array(_))).unwrap_or(false),
+            "range" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Range(_))).unwrap_or(false),
             "struct" | "componentstruct" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Struct(_))).unwrap_or(false),
             "function" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_))).unwrap_or(false),
             "class" | "component" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Class(_) | GcObject::Instance(_))).unwrap_or(false),
@@ -1441,6 +1444,7 @@ impl VM {
                 GcObject::String(s) => s.to_string(),
                 GcObject::Bytes(bytes) => format!("<bytes len:{}>", bytes.len()),
                 GcObject::Array(_) => self.bx_to_json(&val).to_string(),
+                GcObject::Range(range) => format!("{}", range),
                 GcObject::Struct(_) => self.bx_to_json(&val).to_string(),
                 GcObject::Instance(inst) => format!("<instance of {}>", inst.class.borrow().name),
                 GcObject::Future(_) => format!("<future id:{}>", id),
@@ -3174,21 +3178,12 @@ impl VM {
 
                     let start = start_val.as_number() as i64;
                     let end = end_val.as_number() as i64;
-                    let s = if left_excl { start + 1 } else { start };
-                    let e = if right_excl { end - 1 } else { end };
-
-                    // Expand range into array
-                    let mut arr = Vec::new();
-                    if s <= e {
-                        for i in s..=e {
-                            arr.push(BxValue::new_number(i as f64));
-                        }
-                    } else {
-                        for i in (e..=s).rev() {
-                            arr.push(BxValue::new_number(i as f64));
-                        }
-                    }
-                    let id = self.heap.alloc(GcObject::Array(arr));
+                    let id = self.heap.alloc(GcObject::Range(BxRange::from_bounds(
+                        start,
+                        end,
+                        left_excl,
+                        right_excl,
+                    )));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
                 op::POP => {
@@ -4553,30 +4548,56 @@ impl VM {
                     let offset = next_word!();
                     let collection_idx = stack_base + collection_slot as usize;
                     let cursor_idx = stack_base + cursor_slot as usize;
+                    let collection = self.fibers[fiber_idx].stack[collection_idx];
                     
                     let (is_done, next_val, next_idx) = {
                         let cursor_val = if self.fibers[fiber_idx].stack[cursor_idx].is_number() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_number() as usize
                         } else if self.fibers[fiber_idx].stack[cursor_idx].is_int() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_int() as usize
+                        } else if matches!(self.heap.get_opt(collection.as_gc_id().unwrap_or(usize::MAX)), Some(GcObject::Range(_))) {
+                            0
                         } else {
-                            bail!("Internal VM error: iterator cursor is not a number")
+                            bail!(
+                                "Internal VM error: iterator cursor is not a number (slot {}, value {:?}, collection slot {}, collection {:?})",
+                                cursor_idx,
+                                self.fibers[fiber_idx].stack[cursor_idx],
+                                collection_idx,
+                                collection,
+                            )
                         };
-                        
-                        let collection = self.fibers[fiber_idx].stack[collection_idx];
+
                         if let Some(id) = collection.as_gc_id() {
                             match self.heap.get(id) {
-                                GcObject::Array(arr) => {
-                                    if cursor_val < arr.len() {
-                                        (false, Some(arr[cursor_val]), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
-                                    } else {
-                                        (true, None, None)
-                                    }
+                            GcObject::Array(arr) => {
+                                if cursor_val < arr.len() {
+                                    (false, Some(arr[cursor_val]), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
+                                } else {
+                                    (true, None, None)
                                 }
-                                GcObject::Struct(s) => {
-                                    let keys = {
-                                        let mut k = Vec::new();
-                                        let shape = &self.shapes.shapes[s.shape_id as usize];
+                            }
+                            GcObject::Range(range) => {
+                                let (start, end) = range.iter_bounds();
+                                let current = if start <= end {
+                                    start + cursor_val as i64
+                                } else {
+                                    start - cursor_val as i64
+                                };
+                                let done = if start <= end {
+                                    current > end
+                                } else {
+                                    current < end
+                                };
+                                if done {
+                                    (true, None, None)
+                                } else {
+                                    (false, Some(BxValue::new_number(current as f64)), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
+                                }
+                            }
+                            GcObject::Struct(s) => {
+                                let keys = {
+                                    let mut k = Vec::new();
+                                    let shape = &self.shapes.shapes[s.shape_id as usize];
                                         for &intern_id in shape.fields.keys() {
                                             let resolved = self.interner.resolve(intern_id).to_string();
                                             k.push((intern_id, resolved));
@@ -4802,6 +4823,13 @@ impl VM {
                                 s.to_string().contains(&needle_s)
                             }
                             GcObject::Array(arr) => arr.iter().any(|v| *v == needle),
+                            GcObject::Range(range) => {
+                                if needle.is_number() || needle.is_int() {
+                                    range.contains_number(needle.as_number())
+                                } else {
+                                    false
+                                }
+                            }
                             GcObject::Struct(s) => {
                                 let intern_id = self.interner.intern(&needle_s);
                                 self.shapes.get_index(s.shape_id, intern_id).is_some()
@@ -6125,6 +6153,7 @@ impl VM {
                     }
                     js_arr.into()
                 }
+                GcObject::Range(range) => JsValue::from_str(&format!("{}", range)),
                 GcObject::Struct(s) => {
                     let js_obj = js_sys::Object::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];
@@ -6334,6 +6363,7 @@ impl VM {
                     let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| self.bx_to_json(v)).collect();
                     serde_json::Value::Array(json_arr)
                 }
+                GcObject::Range(range) => serde_json::Value::String(format!("{}", range)),
                 GcObject::Struct(s) => {
                     let mut map = serde_json::Map::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];

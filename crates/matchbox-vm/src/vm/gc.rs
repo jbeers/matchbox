@@ -1,4 +1,4 @@
-use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject, box_string::BoxString};
+use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject, BxRange, box_string::BoxString};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -9,6 +9,7 @@ pub enum GcObject {
     String(BoxString),
     Bytes(Vec<u8>),
     Array(Vec<BxValue>),
+    Range(BxRange),
     Struct(BxStruct),
     Instance(BxInstance),
     Future(BxFuture),
@@ -188,7 +189,7 @@ impl Heap {
 
     fn push_children(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) => {}
+            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) => {}
             GcObject::NativeObject(obj) => {
                 let mut tracer = WorklistTracer { worklist, heap: self };
                 // Use unsafe to bypass RefCell borrow check during tracing.
@@ -233,7 +234,7 @@ impl Heap {
 
     fn push_children_young(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) => {}
+            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) => {}
             GcObject::NativeObject(obj) => {
                 let mut tracer = YoungWorklistTracer { worklist, heap: self };
                 unsafe {

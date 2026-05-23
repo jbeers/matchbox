@@ -2,12 +2,13 @@
 
 **Type:** Memory / CPU / Compatibility  
 **Priority:** Medium  
+**Status:** Implemented
 **Related files:** `crates/matchbox-vm/src/vm/mod.rs`, `crates/matchbox-vm/src/vm/opcode.rs`
 **Reference:** `~/dev/ortus-boxlang/BoxLang/src/main/java/ortus/boxlang/runtime/operators/Range.java`, `~/dev/ortus-boxlang/BoxLang/src/main/java/ortus/boxlang/runtime/types/Range.java`
 
 ## Problem
 
-`op::RANGE` eagerly expands numeric ranges into arrays. This has poor memory behavior for large ranges and diverges from BoxLang JVM behavior, which creates a `Range` type.
+`op::RANGE` now lowers to a lazy `Range` GC object instead of eagerly expanding numeric ranges into arrays. This removes the large-array allocation behavior and aligns the VM with BoxLang JVM range semantics for the implemented cases.
 
 Current limitations:
 
@@ -44,11 +45,19 @@ if (count != 3) {
 }
 ```
 
+## Notes
+
+Implemented on this branch:
+
+- `op::RANGE` now allocates a `GcObject::Range` instead of expanding an array.
+- Range iteration is lazy through `ITER_NEXT`.
+- `len` and `contains` understand the range type.
+- Ascending and descending iteration, exclusive bounds, and large-range early exit are covered by `tests/scripts/vm_ranges.bxs`.
+
 ## Acceptance Criteria
 
-- [ ] Range creation does not allocate every element.
-- [ ] Numeric ranges iterate in ascending and descending order.
-- [ ] Exclusive bounds work.
-- [ ] Large ranges can be created without high memory use.
-- [ ] Behavior is aligned with BoxLang JVM range semantics where implemented.
-
+- [x] Range creation does not allocate every element.
+- [x] Numeric ranges iterate in ascending and descending order.
+- [x] Exclusive bounds work.
+- [x] Large ranges can be created without high memory use.
+- [x] Behavior is aligned with BoxLang JVM range semantics where implemented.

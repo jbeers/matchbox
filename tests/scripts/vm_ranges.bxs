@@ -1,10 +1,22 @@
-// Test range operators create arrays
-var r = 1..5;
-var l = len(r);
-if (l != 5) { throw "len wrong"; }
+// Test range operators create lazy ranges with correct iteration semantics
+var r = 1..1000;
+var count = 0;
+for (var n in r) {
+    count++;
+}
+if (count != 1000) { throw "ascending iteration failed"; }
 
-// Right-exclusive
-var r2 = 1..<4;
-if (len(r2) != 3) { throw "r2 len wrong"; }
+var sum = 0;
+for (var n in 5..1) {
+    sum = sum + n;
+}
+if (sum != 15) { throw "descending iteration failed"; }
+
+if (len(1..5) != 5) { throw "len wrong"; }
+if (len(5..1) != 5) { throw "descending len wrong"; }
+if (len(1..<5) != 4) { throw "exclusive len wrong"; }
+
+if (!((1..5) contains 3)) { throw "range contains failed"; }
+if ((1..5) contains 6) { throw "range contains false positive"; }
 
 println("range operators OK");

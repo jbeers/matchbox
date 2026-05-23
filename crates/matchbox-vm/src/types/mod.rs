@@ -403,6 +403,79 @@ pub struct BxInterface {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BxRange {
+    pub start: i64,
+    pub end: i64,
+    pub from_exclusive: bool,
+    pub to_exclusive: bool,
+}
+
+impl BxRange {
+    pub fn from_bounds(start: i64, end: i64, from_exclusive: bool, to_exclusive: bool) -> Self {
+        Self {
+            start,
+            end,
+            from_exclusive,
+            to_exclusive,
+        }
+    }
+
+    pub fn iter_bounds(&self) -> (i64, i64) {
+        if self.start <= self.end {
+            let start = self.start + i64::from(self.from_exclusive);
+            let end = self.end - i64::from(self.to_exclusive);
+            (start, end)
+        } else {
+            let start = self.start - i64::from(self.from_exclusive);
+            let end = self.end + i64::from(self.to_exclusive);
+            (start, end)
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        let (start, end) = self.iter_bounds();
+        if self.start <= self.end {
+            if start > end {
+                0
+            } else {
+                (end - start + 1) as usize
+            }
+        } else if start < end {
+            0
+        } else {
+            (start - end + 1) as usize
+        }
+    }
+
+    pub fn contains_number(&self, value: f64) -> bool {
+        if value.fract() != 0.0 {
+            return false;
+        }
+        let value = value as i64;
+        let (start, end) = self.iter_bounds();
+        if self.start <= self.end {
+            value >= start && value <= end
+        } else {
+            value <= start && value >= end
+        }
+    }
+}
+
+impl std::fmt::Display for BxRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.from_exclusive && self.to_exclusive {
+            write!(f, "{}.<.{}", self.start, self.end)
+        } else if self.from_exclusive {
+            write!(f, "{}.<{}", self.start, self.end)
+        } else if self.to_exclusive {
+            write!(f, "{}..<{}", self.start, self.end)
+        } else {
+            write!(f, "{}..{}", self.start, self.end)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxStruct {
     pub shape_id: u32,
     pub properties: Vec<BxValue>,
