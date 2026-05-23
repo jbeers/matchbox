@@ -1,4 +1,4 @@
-use matchbox_compiler::cst::{SyntaxElement, SyntaxKind, TriviaKind};
+use matchbox_compiler::cst::{SyntaxElement, SyntaxKind, SyntaxNodeId, TriviaKind};
 use matchbox_compiler::parser;
 use matchbox_compiler::tokenizer::TokenKind;
 
@@ -139,6 +139,33 @@ fn script_cst_groups_nested_block_statements() {
         outer_block_statements,
         vec!["\n  var y = 1;\n", "  if (y) { return y; }\n"]
     );
+    assert_eq!(tree.to_source(), source);
+}
+
+#[test]
+fn script_cst_exposes_stable_ids_descendants_and_error_nodes() {
+    let source = "if (x) { return x; }\n}\n";
+
+    let tree = matchbox_compiler::cst::parse_script(source);
+
+    let descendants: Vec<_> = tree.root().descendants().collect();
+    assert_eq!(descendants[0].id, SyntaxNodeId(0));
+    assert!(descendants.windows(2).all(|pair| pair[0].id != pair[1].id));
+
+    let error_nodes: Vec<_> = descendants
+        .iter()
+        .copied()
+        .filter(|node| node.kind == SyntaxKind::Error)
+        .collect();
+    assert_eq!(error_nodes.len(), 1);
+    assert_eq!(tree.text(error_nodes[0].span), "}");
+    assert_eq!(
+        tree.node(error_nodes[0].id).map(|node| node.kind),
+        Some(SyntaxKind::Error)
+    );
+
+    let root_children: Vec<_> = tree.root().children_nodes().collect();
+    assert_eq!(root_children.len(), 2);
     assert_eq!(tree.to_source(), source);
 }
 

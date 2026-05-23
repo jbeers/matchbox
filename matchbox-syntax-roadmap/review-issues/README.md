@@ -41,3 +41,5 @@ R008 has been implemented in code. `assert` now preserves optional custom messag
 R009 has been implemented in code. Class and function modifiers are now preserved in the AST and carried into compiled class/function metadata for future enforcement work.
 
 R010 has been implemented in code. Range creation is now lazy, range iteration is handled without eager array materialization, and `len`/`contains` understand the range type.
+
+R011 is partially implemented. The CST now has stable node ids, descendant traversal helpers, and explicit error nodes for malformed braces, but it still lacks typed expression-level structure and richer statement kinds.

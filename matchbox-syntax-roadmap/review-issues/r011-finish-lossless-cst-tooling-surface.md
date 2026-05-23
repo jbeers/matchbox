@@ -2,6 +2,7 @@
 
 **Type:** Tooling / Parser architecture / Memory performance  
 **Priority:** Medium  
+**Status:** Partially implemented
 **Related files:** `crates/matchbox-compiler/src/cst.rs`, `crates/matchbox-compiler/src/tokenizer.rs`, `crates/matchbox-compiler/tests/cst_tooling.rs`
 
 ## Current Status
@@ -17,6 +18,8 @@ Completed on the current branch:
 - Added `cst::parse_script()` with exact source round-trip.
 - Added script CST nodes for top-level statements and nested braced blocks.
 - Added `cst::parse_template()` with source-gap preservation.
+- Added stable CST node ids and descendant traversal helpers.
+- Added explicit CST error nodes for unmatched braces.
 
 ## Problem
 
@@ -55,9 +58,9 @@ assert_eq!(tree.to_source(), "if (x) { return x; }");
 
 ## Acceptance Criteria
 
-- [ ] CST round-trips exact source for scripts and templates.
+- [x] CST round-trips exact source for scripts and templates.
 - [ ] Common statement nodes have stable, queryable syntax kinds.
 - [ ] Common expression nodes have stable, queryable syntax kinds.
-- [ ] Comments and whitespace remain accessible as trivia.
-- [ ] Error nodes preserve malformed source without panicking.
-- [ ] Formatter/LSP consumers can traverse the tree without parsing token streams manually.
+- [x] Comments and whitespace remain accessible as trivia.
+- [x] Error nodes preserve malformed source without panicking.
+- [x] Formatter/LSP consumers can traverse the tree without parsing token streams manually.

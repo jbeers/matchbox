@@ -5,6 +5,28 @@ pub enum SyntaxKind {
     Root,
     Statement,
     Block,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct SyntaxNodeId(pub usize);
+
+pub struct SyntaxDescendants<'a> {
+    stack: Vec<&'a SyntaxNode>,
+}
+
+impl<'a> Iterator for SyntaxDescendants<'a> {
+    type Item = &'a SyntaxNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.stack.pop()?;
+        for child in node.children.iter().rev() {
+            if let SyntaxElement::Node(child) = child {
+                self.stack.push(child);
+            }
+        }
+        Some(node)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +50,7 @@ impl SyntaxElement {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxNode {
+    pub id: SyntaxNodeId,
     pub kind: SyntaxKind,
     pub span: Span,
     pub children: Vec<SyntaxElement>,
@@ -49,7 +72,8 @@ pub fn parse_script(source: &str) -> SyntaxTree<'_> {
     let (source, tokens, trivia) = lexed.into_parts();
     let elements = merge_elements(&tokens, &trivia);
     let structured_elements = group_blocks(source, &elements);
-    let root = SyntaxNode {
+    let mut root = SyntaxNode {
+        id: SyntaxNodeId::default(),
         kind: SyntaxKind::Root,
         span: Span {
             start: 0,
@@ -59,6 +83,7 @@ pub fn parse_script(source: &str) -> SyntaxTree<'_> {
         },
         children: group_top_level_statements(source, &structured_elements),
     };
+    assign_node_ids(&mut root, 0);
 
     SyntaxTree {
         source,
@@ -73,7 +98,8 @@ pub fn parse_template(source: &str) -> SyntaxTree<'_> {
     let lexed = lex_template(source);
     let (source, tokens, trivia) = lexed.into_parts();
     let elements = merge_elements(&tokens, &trivia);
-    let root = SyntaxNode {
+    let mut root = SyntaxNode {
+        id: SyntaxNodeId::default(),
         kind: SyntaxKind::Root,
         span: Span {
             start: 0,
@@ -83,6 +109,7 @@ pub fn parse_template(source: &str) -> SyntaxTree<'_> {
         },
         children: make_lossless_elements(source, &elements),
     };
+    assign_node_ids(&mut root, 0);
 
     SyntaxTree {
         source,
@@ -110,6 +137,14 @@ impl<'a> SyntaxTree<'a> {
         self.elements.iter()
     }
 
+    pub fn descendants(&self) -> SyntaxDescendants<'_> {
+        self.root.descendants()
+    }
+
+    pub fn node(&self, id: SyntaxNodeId) -> Option<&SyntaxNode> {
+        self.root.find_node(id)
+    }
+
     pub fn text(&self, span: Span) -> &'a str {
         &self.source[span.start..span.end]
     }
@@ -130,6 +165,17 @@ fn append_node_source(output: &mut String, tree: &SyntaxTree<'_>, node: &SyntaxN
             }
         }
     }
+}
+
+fn assign_node_ids(node: &mut SyntaxNode, next_id: usize) -> usize {
+    node.id = SyntaxNodeId(next_id);
+    let mut next = next_id + 1;
+    for child in &mut node.children {
+        if let SyntaxElement::Node(child_node) = child {
+            next = assign_node_ids(child_node, next);
+        }
+    }
+    next
 }
 
 fn make_lossless_elements(source: &str, elements: &[SyntaxElement]) -> Vec<SyntaxElement> {
@@ -211,6 +257,16 @@ fn group_blocks_until(
             {
                 break;
             }
+            SyntaxElement::Token(token) if token.kind == TokenKind::RightBrace => {
+                let span = token.span;
+                children.push(SyntaxElement::Node(Box::new(SyntaxNode {
+                    id: SyntaxNodeId::default(),
+                    kind: SyntaxKind::Error,
+                    span,
+                    children: vec![elements[*index].clone()],
+                })));
+                *index += 1;
+            }
             SyntaxElement::Token(token) if token.kind == TokenKind::LeftBrace => {
                 let left_brace = elements[*index].clone();
                 let start_span = token.span;
@@ -232,6 +288,7 @@ fn group_blocks_until(
                     None
                 };
 
+                let has_right_brace = right_brace.is_some();
                 let mut block_children = Vec::with_capacity(inner_children.len() + 2);
                 block_children.push(left_brace);
                 block_children.extend(inner_children);
@@ -243,8 +300,14 @@ fn group_blocks_until(
                 span.start = start_span.start;
                 span.line = start_span.line;
                 span.col = start_span.col;
+                let kind = if has_right_brace {
+                    SyntaxKind::Block
+                } else {
+                    SyntaxKind::Error
+                };
                 children.push(SyntaxElement::Node(Box::new(SyntaxNode {
-                    kind: SyntaxKind::Block,
+                    id: SyntaxNodeId::default(),
+                    kind,
                     span,
                     children: block_children,
                 })));
@@ -401,6 +464,7 @@ fn push_current_group(
     if has_token {
         let span = span_for_elements(current);
         let node = SyntaxNode {
+            id: SyntaxNodeId::default(),
             kind: SyntaxKind::Statement,
             span,
             children: std::mem::take(current),
@@ -445,5 +509,32 @@ fn span_from_offsets(source: &str, start: usize, end: usize) -> Span {
         end,
         line,
         col,
+    }
+}
+
+impl SyntaxNode {
+    pub fn children_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
+        self.children.iter().filter_map(|child| match child {
+            SyntaxElement::Node(node) => Some(node.as_ref()),
+            _ => None,
+        })
+    }
+
+    pub fn descendants(&self) -> SyntaxDescendants<'_> {
+        SyntaxDescendants { stack: vec![self] }
+    }
+
+    pub fn find_node(&self, id: SyntaxNodeId) -> Option<&SyntaxNode> {
+        if self.id == id {
+            return Some(self);
+        }
+        for child in &self.children {
+            if let SyntaxElement::Node(node) = child {
+                if let Some(found) = node.find_node(id) {
+                    return Some(found);
+                }
+            }
+        }
+        None
     }
 }
