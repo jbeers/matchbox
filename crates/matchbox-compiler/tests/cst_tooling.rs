@@ -203,6 +203,56 @@ fn cst_keeps_comments_while_script_parser_ignores_trivia() {
 }
 
 #[test]
+fn script_cst_exposes_expression_structure_for_common_chains() {
+    let source = "foo((baz + qux));";
+
+    let tree = matchbox_compiler::cst::parse_script(source);
+    assert_eq!(tree.to_source(), source);
+
+    let statement = tree
+        .root()
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Statement)
+        .expect("expression statement");
+    let expression = statement
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Expression)
+        .expect("expression node");
+
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::ParenthesizedExpression));
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::BinaryExpression));
+
+    assert_eq!(tree.text(expression.span), "foo((baz + qux))");
+}
+
+#[test]
+fn script_cst_exposes_member_access_nodes() {
+    let source = "foo.bar;";
+
+    let tree = matchbox_compiler::cst::parse_script(source);
+    assert_eq!(tree.to_source(), source);
+
+    let statement = tree
+        .root()
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Statement)
+        .expect("expression statement");
+    let expression = statement
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Expression)
+        .expect("expression node");
+
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::MemberAccess));
+    assert_eq!(tree.text(expression.span), "foo.bar");
+}
+
+#[test]
 fn template_cst_exposes_interpolation_and_script_island_nodes() {
     let source = "Hello <bx:output>#name#</bx:output>\n<bx:script>\n  var x = 1;\n</bx:script>";
 

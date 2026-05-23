@@ -42,6 +42,6 @@ R009 has been implemented in code. Class and function modifiers are now preserve
 
 R010 has been implemented in code. Range creation is now lazy, range iteration is handled without eager array materialization, and `len`/`contains` understand the range type.
 
-R011 is partially implemented. The CST now has stable node ids, descendant traversal helpers, explicit error nodes for malformed braces, and typed kinds for common statements, but it still lacks expression-level structure and richer formatter-oriented metadata.
+R011 is partially implemented. The CST now has stable node ids, descendant traversal helpers, explicit error nodes for malformed braces, typed kinds for common statements, and shallow expression nodes for common expression statements, but it still lacks full postfix expression coverage and richer formatter-oriented metadata.
 
 R012 has been implemented in code. Template CST now exposes structured interpolation and script-island nodes, preserves escaped hashes distinctly, and still round-trips exact source.
