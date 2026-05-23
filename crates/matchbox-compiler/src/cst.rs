@@ -318,6 +318,50 @@ fn structure_expression_slice(elements: &[SyntaxElement]) -> Vec<SyntaxElement> 
         return elements;
     }
 
+    if let Some(open_idx) = find_postfix_open(&elements, TokenKind::LeftParen, TokenKind::RightParen) {
+        if let Some(close_idx) =
+            find_matching_token(&elements, open_idx, TokenKind::LeftParen, TokenKind::RightParen)
+        {
+            if open_idx > 0 {
+                let base = structure_expression_slice(&elements[..open_idx]);
+                let inner = structure_expression_slice(&elements[open_idx + 1..close_idx]);
+                return vec![SyntaxElement::Node(Box::new(SyntaxNode {
+                    id: SyntaxNodeId::default(),
+                    kind: SyntaxKind::CallExpression,
+                    span: span_for_elements(&elements),
+                    children: base
+                        .into_iter()
+                        .chain(std::iter::once(elements[open_idx].clone()))
+                        .chain(inner)
+                        .chain(std::iter::once(elements[close_idx].clone()))
+                        .collect(),
+                }))];
+            }
+        }
+    }
+
+    if let Some(open_idx) = find_postfix_open(&elements, TokenKind::LeftBracket, TokenKind::RightBracket) {
+        if let Some(close_idx) =
+            find_matching_token(&elements, open_idx, TokenKind::LeftBracket, TokenKind::RightBracket)
+        {
+            if open_idx > 0 {
+                let base = structure_expression_slice(&elements[..open_idx]);
+                let inner = structure_expression_slice(&elements[open_idx + 1..close_idx]);
+                return vec![SyntaxElement::Node(Box::new(SyntaxNode {
+                    id: SyntaxNodeId::default(),
+                    kind: SyntaxKind::ArrayAccess,
+                    span: span_for_elements(&elements),
+                    children: base
+                        .into_iter()
+                        .chain(std::iter::once(elements[open_idx].clone()))
+                        .chain(inner)
+                        .chain(std::iter::once(elements[close_idx].clone()))
+                        .collect(),
+                }))];
+            }
+        }
+    }
+
     if let Some((open_idx, close_idx, kind)) = enclosing_pair(&elements) {
         let inner = structure_expression_slice(&elements[open_idx + 1..close_idx]);
         let wrapped_kind = match kind {
@@ -360,46 +404,6 @@ fn maybe_wrap_binary_or_postfix(elements: Vec<SyntaxElement>) -> Vec<SyntaxEleme
                 .chain(right)
                 .collect(),
         }))];
-    }
-
-    if let Some(open_idx) = find_postfix_open(&elements, TokenKind::LeftParen, TokenKind::RightParen) {
-        if let Some(close_idx) = find_matching_token(&elements, open_idx, TokenKind::LeftParen, TokenKind::RightParen) {
-            if open_idx > 0 {
-                let base = structure_expression_slice(&elements[..open_idx]);
-                let inner = structure_expression_slice(&elements[open_idx + 1..close_idx]);
-                return vec![SyntaxElement::Node(Box::new(SyntaxNode {
-                    id: SyntaxNodeId::default(),
-                    kind: SyntaxKind::CallExpression,
-                    span: span_for_elements(&elements),
-                    children: base
-                        .into_iter()
-                        .chain(std::iter::once(elements[open_idx].clone()))
-                        .chain(inner)
-                        .chain(std::iter::once(elements[close_idx].clone()))
-                        .collect(),
-                }))];
-            }
-        }
-    }
-
-    if let Some(open_idx) = find_postfix_open(&elements, TokenKind::LeftBracket, TokenKind::RightBracket) {
-        if let Some(close_idx) = find_matching_token(&elements, open_idx, TokenKind::LeftBracket, TokenKind::RightBracket) {
-            if open_idx > 0 {
-                let base = structure_expression_slice(&elements[..open_idx]);
-                let inner = structure_expression_slice(&elements[open_idx + 1..close_idx]);
-                return vec![SyntaxElement::Node(Box::new(SyntaxNode {
-                    id: SyntaxNodeId::default(),
-                    kind: SyntaxKind::ArrayAccess,
-                    span: span_for_elements(&elements),
-                    children: base
-                        .into_iter()
-                        .chain(std::iter::once(elements[open_idx].clone()))
-                        .chain(inner)
-                        .chain(std::iter::once(elements[close_idx].clone()))
-                        .collect(),
-                }))];
-            }
-        }
     }
 
     if let Some(dot_idx) = find_top_level_token(&elements, TokenKind::Dot)
@@ -1071,6 +1075,31 @@ impl SyntaxNode {
             SyntaxElement::Node(node) => Some(node.as_ref()),
             _ => None,
         })
+    }
+
+    pub fn leading_trivia(&self) -> impl Iterator<Item = &Trivia> {
+        self.children
+            .iter()
+            .take_while(|child| matches!(child, SyntaxElement::Trivia(_)))
+            .filter_map(|child| match child {
+                SyntaxElement::Trivia(trivia) => Some(trivia),
+                _ => None,
+            })
+    }
+
+    pub fn trailing_trivia(&self) -> impl Iterator<Item = &Trivia> {
+        let mut trivia: Vec<&Trivia> = self
+            .children
+            .iter()
+            .rev()
+            .take_while(|child| matches!(child, SyntaxElement::Trivia(_)))
+            .filter_map(|child| match child {
+                SyntaxElement::Trivia(trivia) => Some(trivia),
+                _ => None,
+            })
+            .collect();
+        trivia.reverse();
+        trivia.into_iter()
     }
 
     pub fn descendants(&self) -> SyntaxDescendants<'_> {

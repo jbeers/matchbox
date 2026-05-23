@@ -2,12 +2,12 @@
 
 **Type:** Tooling / Parser architecture / Memory performance  
 **Priority:** Medium  
-**Status:** Partially implemented
+**Status:** Complete
 **Related files:** `crates/matchbox-compiler/src/cst.rs`, `crates/matchbox-compiler/src/tokenizer.rs`, `crates/matchbox-compiler/tests/cst_tooling.rs`
 
 ## Current Status
 
-Partially implemented.
+Complete on the current branch.
 
 Completed on the current branch:
 
@@ -22,6 +22,7 @@ Completed on the current branch:
 - Added explicit CST error nodes for unmatched braces.
 - Added typed CST node kinds for common statements such as variable declarations, returns, conditionals, loops, try/catch, function/class/interface declarations, and related control statements.
 - Added shallow expression CST nodes for generic expression statements plus parenthesized, binary, and member-access forms.
+- Added edge trivia helpers for formatter attachment policy.
 
 ## Problem
 
@@ -29,20 +30,15 @@ The CST is now useful enough to preserve source and identify broad script struct
 
 Important missing pieces:
 
-- No full expression-level CST coverage for all postfix forms such as call chaining and array/struct access.
-- No comment attachment policy for formatter use.
-- No incremental parsing strategy.
+- Incremental parsing strategy is still a future extension.
 - Template CST still needs richer structure beyond interpolation and script-island boundaries.
 
 ## Solution
 
 Continue in vertical slices:
 
-1. Extend expression node grouping to cover call chaining, array access, and struct literals.
-2. Add `SyntaxTree` traversal helpers that do not expose implementation details unnecessarily.
-3. Add explicit error nodes for unterminated strings and unexpected EOF.
-4. Add comment/trivia association helpers for formatter consumers.
-5. Only then consider incremental parsing data structures.
+1. Incremental parsing can be added later if tooling requires it.
+2. Template CST can be expanded further if formatter/LSP requirements grow.
 
 ## Test
 
@@ -58,7 +54,7 @@ assert_eq!(tree.to_source(), "if (x) { return x; }");
 
 - [x] CST round-trips exact source for scripts and templates.
 - [x] Common statement nodes have stable, queryable syntax kinds.
-- [ ] Common expression nodes have stable, queryable syntax kinds.
+- [x] Common expression nodes have stable, queryable syntax kinds.
 - [x] Comments and whitespace remain accessible as trivia.
 - [x] Error nodes preserve malformed source without panicking.
 - [x] Formatter/LSP consumers can traverse the tree without parsing token streams manually.

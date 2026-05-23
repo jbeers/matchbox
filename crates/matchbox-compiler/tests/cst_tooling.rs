@@ -203,6 +203,30 @@ fn cst_keeps_comments_while_script_parser_ignores_trivia() {
 }
 
 #[test]
+fn script_cst_exposes_edge_trivia_for_attachment() {
+    let source = "// lead\nvar answer = 42; // trail\n";
+
+    let tree = matchbox_compiler::cst::parse_script(source);
+    let statement = tree
+        .root()
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::VariableDecl)
+        .expect("variable declaration");
+
+    let leading: Vec<_> = statement
+        .leading_trivia()
+        .map(|trivia| tree.text(trivia.span))
+        .collect();
+    let trailing: Vec<_> = statement
+        .trailing_trivia()
+        .map(|trivia| tree.text(trivia.span))
+        .collect();
+
+    assert_eq!(leading, vec!["// lead", "\n"]);
+    assert_eq!(trailing, vec![" ", "// trail", "\n"]);
+}
+
+#[test]
 fn script_cst_exposes_expression_structure_for_common_chains() {
     let source = "foo((baz + qux));";
 
@@ -250,6 +274,37 @@ fn script_cst_exposes_member_access_nodes() {
         .descendants()
         .any(|node| node.kind == SyntaxKind::MemberAccess));
     assert_eq!(tree.text(expression.span), "foo.bar");
+}
+
+#[test]
+fn script_cst_exposes_call_and_array_access_nodes() {
+    let source = "foo.bar(baz)[qux + 1];";
+
+    let tree = matchbox_compiler::cst::parse_script(source);
+    assert_eq!(tree.to_source(), source);
+
+    let statement = tree
+        .root()
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Statement)
+        .expect("expression statement");
+    let expression = statement
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Expression)
+        .expect("expression node");
+
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::MemberAccess));
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::CallExpression));
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::ArrayAccess));
+    assert!(expression
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::BinaryExpression));
 }
 
 #[test]
