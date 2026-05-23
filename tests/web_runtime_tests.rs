@@ -35,6 +35,153 @@ fn test_vm_output_buffering() {
 }
 
 #[test]
+fn test_rethrow_preserves_active_exception() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        try {
+            try {
+                throw "inner error";
+            } catch (e) {
+                rethrow;
+            }
+        } catch (e) {
+            println(e.message);
+        }
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "inner error\n");
+}
+
+#[test]
+fn test_rethrow_outside_catch_is_rejected() {
+    let source = "rethrow;";
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let err = compiler.compile(&ast, source).unwrap_err();
+
+    assert!(
+        err.to_string().contains("inside a catch block"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_special_operators_evaluate_each_operand_once() {
+    let mut vm = VM::new();
+
+    let source = r#"
+        var c = 0;
+
+        function bump() {
+            c = c + 1;
+            return c;
+        }
+
+        function typeName() {
+            c = c + 1;
+            return "numeric";
+        }
+
+        var rangeVal = bump()..bump();
+        var containsVal = bump() contains bump();
+        var instanceofVal = bump() instanceof typeName();
+        var castasVal = bump() castas typeName();
+
+        if (len(rangeVal) != 2) { throw "range result wrong"; }
+        if (containsVal != false) { throw "contains result wrong"; }
+        if (instanceofVal != true) { throw "instanceof result wrong"; }
+        if (castasVal != 7) { throw "castas result wrong"; }
+        if (c != 8) { throw "special operator operands evaluated wrong number of times: " & c; }
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+}
+
+#[test]
+fn test_case_insensitive_keywords_and_word_operators() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        var out = "";
+
+        IF (TRUE AND 3 GT 2) {
+            out = out & "A";
+        }
+
+        if (1 LTE 1 or 5 NEQ 5) {
+            out = out & "B";
+        }
+
+        if (false OR 2 lt 3) {
+            out = out & "C";
+        }
+
+        writeOutput(out);
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ABC");
+}
+
+#[test]
+fn test_phrase_word_operators() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        var out = "";
+
+        if ("hello" not contains "z") {
+            out = out & "A";
+        }
+
+        if ("hello" does not contain "z") {
+            out = out & "B";
+        }
+
+        if (1 less than 2) {
+            out = out & "C";
+        }
+
+        if (2 greater than or equal to 2) {
+            out = out & "D";
+        }
+
+        if (1 is not 2) {
+            out = out & "E";
+        }
+
+        writeOutput(out);
+    "#;
+
+    let ast = parser::parse(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ABCDE");
+}
+
+#[test]
 fn test_weak_typing_addition() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());
@@ -154,6 +301,27 @@ fn test_nested_bxm_interpolation() {
     let bxm_source = r#"<bx:output>#1 + 1# is #2# and ## is literal</bx:output>"#;
     let result = parser::parse_bxm(bxm_source, Some("test"));
     assert!(result.is_ok(), "Template parser should handle interpolation BXM: {:?}", result.err());
+}
+
+#[test]
+fn test_bxm_script_island_and_output_semantics() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        <bx:script>
+            var name = "World";
+        </bx:script>
+        <bx:output>Hello #name#! ## #name#</bx:output>
+    "#;
+
+    let ast = parser::parse_bxm(source, Some("test")).unwrap();
+    let mut compiler = Compiler::new("test");
+    let chunk = compiler.compile(&ast, source).unwrap();
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "\n        \n        Hello World! # World\n    ");
 }
 
 #[test]

@@ -9,7 +9,7 @@ pub mod jit;
 #[cfg(all(test, target_arch = "wasm32", feature = "js"))]
 mod interop_tests;
 
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
+use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
 use self::chunk::{Chunk, IcEntry};
@@ -535,6 +535,249 @@ impl BxVM for VM {
             matches!(self.heap.get(id), GcObject::Bytes(_))
         } else {
             false
+        }
+    }
+
+    fn type_name_from_value(&self, val: BxValue) -> Option<String> {
+        if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::String(s) => Some(s.to_string()),
+                GcObject::Class(class) => Some(class.borrow().name.clone()),
+                GcObject::Interface(interface) => Some(interface.borrow().name.clone()),
+                GcObject::Instance(inst) => Some(inst.class.borrow().name.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn find_global_class_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxClass>>> {
+        if let Some(val) = self.get_global(type_name) {
+            if let Some(id) = val.as_gc_id() {
+                if let GcObject::Class(class) = self.heap.get(id) {
+                    return Some(Rc::clone(class));
+                }
+            }
+        }
+
+        for (&name_id, _) in &self.global_names {
+            let name = self.interner.resolve(name_id);
+            if name.eq_ignore_ascii_case(type_name) {
+                if let Some(val) = self.get_global(name) {
+                    if let Some(id) = val.as_gc_id() {
+                        if let GcObject::Class(class) = self.heap.get(id) {
+                            return Some(Rc::clone(class));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_global_interface_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxInterface>>> {
+        if let Some(val) = self.get_global(type_name) {
+            if let Some(id) = val.as_gc_id() {
+                if let GcObject::Interface(interface) = self.heap.get(id) {
+                    return Some(Rc::clone(interface));
+                }
+            }
+        }
+
+        for (&name_id, _) in &self.global_names {
+            let name = self.interner.resolve(name_id);
+            if name.eq_ignore_ascii_case(type_name) {
+                if let Some(val) = self.get_global(name) {
+                    if let Some(id) = val.as_gc_id() {
+                        if let GcObject::Interface(interface) = self.heap.get(id) {
+                            return Some(Rc::clone(interface));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool {
+        let (class_name, extends, implements) = {
+            let class_ref = class.borrow();
+            (
+                class_ref.name.clone(),
+                class_ref.extends.clone(),
+                class_ref.implements.clone(),
+            )
+        };
+
+        if class_name.eq_ignore_ascii_case(type_name) {
+            return true;
+        }
+        if implements.iter().any(|iface| iface.eq_ignore_ascii_case(type_name)) {
+            return true;
+        }
+        if let Some(parent_name) = extends {
+            if parent_name.eq_ignore_ascii_case(type_name) {
+                return true;
+            }
+            if let Some(parent_class) = self.find_global_class_by_name(&parent_name) {
+                return self.class_matches_type_name(&parent_class, type_name);
+            }
+        }
+        false
+    }
+
+    fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool {
+        let lower = type_name.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "any" | "object" => !val.is_null(),
+            "null" | "void" => val.is_null(),
+            "string" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::String(_))).unwrap_or(false),
+            "numeric" | "number" | "double" | "float" | "bigdecimal" => val.is_number(),
+            "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
+            "boolean" | "bool" => val.is_bool(),
+            "array" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Array(_))).unwrap_or(false),
+            "struct" | "componentstruct" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Struct(_))).unwrap_or(false),
+            "function" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_))).unwrap_or(false),
+            "class" | "component" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Class(_) | GcObject::Instance(_))).unwrap_or(false),
+            "interface" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Interface(_))).unwrap_or(false),
+            _ => {
+                if let Some(class) = self.find_global_class_by_name(type_name) {
+                    match val.as_gc_id() {
+                        Some(id) => match self.heap.get(id) {
+                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &class.borrow().name),
+                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &class.borrow().name),
+                            _ => false,
+                        },
+                        None => false,
+                    }
+                } else if let Some(interface) = self.find_global_interface_by_name(type_name) {
+                    let interface_name = interface.borrow().name.clone();
+                    match val.as_gc_id() {
+                        Some(id) => match self.heap.get(id) {
+                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &interface_name),
+                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &interface_name),
+                            GcObject::Interface(existing) => existing.borrow().name.eq_ignore_ascii_case(&interface_name),
+                            _ => false,
+                        },
+                        None => false,
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String> {
+        let lower = type_name.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "any" | "object" => Ok(val),
+            "null" | "void" => {
+                if val.is_null() {
+                    Ok(BxValue::new_null())
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "string" => {
+                if let Some(id) = val.as_gc_id() {
+                    if matches!(self.heap.get(id), GcObject::String(_)) {
+                        return Ok(val);
+                    }
+                }
+                let id = self.string_new(self.to_string(val));
+                Ok(BxValue::new_ptr(id))
+            }
+            "numeric" | "number" | "double" | "float" | "bigdecimal" => {
+                if val.is_number() {
+                    return Ok(val);
+                }
+                let parsed = if val.is_bool() {
+                    Some(if val.as_bool() { 1.0 } else { 0.0 })
+                } else {
+                    self.to_string(val).trim().parse::<f64>().ok()
+                };
+                if let Some(num) = parsed {
+                    if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
+                        Ok(BxValue::new_int(num as i32))
+                    } else {
+                        Ok(BxValue::new_number(num))
+                    }
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "integer" | "int" | "long" | "short" | "byte" => {
+                if val.is_int() {
+                    return Ok(val);
+                }
+                let parsed = if val.is_number() {
+                    let num = val.as_number();
+                    if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
+                        Some(num as i32)
+                    } else {
+                        None
+                    }
+                } else if val.is_bool() {
+                    Some(if val.as_bool() { 1 } else { 0 })
+                } else {
+                    self.to_string(val).trim().parse::<i32>().ok()
+                };
+                if let Some(num) = parsed {
+                    Ok(BxValue::new_int(num))
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "boolean" | "bool" => {
+                if val.is_bool() {
+                    Ok(val)
+                } else {
+                    Ok(BxValue::new_bool(self.is_truthy(val)))
+                }
+            }
+            "array" => {
+                if self.is_array_value(val) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "struct" | "componentstruct" => {
+                if self.is_struct_value(val) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "function" => {
+                if let Some(id) = val.as_gc_id() {
+                    if matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_)) {
+                        Ok(val)
+                    } else {
+                        Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    }
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "class" | "component" | "interface" => {
+                if self.value_matches_type_name(val, type_name) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            _ => {
+                if self.value_matches_type_name(val, type_name) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
         }
     }
 
@@ -4406,6 +4649,32 @@ impl VM {
                         hs.contains(&needle_s)
                     };
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
+                }
+                op::INSTANCEOF => {
+                    let right = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let type_name = self
+                        .type_name_from_value(right)
+                        .unwrap_or_else(|| self.to_string(right));
+                    let result = self.value_matches_type_name(left, &type_name);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
+                }
+                op::CASTAS => {
+                    let right = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let type_name = self
+                        .type_name_from_value(right)
+                        .unwrap_or_else(|| self.to_string(right));
+                    match self.cast_value_to_type(left, &type_name) {
+                        Ok(val) => self.fibers[fiber_idx].stack.push(val),
+                        Err(msg) => {
+                            flush_ip!();
+                            let err = self.exception_from_message("BoxCastException", msg, None);
+                            self.throw_value(fiber_idx, err)?;
+                            frame_changed = true;
+                            continue 'quantum;
+                        }
+                    }
                 }
                 _ => {
                     bail!("Unknown opcode: {}", opcode);

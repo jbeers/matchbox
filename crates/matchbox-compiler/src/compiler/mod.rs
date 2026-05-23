@@ -30,6 +30,7 @@ pub struct Compiler {
     continue_patches: Vec<Vec<usize>>,
     break_patches: Vec<Vec<usize>>,
     loop_locals: Vec<usize>,
+    catch_exception_slots: Vec<usize>,
     class_methods: HashSet<String>, // Method names of the current class being compiled
     /// Directory to resolve unqualified source paths against (e.g. sibling interfaces).
     source_dir: Option<PathBuf>,
@@ -53,6 +54,7 @@ impl Compiler {
             continue_patches: Vec::new(),
             break_patches: Vec::new(),
             loop_locals: Vec::new(),
+            catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
             source_dir: None,
             class_has_init_map: HashMap::new(),
@@ -72,6 +74,7 @@ impl Compiler {
             continue_patches: Vec::new(),
             break_patches: Vec::new(),
             loop_locals: Vec::new(),
+            catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
             source_dir: None,
             class_has_init_map: HashMap::new(),
@@ -449,8 +452,12 @@ impl Compiler {
                 Ok(())
             }
             StatementKind::Rethrow => {
-                let msg_idx = self.chunk.add_constant(Constant::String(BoxString::new("Rethrown exception")));
-                self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
+                let slot = self
+                    .catch_exception_slots
+                    .last()
+                    .copied()
+                    .ok_or_else(|| anyhow::anyhow!("rethrow can only be used inside a catch block"))?;
+                self.chunk.emit1(op::GET_LOCAL, slot as u32, stmt.line as u32);
                 self.chunk.emit0(op::THROW, stmt.line as u32);
                 Ok(())
             }
@@ -573,10 +580,17 @@ impl Compiler {
                     let first_catch = &catches[0];
                     self.begin_scope();
                     self.add_local(first_catch.exception_var.clone());
-                    for s in &first_catch.body {
-                        self.compile_statement(s, false)?;
-                    }
+                    let catch_slot = self.locals.len() - 1;
+                    self.catch_exception_slots.push(catch_slot);
+                    let catch_result = (|| -> Result<()> {
+                        for s in &first_catch.body {
+                            self.compile_statement(s, false)?;
+                        }
+                        Ok(())
+                    })();
+                    self.catch_exception_slots.pop();
                     self.end_scope();
+                    catch_result?;
                 } else {
                     self.chunk.emit0(op::THROW, stmt.line as u32);
                 }
@@ -1519,6 +1533,47 @@ impl Compiler {
                             op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
                         return Ok(());
                     }
+                    ".." => {
+                        self.compile_range(expr, left, right, false, false);
+                        return Ok(());
+                    }
+                    "..<" => {
+                        self.compile_range(expr, left, right, false, true);
+                        return Ok(());
+                    }
+                    ">.." => {
+                        self.compile_range(expr, left, right, true, false);
+                        return Ok(());
+                    }
+                    ">..<" => {
+                        self.compile_range(expr, left, right, true, true);
+                        return Ok(());
+                    }
+                    "contains" | "ct" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CONTAINS, expr.line);
+                        return Ok(());
+                    }
+                    "not contains" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CONTAINS, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
+                        return Ok(());
+                    }
+                    "instanceof" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::INSTANCEOF, expr.line);
+                        return Ok(());
+                    }
+                    "castas" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CASTAS, expr.line);
+                        return Ok(());
+                    }
                     "&&" => {
                         self.compile_expression(left)?;
                         // If left is falsy, jump to end (left stays on stack as result)
@@ -1625,55 +1680,6 @@ impl Compiler {
                     "xor" => self.chunk.emit0(op::XOR_OP, expr.line),
                     "eqv" => self.chunk.emit0(op::EQV_OP, expr.line),
                     "^" => self.chunk.emit0(op::POW, expr.line),
-                    ".." => {
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        let idx = self.chunk.add_constant(Constant::Boolean(false));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        let idx = self.chunk.add_constant(Constant::Boolean(false));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        self.chunk.emit0(op::RANGE, expr.line);
-                    }
-                    "..<" => {
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        let idx = self.chunk.add_constant(Constant::Boolean(false));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        let idx = self.chunk.add_constant(Constant::Boolean(true));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        self.chunk.emit0(op::RANGE, expr.line);
-                    }
-                    ">.." => {
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        let idx = self.chunk.add_constant(Constant::Boolean(true));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        let idx = self.chunk.add_constant(Constant::Boolean(false));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        self.chunk.emit0(op::RANGE, expr.line);
-                    }
-                    ">..<" => {
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        let idx = self.chunk.add_constant(Constant::Boolean(true));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        let idx = self.chunk.add_constant(Constant::Boolean(true));
-                        self.chunk.emit1(op::CONSTANT, idx, expr.line);
-                        self.chunk.emit0(op::RANGE, expr.line);
-                    }
-                    "contains" | "ct" => {
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        self.chunk.emit0(op::CONTAINS, expr.line);
-                    }
-                    "instanceof" | "castas" => {
-                        // Type-check/cast operators — evaluate both, push true for now
-                        self.compile_expression(left)?;
-                        self.compile_expression(right)?;
-                        self.chunk.emit0(op::POP, expr.line);
-                        let t_idx = self.chunk.add_constant(Constant::Boolean(true));
-                        self.chunk.emit1(op::CONSTANT, t_idx, expr.line);
-                    }
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())

@@ -127,6 +127,12 @@ pub trait BxVM {
     fn is_struct_value(&self, val: BxValue) -> bool;
     fn is_string_value(&self, val: BxValue) -> bool;
     fn is_bytes(&self, val: BxValue) -> bool;
+    fn type_name_from_value(&self, val: BxValue) -> Option<String>;
+    fn find_global_class_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxClass>>>;
+    fn find_global_interface_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxInterface>>>;
+    fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool;
+    fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool;
+    fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String>;
     fn bytes_new(&mut self, data: Vec<u8>) -> usize;
     fn bytes_len(&self, id: usize) -> usize;
     fn bytes_get(&self, id: usize, idx: usize) -> Result<u8, String>;

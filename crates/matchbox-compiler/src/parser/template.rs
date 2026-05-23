@@ -1,21 +1,28 @@
 use crate::ast::*;
 use crate::tokenizer::*;
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 pub fn parse_template(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
-    let tokens = tokenize_template(source);
+    let lexed = lex_template(source);
     let _ = filename;
-    TemplateParser::new(&tokens).parse()
+    TemplateParser::new(source, lexed.tokens()).parse()
 }
 
 struct TemplateParser<'a> {
-    tokens: &'a [Token],
+    source: &'a str,
+    tokens: &'a [SyntaxToken],
     pos: usize,
+    pending: Vec<Statement>,
 }
 
 impl<'a> TemplateParser<'a> {
-    fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+    fn new(source: &'a str, tokens: &'a [SyntaxToken]) -> Self {
+        Self {
+            source,
+            tokens,
+            pos: 0,
+            pending: Vec::new(),
+        }
     }
 
     fn peek_kind(&self) -> Option<TokenKind> {
@@ -23,18 +30,25 @@ impl<'a> TemplateParser<'a> {
     }
 
     fn peek_lexeme(&self) -> Option<&str> {
-        self.tokens.get(self.pos).map(|t| t.lexeme.as_str())
+        self.tokens.get(self.pos).map(|t| &self.source[t.span.start..t.span.end])
     }
 
     fn advance_lexeme(&mut self) -> Option<String> {
-        let lexeme = self.tokens.get(self.pos).map(|t| t.lexeme.clone());
+        let lexeme = self
+            .tokens
+            .get(self.pos)
+            .map(|t| self.source[t.span.start..t.span.end].to_string());
         self.pos += 1;
         lexeme
     }
 
     fn parse(&mut self) -> Result<Vec<Statement>> {
         let mut stmts = Vec::new();
-        while self.pos < self.tokens.len() {
+        while self.pos < self.tokens.len() || !self.pending.is_empty() {
+            if let Some(stmt) = self.pending.pop() {
+                stmts.push(stmt);
+                continue;
+            }
             if let Some(stmt) = self.parse_template_statement()? {
                 stmts.push(stmt);
             }
@@ -45,29 +59,40 @@ impl<'a> TemplateParser<'a> {
     fn parse_template_statement(&mut self) -> Result<Option<Statement>> {
         match self.peek_kind() {
             Some(TokenKind::ContentText) => {
-                let lexeme = self.advance_lexeme().unwrap_or_default();
-                let mut text = lexeme;
+                let mut parts = Vec::new();
                 while self.peek_kind() == Some(TokenKind::ContentText) {
-                    text.push_str(&self.advance_lexeme().unwrap_or_default());
+                    if let Some(lexeme) = self.advance_lexeme() {
+                        let text = decode_template_text(&lexeme);
+                        if !text.is_empty() {
+                            parts.push(StringPart::Text(text));
+                        }
+                    }
                 }
-                let trimmed = text.trim().to_string();
-                if trimmed.is_empty() {
+                if parts.is_empty() {
                     return Ok(None);
                 }
+                let expr = Expression::new(ExpressionKind::Literal(Literal::String(parts)), 0);
                 Ok(Some(Statement::new(
-                    StatementKind::BufferOutput(Expression::new(
-                        ExpressionKind::Literal(Literal::String(vec![StringPart::Text(trimmed)])),
-                        0,
-                    )),
+                    StatementKind::BufferOutput(expr),
                     0,
                 )))
+            }
+            Some(TokenKind::ScriptStart) => {
+                self.parse_script_island()?;
+                Ok(None)
             }
             Some(TokenKind::ComponentName) => {
                 let name = self.advance_lexeme().unwrap_or_default();
                 self.parse_component(&name)
             }
+            Some(TokenKind::InterpStart) => {
+                self.pos += 1;
+                Ok(None)
+            }
             Some(TokenKind::Less) | Some(TokenKind::ComponentClose)
-            | Some(TokenKind::ComponentSelfClose) => {
+            | Some(TokenKind::ComponentSelfClose)
+            | Some(TokenKind::InterpEnd)
+            | Some(TokenKind::ScriptEnd) => {
                 self.pos += 1;
                 Ok(None)
             }
@@ -96,12 +121,9 @@ impl<'a> TemplateParser<'a> {
             "throw" => self.parse_throw_tag(),
             "rethrow" => self.parse_simple_tag(StatementKind::Rethrow),
             "function" => self.parse_function_tag(),
-            "output" => {
-                self.skip_to_close();
-                Ok(None)
-            }
+            "output" => self.parse_output_tag(),
             "script" => {
-                self.skip_body("script");
+                self.skip_to_close();
                 Ok(None)
             }
             _ => {
@@ -110,6 +132,103 @@ impl<'a> TemplateParser<'a> {
                 Ok(None)
             }
         }
+    }
+
+    fn parse_output_tag(&mut self) -> Result<Option<Statement>> {
+        self.skip_to_close();
+        let expr = self.parse_output_expression()?;
+        self.skip_closing("output");
+        Ok(Some(Statement::new(StatementKind::BufferOutput(expr), 0)))
+    }
+
+    fn parse_output_expression(&mut self) -> Result<Expression> {
+        let mut parts = Vec::new();
+        let mut text = String::new();
+
+        while self.pos < self.tokens.len() {
+            match self.peek_kind() {
+                Some(TokenKind::ComponentName) if self.peek_lexeme() == Some("output") => {
+                    break;
+                }
+                Some(TokenKind::ContentText) => {
+                    text.push_str(&decode_template_text(&self.advance_lexeme().unwrap_or_default()));
+                }
+                Some(TokenKind::InterpStart) => {
+                    self.pos += 1;
+                    if !text.is_empty() {
+                        parts.push(StringPart::Text(std::mem::take(&mut text)));
+                    }
+                    let expr = self.parse_interpolation_expression()?;
+                    parts.push(StringPart::Expression(expr));
+                }
+                Some(TokenKind::InterpEnd) => {
+                    self.pos += 1;
+                }
+                Some(TokenKind::Less) | Some(TokenKind::ComponentClose)
+                | Some(TokenKind::ComponentSelfClose) => {
+                    self.pos += 1;
+                }
+                _ => {
+                    self.pos += 1;
+                }
+            }
+        }
+
+        if !text.is_empty() {
+            parts.push(StringPart::Text(text));
+        }
+        if parts.is_empty() {
+            parts.push(StringPart::Text(String::new()));
+        }
+
+        Ok(Expression::new(
+            ExpressionKind::Literal(Literal::String(parts)),
+            0,
+        ))
+    }
+
+    fn parse_interpolation_expression(&mut self) -> Result<Expression> {
+        let expr_text = self.collect_text_until(TokenKind::InterpEnd);
+        self.skip_expected(TokenKind::InterpEnd);
+
+        if expr_text.trim().is_empty() {
+            return Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Null),
+                0,
+            ));
+        }
+
+        let stmts = crate::parser::parse(&expr_text, None)?;
+        let expr = stmts
+            .into_iter()
+            .next()
+            .and_then(|stmt| {
+                if let StatementKind::Expression(expr) = stmt.kind {
+                    Some(expr)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                Expression::new(ExpressionKind::Literal(Literal::Null), 0)
+            });
+
+        Ok(expr)
+    }
+
+    fn parse_script_island(&mut self) -> Result<()> {
+        self.skip_expected(TokenKind::ScriptStart);
+        let script_text = self.collect_text_until(TokenKind::ScriptEnd);
+        self.skip_expected(TokenKind::ScriptEnd);
+
+        if script_text.trim().is_empty() {
+            return Ok(());
+        }
+
+        let mut stmts = crate::parser::parse(&script_text, None)?;
+        stmts.reverse();
+        self.pending.extend(stmts);
+        Ok(())
     }
 
     fn parse_set_tag(&mut self) -> Result<Option<Statement>> {
@@ -392,6 +511,27 @@ impl<'a> TemplateParser<'a> {
         }, 0)))
     }
 
+    fn collect_text_until(&mut self, end_kind: TokenKind) -> String {
+        let mut text = String::new();
+        while self.pos < self.tokens.len() && self.peek_kind() != Some(end_kind) {
+            if let Some(lexeme) = self.advance_lexeme() {
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(&lexeme);
+            } else {
+                break;
+            }
+        }
+        text
+    }
+
+    fn skip_expected(&mut self, kind: TokenKind) {
+        if self.peek_kind() == Some(kind) {
+            self.pos += 1;
+        }
+    }
+
     fn skip_closing(&mut self, name: &str) {
         if self.peek_kind() == Some(TokenKind::ComponentName)
             && self.peek_lexeme() == Some(name)
@@ -422,6 +562,10 @@ impl<'a> TemplateParser<'a> {
             self.pos += 1;
         }
     }
+}
+
+fn decode_template_text(text: &str) -> String {
+    text.replace("##", "#")
 }
 
 #[cfg(test)]

@@ -1,0 +1,42 @@
+// Test instanceof and castas semantics
+
+if (!("x" instanceof "string")) {
+    throw "string instanceof failed";
+}
+
+if (123 instanceof "string") {
+    throw "numeric should not be a string";
+}
+
+var typed = "123" castas "numeric";
+if (typed + 1 != 124) {
+    throw "castas numeric failed";
+}
+
+var label = 42 castas "string";
+if (label != "42") {
+    throw "castas string failed";
+}
+
+class Boxed {
+    function init() {
+        return this;
+    }
+}
+
+var obj = new Boxed();
+if (!(obj instanceof "Boxed")) {
+    throw "class instanceof failed";
+}
+
+if (!(obj instanceof "component")) {
+    throw "component instanceof failed";
+}
+
+try {
+    1 castas "nope";
+    throw "invalid cast should have failed";
+} catch (e) {
+}
+
+println("instanceof/castas OK");

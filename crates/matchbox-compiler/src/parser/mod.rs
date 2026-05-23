@@ -9,18 +9,19 @@ pub fn parse_bxm(source: &str, filename: Option<&str>) -> Result<Vec<Statement>>
 }
 
 pub fn parse(source: &str, _filename: Option<&str>) -> Result<Vec<Statement>> {
-    let tokens = tokenize(source);
-    Parser::new(&tokens).parse_program()
+    let lexed = lex(source);
+    Parser::new(source, lexed.tokens()).parse_program()
 }
 
 struct Parser<'a> {
-    tokens: &'a [Token],
+    source: &'a str,
+    tokens: &'a [SyntaxToken],
     pos: usize,
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+    fn new(source: &'a str, tokens: &'a [SyntaxToken]) -> Self {
+        Self { source, tokens, pos: 0 }
     }
 
     fn kind(&self, offset: usize) -> Option<TokenKind> {
@@ -32,7 +33,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek_lexeme(&self) -> Option<&str> {
-        self.tokens.get(self.pos).map(|t| t.lexeme.as_str())
+        self.tokens.get(self.pos).map(|t| &self.source[t.span.start..t.span.end])
     }
 
     fn peek_line(&self) -> u32 {
@@ -50,9 +51,84 @@ impl<'a> Parser<'a> {
     }
 
     fn advance_lexeme(&mut self) -> Option<String> {
-        let lexeme = self.tokens.get(self.pos).map(|t| t.lexeme.clone());
+        let lexeme = self
+            .tokens
+            .get(self.pos)
+            .map(|t| self.source[t.span.start..t.span.end].to_string());
         self.pos += 1;
         lexeme
+    }
+
+    fn binary_operator_lexeme(&self, kind: TokenKind, raw: &str) -> String {
+        match kind {
+            TokenKind::PipePipe => "||".to_string(),
+            TokenKind::AmpAmp => "&&".to_string(),
+            TokenKind::EqualEqual => "==".to_string(),
+            TokenKind::BangEqual => "!=".to_string(),
+            TokenKind::Less => "<".to_string(),
+            TokenKind::Greater => ">".to_string(),
+            TokenKind::LessEqual => "<=".to_string(),
+            TokenKind::GreaterEqual => ">=".to_string(),
+            TokenKind::Contains => "contains".to_string(),
+            TokenKind::InstanceOf => "instanceof".to_string(),
+            TokenKind::CastAs => "castas".to_string(),
+            TokenKind::Xor => "xor".to_string(),
+            TokenKind::Eqv => "eqv".to_string(),
+            _ => raw.to_string(),
+        }
+    }
+
+    fn token_text_lower(&self, offset: usize) -> Option<String> {
+        self.tokens
+            .get(self.pos + offset)
+            .map(|t| self.source[t.span.start..t.span.end].to_ascii_lowercase())
+    }
+
+    fn phrase_operator(&self) -> Option<(u8, String, usize)> {
+        let current = self.peek_kind()?;
+        let current_text = self.token_text_lower(0)?;
+        match current {
+            TokenKind::Not => {
+                if matches!(self.kind(1), Some(TokenKind::Contains)) {
+                    Some((3, "not contains".to_string(), 2))
+                } else {
+                    None
+                }
+            }
+            TokenKind::Identifier if current_text == "does" => {
+                if matches!(self.kind(1), Some(TokenKind::Not))
+                    && matches!(self.kind(2), Some(TokenKind::Contains) | Some(TokenKind::Identifier))
+                    && self.token_text_lower(2).as_deref().is_some_and(|t| t == "contain" || t == "contains")
+                {
+                    Some((3, "not contains".to_string(), 3))
+                } else {
+                    None
+                }
+            }
+            TokenKind::Identifier if current_text == "less" || current_text == "greater" => {
+                if self.token_text_lower(1).as_deref() != Some("than") {
+                    return None;
+                }
+                let base_op = if current_text == "less" { "<" } else { ">" };
+                if self.token_text_lower(2).as_deref() == Some("or")
+                    && matches!(self.kind(3), Some(TokenKind::EqualEqual))
+                    && self.token_text_lower(3).as_deref().is_some_and(|t| t == "eq" || t == "equal" || t == "is")
+                    && self.token_text_lower(4).as_deref() == Some("to")
+                {
+                    Some((3, format!("{base_op}="), 5))
+                } else {
+                    Some((3, base_op.to_string(), 2))
+                }
+            }
+            TokenKind::EqualEqual if current_text == "is" => {
+                if matches!(self.kind(1), Some(TokenKind::Not)) {
+                    Some((3, "!=".to_string(), 2))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     fn advance_line(&mut self) -> u32 {
@@ -924,6 +1000,45 @@ impl<'a> Parser<'a> {
 
     fn parse_binary_tail(&mut self, mut left: Expression, min_prec: u8, line: u32) -> Result<Expression> {
         loop {
+            if let Some((op_prec, op, consume)) = self.phrase_operator() {
+                if op_prec < min_prec {
+                    break;
+                }
+                self.pos += consume;
+                let right = self.parse_binary(op_prec + 1)?;
+                let next_line = self.peek_line();
+                if matches!(self.peek_kind(),
+                    Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
+                    | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
+                    | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+                ) {
+                    let assign_op = self.advance_lexeme().unwrap_or_default();
+                    let val = self.parse_expression()?;
+                    let bin = Expression::new(
+                        ExpressionKind::Binary { left: Box::new(left), operator: op, right: Box::new(right) },
+                        line,
+                    );
+                    let target = expr_to_assignment_target(&bin)?;
+                    let final_val = if &assign_op == "=" { val } else {
+                        let bin_op = assign_op[..assign_op.len() - 1].to_string();
+                        Expression::new(
+                            ExpressionKind::Binary { left: Box::new(val.clone()), operator: bin_op, right: Box::new(val) },
+                            next_line,
+                        )
+                    };
+                    return Ok(Expression::new(
+                        ExpressionKind::Assignment { target, value: Box::new(final_val) },
+                        next_line,
+                    ));
+                }
+
+                left = Expression::new(
+                    ExpressionKind::Binary { left: Box::new(left), operator: op, right: Box::new(right) },
+                    line,
+                );
+                continue;
+            }
+
             let op_prec = match self.peek_kind() {
                 Some(TokenKind::PipePipe) | Some(TokenKind::Xor) | Some(TokenKind::Eqv) => 1,
                 Some(TokenKind::AmpAmp) => 2,
@@ -950,7 +1065,13 @@ impl<'a> Parser<'a> {
                 break;
             }
 
-            let op = self.advance_lexeme().unwrap_or_default();
+            let op_kind = self.advance().unwrap_or(TokenKind::Eof);
+            let raw = self
+                .tokens
+                .get(self.pos - 1)
+                .map(|t| &self.source[t.span.start..t.span.end])
+                .unwrap_or("");
+            let op = self.binary_operator_lexeme(op_kind, raw);
             let right = self.parse_binary(op_prec + 1)?;
             let next_line = self.peek_line();
 
@@ -1481,8 +1602,8 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
                 i += 1;
             }
             if !expr.is_empty() {
-                let tokens = crate::tokenizer::tokenize(&expr);
-                let mut p = Parser::new(&tokens);
+                let lexed = crate::tokenizer::lex(&expr);
+                let mut p = Parser::new(&expr, lexed.tokens());
                 if let Ok(e) = p.parse_expression() {
                     parts.push(StringPart::Expression(e));
                 }

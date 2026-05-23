@@ -6,6 +6,25 @@ pub struct Token {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyntaxToken {
+    pub kind: TokenKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriviaKind {
+    Whitespace,
+    LineComment,
+    BlockComment,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Trivia {
+    pub kind: TriviaKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     // Identifiers and literals
     Identifier,
@@ -43,6 +62,8 @@ pub enum TokenKind {
     // Interpolation markers
     InterpStart,
     InterpEnd,
+    ScriptStart,
+    ScriptEnd,
 
     // Template tokens
     ContentText,
@@ -69,14 +90,62 @@ pub enum LexerMode {
     TemplateScript,
 }
 
-pub fn tokenize(source: &str) -> Vec<Token> {
+#[derive(Debug, Clone)]
+pub struct LexedSource<'a> {
+    source: &'a str,
+    tokens: Vec<SyntaxToken>,
+    trivia: Vec<Trivia>,
+}
+
+impl<'a> LexedSource<'a> {
+    pub fn source(&self) -> &'a str {
+        self.source
+    }
+
+    pub fn tokens(&self) -> &[SyntaxToken] {
+        &self.tokens
+    }
+
+    pub fn trivia(&self) -> &[Trivia] {
+        &self.trivia
+    }
+
+    pub fn into_parts(self) -> (&'a str, Vec<SyntaxToken>, Vec<Trivia>) {
+        (self.source, self.tokens, self.trivia)
+    }
+
+    pub fn text(&self, span: Span) -> &'a str {
+        &self.source[span.start..span.end]
+    }
+
+    pub fn into_owned_tokens(self) -> Vec<Token> {
+        self.tokens
+            .into_iter()
+            .map(|token| Token {
+                kind: token.kind,
+                span: token.span,
+                lexeme: self.source[token.span.start..token.span.end].to_string(),
+            })
+            .collect()
+    }
+}
+
+pub fn lex(source: &str) -> LexedSource<'_> {
     let mut lexer = Lexer::new(source, LexerMode::DefaultScript);
-    lexer.tokenize()
+    lexer.lex()
+}
+
+pub fn lex_template(source: &str) -> LexedSource<'_> {
+    let mut lexer = Lexer::new(source, LexerMode::DefaultTemplate);
+    lexer.lex()
+}
+
+pub fn tokenize(source: &str) -> Vec<Token> {
+    lex(source).into_owned_tokens()
 }
 
 pub fn tokenize_template(source: &str) -> Vec<Token> {
-    let mut lexer = Lexer::new(source, LexerMode::DefaultTemplate);
-    lexer.tokenize()
+    lex_template(source).into_owned_tokens()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,7 +161,8 @@ struct Lexer<'a> {
     pos: usize,
     line: u32,
     col: u32,
-    tokens: Vec<Token>,
+    tokens: Vec<SyntaxToken>,
+    trivia: Vec<Trivia>,
     mode_stack: Vec<LexerMode>,
 }
 
@@ -104,6 +174,7 @@ impl<'a> Lexer<'a> {
             line: 1,
             col: 1,
             tokens: Vec::new(),
+            trivia: Vec::new(),
             mode_stack: vec![initial_mode],
         }
     }
@@ -124,7 +195,7 @@ impl<'a> Lexer<'a> {
         self.mode_stack.contains(&mode)
     }
 
-    fn tokenize(&mut self) -> Vec<Token> {
+    fn lex(&mut self) -> LexedSource<'a> {
         loop {
             if self.pos >= self.source.len() {
                 break;
@@ -134,7 +205,11 @@ impl<'a> Lexer<'a> {
                     // Check for </bx:script> while in template script mode
                     if self.mode_stack_contains(LexerMode::TemplateScript) {
                         if self.source[self.pos..].starts_with("</bx:script>") {
+                            let start = self.pos;
+                            let start_line = self.line;
+                            let start_col = self.col;
                             self.pos += 12; self.col += 12;
+                            self.push_token(TokenKind::ScriptEnd, start, self.pos, start_line, start_col);
                             self.pop_mode(); // DefaultScript
                             self.pop_mode(); // TemplateScript
                             continue; // Back to template mode
@@ -147,6 +222,20 @@ impl<'a> Lexer<'a> {
                         continue;
                     }
                     self.skip_whitespace_and_comments();
+                    if self.mode_stack_contains(LexerMode::TemplateScript)
+                        && self.pos < self.source.len()
+                        && self.source[self.pos..].starts_with("</bx:script>")
+                    {
+                        let start = self.pos;
+                        let start_line = self.line;
+                        let start_col = self.col;
+                        self.pos += 12;
+                        self.col += 12;
+                        self.push_token(TokenKind::ScriptEnd, start, self.pos, start_line, start_col);
+                        self.pop_mode(); // DefaultScript
+                        self.pop_mode(); // TemplateScript
+                        continue;
+                    }
                     if self.pos >= self.source.len() { break; }
                     let ch = self.current_char();
                     if is_ident_start(ch) {
@@ -162,13 +251,20 @@ impl<'a> Lexer<'a> {
                 LexerMode::DefaultTemplate => {
                     self.tokenize_template_content();
                 }
+                LexerMode::TemplateOutput => {
+                    self.tokenize_template_content();
+                }
                 _ => {
                     // Unhandled mode — skip character
                     self.advance();
                 }
             }
         }
-        std::mem::take(&mut self.tokens)
+        LexedSource {
+            source: self.source,
+            tokens: std::mem::take(&mut self.tokens),
+            trivia: std::mem::take(&mut self.trivia),
+        }
     }
 
     fn tokenize_template_content(&mut self) {
@@ -209,6 +305,7 @@ impl<'a> Lexer<'a> {
                     let is_script = rest.starts_with("bx:script");
                     if is_script {
                         // <bx:script ...> — switch to script parsing mode
+                        self.push_token(TokenKind::ScriptStart, start, self.pos, self.line, self.col.saturating_sub(1));
                         self.push_mode(LexerMode::TemplateScript);
                         // Skip past opening > to find end of opening tag
                         while self.pos < self.source.len() && self.current_char() != '>' {
@@ -223,6 +320,7 @@ impl<'a> Lexer<'a> {
                         self.push_mode(LexerMode::TemplateOutput);
                         self.pos += 3; self.col += 3; // skip bx:
                         self.tokenize_component_name(start);
+                        self.push_mode(LexerMode::TemplateOutput);
                         return;
                     }
                 } else if rest.starts_with("bx:") {
@@ -231,9 +329,13 @@ impl<'a> Lexer<'a> {
                     self.tokenize_component_name(start);
                     return; // tokenize_component_name handles the rest
                 } else if rest.starts_with("/bx:") {
+                    let is_output_close = rest.starts_with("/bx:output");
                     self.push_mode(LexerMode::TemplateEndComponent);
                     self.pos += 4; self.col += 4; // skip /bx:
                     self.tokenize_component_name(start);
+                    if is_output_close {
+                        self.pop_mode();
+                    }
                     return;
                 } else if rest.starts_with("!---") {
                     self.pos += 4; self.col += 4;
@@ -257,17 +359,21 @@ impl<'a> Lexer<'a> {
                 } else if self.mode_stack_contains(LexerMode::TemplateOutput) {
                     // Expression interpolation in output mode: #expr#
                     // Parse the expression tokens inline
-                    let mut depth: i32 = 1;
-                    while self.pos < self.source.len() && depth > 0 {
+                    let interp_start = self.pos - 1;
+                    self.push_token(TokenKind::InterpStart, interp_start, self.pos, self.line, self.col.saturating_sub(1));
+                    while self.pos < self.source.len() {
                         let c = self.current_char();
                         if c == '#' {
+                            let end_start = self.pos;
+                            let end_line = self.line;
+                            let end_col = self.col;
                             self.advance();
                             if self.pos < self.source.len() && self.current_char() == '#' {
                                 self.advance();
                                 continue;
                             }
-                            depth -= 1;
-                            if depth == 0 { break; }
+                            self.push_token(TokenKind::InterpEnd, end_start, self.pos, end_line, end_col);
+                            break;
                         } else if is_ident_start(c) {
                             self.tokenize_ident_or_bitwise();
                             continue;
@@ -313,10 +419,19 @@ impl<'a> Lexer<'a> {
     }
 
     fn push_token(&mut self, kind: TokenKind, start: usize, end: usize, start_line: u32, start_col: u32) {
-        self.tokens.push(Token {
+        self.tokens.push(SyntaxToken {
             kind,
             span: Span { start, end, line: start_line, col: start_col },
-            lexeme: self.source[start..end].to_string(),
+        });
+    }
+
+    fn push_trivia(&mut self, kind: TriviaKind, start: usize, end: usize, start_line: u32, start_col: u32) {
+        if start == end {
+            return;
+        }
+        self.trivia.push(Trivia {
+            kind,
+            span: Span { start, end, line: start_line, col: start_col },
         });
     }
 
@@ -324,28 +439,43 @@ impl<'a> Lexer<'a> {
         loop {
             let remaining = &self.source[self.pos..];
             if remaining.starts_with("//") {
-                // Line comment — skip to end of line
-                self.pos += 2;
-                self.col += 2;
+                let start = self.pos;
+                let start_line = self.line;
+                let start_col = self.col;
+                self.advance();
+                self.advance();
                 while self.pos < self.source.len() && self.current_char() != '\n' {
                     self.advance();
                 }
+                self.push_trivia(TriviaKind::LineComment, start, self.pos, start_line, start_col);
             } else if remaining.starts_with("/*") {
-                // Block comment — skip to */
-                self.pos += 2;
-                self.col += 2;
+                let start = self.pos;
+                let start_line = self.line;
+                let start_col = self.col;
+                self.advance();
+                self.advance();
                 while self.pos < self.source.len() {
                     if self.source[self.pos..].starts_with("*/") {
-                        self.pos += 2;
-                        self.col += 2;
+                        self.advance();
+                        self.advance();
                         break;
                     }
                     self.advance();
                 }
+                self.push_trivia(TriviaKind::BlockComment, start, self.pos, start_line, start_col);
             } else {
-                let ch = self.current_char();
-                if ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' {
+                let start = self.pos;
+                let start_line = self.line;
+                let start_col = self.col;
+                while self.pos < self.source.len() {
+                    let ch = self.current_char();
+                    if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
+                        break;
+                    }
                     self.advance();
+                }
+                if self.pos > start {
+                    self.push_trivia(TriviaKind::Whitespace, start, self.pos, start_line, start_col);
                 } else {
                     break;
                 }
@@ -816,7 +946,7 @@ fn is_ident_cont(ch: char) -> bool {
 }
 
 fn keyword_or_ident(lexeme: &str) -> TokenKind {
-    match lexeme {
+    match lexeme.to_ascii_lowercase().as_str() {
         "import" => TokenKind::Import,
         "class" => TokenKind::Class,
         "interface" => TokenKind::Interface,
@@ -862,6 +992,14 @@ fn keyword_or_ident(lexeme: &str) -> TokenKind {
         "not" => TokenKind::Not,
         "xor" => TokenKind::Xor,
         "eqv" => TokenKind::Eqv,
+        "and" => TokenKind::AmpAmp,
+        "or" => TokenKind::PipePipe,
+        "eq" | "equal" | "is" => TokenKind::EqualEqual,
+        "neq" | "notequal" | "not_equal" => TokenKind::BangEqual,
+        "gt" => TokenKind::Greater,
+        "gte" | "ge" => TokenKind::GreaterEqual,
+        "lt" => TokenKind::Less,
+        "lte" | "le" => TokenKind::LessEqual,
         "instanceof" => TokenKind::InstanceOf,
         "castas" => TokenKind::CastAs,
         "contains" => TokenKind::Contains,
@@ -1262,5 +1400,15 @@ mod tests {
         assert!(tokens.iter().any(|t| t.lexeme == "var"));
         assert!(tokens.iter().any(|t| t.lexeme == "x"));
         assert!(tokens.iter().any(|t| t.lexeme == "after"));
+    }
+
+    #[test]
+    fn template_output_markers_and_script_markers() {
+        let tokens = tokenize_template("<bx:script>var name = 1;</bx:script><bx:output>Hello #name#! ##</bx:output>");
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::ScriptStart));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::ScriptEnd));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::InterpStart));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::InterpEnd));
+        assert!(tokens.iter().any(|t| t.kind == TokenKind::ComponentName && t.lexeme == "output"));
     }
 }

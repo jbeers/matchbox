@@ -89,6 +89,8 @@ pub mod op {
     pub const BUFFER_WRITE: u8 = 77;
     pub const CONTAINS: u8 = 78;
     pub const ARRAY_SPREAD: u8 = 79;
+    pub const INSTANCEOF: u8 = 80;
+    pub const CASTAS: u8 = 81;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -173,6 +175,8 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::BUFFER_WRITE            => "BUFFER_WRITE",
         op::CONTAINS                => "CONTAINS",
         op::ARRAY_SPREAD            => "ARRAY_SPREAD",
+        op::INSTANCEOF              => "INSTANCEOF",
+        op::CASTAS                  => "CASTAS",
         _                           => "UNKNOWN",
     }
 }
