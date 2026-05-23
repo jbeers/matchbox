@@ -7,20 +7,16 @@
 
 ## Current Status
 
-Partially implemented for source preservation only.
+Implemented on the current branch.
 
 Completed on the current branch:
 
 - `cst::parse_template()` round-trips exact source.
 - Source gaps are preserved with `SyntaxElement::Source(Span)`.
 - Existing template lexer tokens remain available through `SyntaxTree::tokens()`.
-
-Still open:
-
-- `#expr#` is not exposed as a structured interpolation region.
-- Template delimiters such as `<bx:` may be represented as source gaps rather than proper tokens.
-- `<bx:script>` opening/closing boundaries are not represented as first-class CST nodes.
-- Script-island body content is not represented as nested script CST.
+- `#expr#` is exposed as a structured interpolation CST node with nested script CST.
+- `<bx:script>...</bx:script>` is exposed as a structured script-island CST node with nested script CST.
+- Escaped hashes still round-trip distinctly from interpolation.
 
 ## Problem
 
@@ -64,9 +60,9 @@ Expected CST behavior:
 
 ## Acceptance Criteria
 
-- [ ] Template delimiters are represented explicitly, not only as source gaps.
-- [ ] Interpolation regions expose expression boundaries.
-- [ ] Script islands expose nested script CST.
-- [ ] Escaped hashes round-trip and are distinguishable from interpolation.
-- [ ] Existing `parse_bxm()` runtime behavior is not regressed.
-- [ ] Tests assert both CST structure and exact source round-trip.
+- [x] Template delimiters are represented explicitly, not only as source gaps.
+- [x] Interpolation regions expose expression boundaries.
+- [x] Script islands expose nested script CST.
+- [x] Escaped hashes round-trip and are distinguishable from interpolation.
+- [x] Existing `parse_bxm()` runtime behavior is not regressed.
+- [x] Tests assert both CST structure and exact source round-trip.

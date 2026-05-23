@@ -198,17 +198,50 @@ fn cst_keeps_comments_while_script_parser_ignores_trivia() {
 }
 
 #[test]
-fn template_cst_preserves_source_gaps_and_round_trips() {
-    let source = "Hello <bx:output>#name#</bx:output>\n<bx:script>var x = 1;</bx:script>";
+fn template_cst_exposes_interpolation_and_script_island_nodes() {
+    let source = "Hello <bx:output>#name#</bx:output>\n<bx:script>\n  var x = 1;\n</bx:script>";
 
     let tree = matchbox_compiler::cst::parse_template(source);
 
     assert_eq!(tree.to_source(), source);
     assert_eq!(tree.root().span.start, 0);
     assert_eq!(tree.root().span.end, source.len());
-    assert!(tree.root().children.iter().any(
-        |element| matches!(element, SyntaxElement::Source(span) if tree.text(*span) == "<bx:")
-    ));
+
+    let descendants: Vec<_> = tree.descendants().collect();
+    let interpolation = descendants
+        .iter()
+        .copied()
+        .find(|node| node.kind == SyntaxKind::Interpolation)
+        .expect("interpolation node");
+    assert_eq!(tree.text(interpolation.span), "#name#");
+
+    let interpolation_body = interpolation
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Root)
+        .expect("nested interpolation CST");
+    let interpolation_statement = interpolation_body
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Statement)
+        .expect("interpolation statement");
+    assert_eq!(tree.text(interpolation_statement.span), "name");
+
+    let script_island = descendants
+        .iter()
+        .copied()
+        .find(|node| node.kind == SyntaxKind::ScriptIsland)
+        .expect("script island node");
+    assert!(tree.text(script_island.span).contains("<bx:script>"));
+
+    let script_body = script_island
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Root)
+        .expect("nested script CST");
+    let script_statement = script_body
+        .children_nodes()
+        .find(|node| node.kind == SyntaxKind::Statement)
+        .expect("nested script statement");
+    assert!(tree.text(script_statement.span).contains("var x = 1;"));
+
     let token_text: Vec<(TokenKind, &str)> = tree
         .tokens()
         .map(|token| (token.kind, tree.text(token.span)))
@@ -216,6 +249,21 @@ fn template_cst_preserves_source_gaps_and_round_trips() {
     assert!(token_text.contains(&(TokenKind::ContentText, "Hello ")));
     assert!(token_text.contains(&(TokenKind::ComponentName, "output")));
     assert!(token_text.contains(&(TokenKind::Identifier, "x")));
+}
+
+#[test]
+fn template_cst_distinguishes_escaped_hashes_from_interpolation() {
+    let source = "<bx:output>before ## after #name#</bx:output>";
+
+    let tree = matchbox_compiler::cst::parse_template(source);
+
+    assert_eq!(tree.to_source(), source);
+    assert!(tree
+        .descendants()
+        .any(|node| node.kind == SyntaxKind::Interpolation && tree.text(node.span) == "#name#"));
+    assert!(tree
+        .tokens()
+        .any(|token| token.kind == TokenKind::ContentText && tree.text(token.span) == "##"));
 }
 
 fn collect_nodes(

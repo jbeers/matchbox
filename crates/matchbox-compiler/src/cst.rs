@@ -5,6 +5,8 @@ pub enum SyntaxKind {
     Root,
     Statement,
     Block,
+    Interpolation,
+    ScriptIsland,
     Error,
 }
 
@@ -98,6 +100,8 @@ pub fn parse_template(source: &str) -> SyntaxTree<'_> {
     let lexed = lex_template(source);
     let (source, tokens, trivia) = lexed.into_parts();
     let elements = merge_elements(&tokens, &trivia);
+    let lossless_elements = make_lossless_elements(source, &elements);
+    let structured_elements = group_template_regions(source, &lossless_elements);
     let mut root = SyntaxNode {
         id: SyntaxNodeId::default(),
         kind: SyntaxKind::Root,
@@ -107,7 +111,7 @@ pub fn parse_template(source: &str) -> SyntaxTree<'_> {
             line: 1,
             col: 1,
         },
-        children: make_lossless_elements(source, &elements),
+        children: structured_elements,
     };
     assign_node_ids(&mut root, 0);
 
@@ -202,6 +206,159 @@ fn make_lossless_elements(source: &str, elements: &[SyntaxElement]) -> Vec<Synta
     }
 
     children
+}
+
+fn group_template_regions(source: &str, elements: &[SyntaxElement]) -> Vec<SyntaxElement> {
+    let mut children = Vec::new();
+    let mut index = 0;
+
+    while index < elements.len() {
+        match &elements[index] {
+            SyntaxElement::Token(token) if token.kind == TokenKind::InterpStart => {
+                let start_index = index;
+                index += 1;
+                let mut found = false;
+                while index < elements.len() {
+                    if matches!(
+                        &elements[index],
+                        SyntaxElement::Token(token) if token.kind == TokenKind::InterpEnd
+                    ) {
+                        let end_index = index;
+                        let inner_start = token.span.end;
+                        let inner_end = match &elements[end_index] {
+                            SyntaxElement::Token(end) => end.span.start,
+                            _ => unreachable!(),
+                        };
+                        let mut inner = parse_script(&source[inner_start..inner_end]).root.clone();
+                        shift_node(&mut inner, inner_start, source);
+                        let node = SyntaxNode {
+                            id: SyntaxNodeId::default(),
+                            kind: SyntaxKind::Interpolation,
+                            span: span_for_elements(&elements[start_index..=end_index]),
+                            children: vec![
+                                elements[start_index].clone(),
+                                SyntaxElement::Node(Box::new(inner)),
+                                elements[end_index].clone(),
+                            ],
+                        };
+                        children.push(SyntaxElement::Node(Box::new(node)));
+                        index = end_index + 1;
+                        found = true;
+                        break;
+                    }
+                    index += 1;
+                }
+                if !found {
+                    children.extend(elements[start_index..index].iter().cloned());
+                }
+            }
+            SyntaxElement::Token(token) if token.kind == TokenKind::ScriptStart => {
+                let start_index = index;
+                let open_start = token.span.end;
+                index += 1;
+                let mut found = false;
+                while index < elements.len() {
+                    if matches!(
+                        &elements[index],
+                        SyntaxElement::Token(token) if token.kind == TokenKind::ScriptEnd
+                    ) {
+                        let end_index = index;
+                        let script_end = match &elements[end_index] {
+                            SyntaxElement::Token(end) => end.span.start,
+                            _ => unreachable!(),
+                        };
+                        let body_start = elements
+                            .get(start_index + 1)
+                            .map(SyntaxElement::span)
+                            .map(|span| if matches!(elements[start_index + 1], SyntaxElement::Source(_)) {
+                                span.end
+                            } else {
+                                span.start
+                            })
+                            .unwrap_or(open_start);
+                        let mut body = parse_script(&source[body_start..script_end]).root.clone();
+                        shift_node(&mut body, body_start, source);
+                        let opening_span = Span {
+                            start: open_start,
+                            end: body_start,
+                            line: token.span.line,
+                            col: token.span.col + 1,
+                        };
+                        let node = SyntaxNode {
+                            id: SyntaxNodeId::default(),
+                            kind: SyntaxKind::ScriptIsland,
+                            span: span_for_elements(&elements[start_index..=end_index]),
+                            children: vec![
+                                elements[start_index].clone(),
+                                SyntaxElement::Source(opening_span),
+                                SyntaxElement::Node(Box::new(body)),
+                                elements[end_index].clone(),
+                            ],
+                        };
+                        children.push(SyntaxElement::Node(Box::new(node)));
+                        index = end_index + 1;
+                        found = true;
+                        break;
+                    }
+                    index += 1;
+                }
+                if !found {
+                    children.extend(elements[start_index..index].iter().cloned());
+                }
+            }
+            _ => {
+                children.push(elements[index].clone());
+                index += 1;
+            }
+        }
+    }
+
+    children
+}
+
+fn shift_node(node: &mut SyntaxNode, base_start: usize, source: &str) {
+    let base_span = span_from_offsets(source, base_start, base_start);
+    shift_node_with_base(node, base_start, base_span.line, base_span.col);
+}
+
+fn shift_node_with_base(node: &mut SyntaxNode, base_start: usize, base_line: u32, base_col: u32) {
+    node.span = shift_span(node.span, base_start, base_line, base_col);
+    for child in &mut node.children {
+        match child {
+            SyntaxElement::Node(node) => shift_node_with_base(node, base_start, base_line, base_col),
+            SyntaxElement::Token(token) => {
+                token.span = shift_span(token.span, base_start, base_line, base_col);
+            }
+            SyntaxElement::Trivia(trivia) => {
+                trivia.span = shift_span(trivia.span, base_start, base_line, base_col);
+            }
+            SyntaxElement::Source(span) => {
+                *span = shift_span(*span, base_start, base_line, base_col);
+            }
+        }
+    }
+}
+
+fn shift_span(span: Span, base_start: usize, base_line: u32, base_col: u32) -> Span {
+    let start = base_start + span.start;
+    let end = base_start + span.end;
+    let line = if span.line == 1 {
+        base_line
+    } else {
+        base_line + span.line - 1
+    };
+    let col = if span.line == 1 {
+        base_col + span.col - 1
+    } else {
+        span.col
+    };
+
+    Span {
+        start,
+        end,
+        line,
+        col,
+    }
 }
 
 fn merge_elements(tokens: &[SyntaxToken], trivia: &[Trivia]) -> Vec<SyntaxElement> {

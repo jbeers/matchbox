@@ -26,7 +26,7 @@ The current branch now has a first-pass CST foundation:
 - `cst::parse_template()` preserves exact template source by keeping source-gap spans around current template lexer tokens.
 - The parser path now consumes span tokens from `lex()` / `lex_template()` instead of allocating an owned `String` lexeme for every token up front.
 
-The remaining CST/tooling work is tracked in R011 and R012. The compiler/runtime semantic findings remain tracked in R001-R010.
+The remaining CST/tooling work is tracked in R011. The compiler/runtime semantic findings remain tracked in R001-R010.
 
 R001, R002, R003, and R004 have been implemented in code and the corresponding issue files have been updated to reflect that status.
 
@@ -43,3 +43,5 @@ R009 has been implemented in code. Class and function modifiers are now preserve
 R010 has been implemented in code. Range creation is now lazy, range iteration is handled without eager array materialization, and `len`/`contains` understand the range type.
 
 R011 is partially implemented. The CST now has stable node ids, descendant traversal helpers, and explicit error nodes for malformed braces, but it still lacks typed expression-level structure and richer statement kinds.
+
+R012 has been implemented in code. Template CST now exposes structured interpolation and script-island nodes, preserves escaped hashes distinctly, and still round-trips exact source.
