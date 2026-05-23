@@ -34,6 +34,11 @@ pub enum TokenKind {
     PlusEqual, MinusEqual, StarEqual, SlashEqual, PercentEqual, AmpEqual,
     PlusPlus, MinusMinus, DotDot, DotDotDot, DotDotLess,
     GreaterDotDot, GreaterDotDotLess,
+    // Bitwise operators
+    BitwiseOr, BitwiseAnd, BitwiseXor, BitwiseComplement,
+    BitwiseShiftLeft, BitwiseShiftRight, BitwiseUnsignedShiftRight,
+    // Word operators
+    Xor, Eqv, InstanceOf, CastAs, Contains,
 
     // Interpolation markers
     InterpStart,
@@ -82,7 +87,7 @@ impl<'a> Lexer<'a> {
             }
             let ch = self.current_char();
             if is_ident_start(ch) {
-                self.tokenize_ident();
+                self.tokenize_ident_or_bitwise();
             } else if ch.is_ascii_digit() {
                 self.tokenize_number();
             } else if ch == '"' || ch == '\'' {
@@ -151,17 +156,51 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn tokenize_ident(&mut self) {
+    fn tokenize_ident_or_bitwise(&mut self) {
         let start = self.pos;
         let start_line = self.line;
         let start_col = self.col;
-        self.advance(); // consume first char (checked by caller)
+        self.advance(); // consume first char
 
         while self.pos < self.source.len() && is_ident_cont(self.current_char()) {
             self.advance();
         }
         let end = self.pos;
+
+        // Check if this was just "b" followed by a bitwise operator
         let lexeme = &self.source[start..end];
+        if lexeme == "b" && self.pos < self.source.len() {
+            let rest = &self.source[self.pos..];
+            if rest.starts_with(">>>") {
+                self.pos += 3; self.col += 3;
+                self.push_token(TokenKind::BitwiseUnsignedShiftRight, start, self.pos, start_line, start_col);
+                return;
+            }
+            if rest.starts_with("<<") {
+                self.pos += 2; self.col += 2;
+                self.push_token(TokenKind::BitwiseShiftLeft, start, self.pos, start_line, start_col);
+                return;
+            }
+            if rest.starts_with(">>") {
+                self.pos += 2; self.col += 2;
+                self.push_token(TokenKind::BitwiseShiftRight, start, self.pos, start_line, start_col);
+                return;
+            }
+            let ch = self.current_char();
+            if ch == '|' || ch == '&' || ch == '^' || ch == '~' {
+                let kind = match ch {
+                    '|' => TokenKind::BitwiseOr,
+                    '&' => TokenKind::BitwiseAnd,
+                    '^' => TokenKind::BitwiseXor,
+                    '~' => TokenKind::BitwiseComplement,
+                    _ => unreachable!(),
+                };
+                self.advance();
+                self.push_token(kind, start, self.pos, start_line, start_col);
+                return;
+            }
+        }
+
         let kind = keyword_or_ident(lexeme);
         self.push_token(kind, start, end, start_line, start_col);
     }
@@ -520,6 +559,11 @@ fn keyword_or_ident(lexeme: &str) -> TokenKind {
         "rethrow" => TokenKind::Rethrow,
         "include" => TokenKind::Include,
         "not" => TokenKind::Not,
+        "xor" => TokenKind::Xor,
+        "eqv" => TokenKind::Eqv,
+        "instanceof" => TokenKind::InstanceOf,
+        "castas" => TokenKind::CastAs,
+        "contains" => TokenKind::Contains,
         _ => TokenKind::Identifier,
     }
 }

@@ -851,14 +851,24 @@ impl<'a> Parser<'a> {
     fn parse_binary_tail(&mut self, mut left: Expression, min_prec: u8, line: u32) -> Result<Expression> {
         loop {
             let op_prec = match self.peek_kind() {
-                Some(TokenKind::PipePipe) => 1,
+                Some(TokenKind::PipePipe) | Some(TokenKind::Xor) | Some(TokenKind::Eqv) => 1,
                 Some(TokenKind::AmpAmp) => 2,
                 Some(TokenKind::EqualEqual) | Some(TokenKind::BangEqual)
                 | Some(TokenKind::Less) | Some(TokenKind::Greater)
-                | Some(TokenKind::LessEqual) | Some(TokenKind::GreaterEqual) => 3,
-                Some(TokenKind::Ampersand) => 4,
-                Some(TokenKind::Plus) | Some(TokenKind::Minus) => 5,
-                Some(TokenKind::Star) | Some(TokenKind::Slash) | Some(TokenKind::Percent) => 6,
+                | Some(TokenKind::LessEqual) | Some(TokenKind::GreaterEqual)
+                | Some(TokenKind::InstanceOf) | Some(TokenKind::CastAs)
+                | Some(TokenKind::Contains) => 3,
+                Some(TokenKind::BitwiseOr) => 4,
+                Some(TokenKind::BitwiseXor) => 5,
+                Some(TokenKind::BitwiseAnd) => 6,
+                Some(TokenKind::BitwiseShiftLeft) | Some(TokenKind::BitwiseShiftRight)
+                | Some(TokenKind::BitwiseUnsignedShiftRight) => 7,
+                Some(TokenKind::DotDot) | Some(TokenKind::DotDotLess)
+                | Some(TokenKind::GreaterDotDot) | Some(TokenKind::GreaterDotDotLess) => 8,
+                Some(TokenKind::Ampersand) => 9,
+                Some(TokenKind::Plus) | Some(TokenKind::Minus) => 10,
+                Some(TokenKind::Star) | Some(TokenKind::Slash) | Some(TokenKind::Percent) => 11,
+                Some(TokenKind::Caret) => 12, // power ^
                 _ => 0,
             };
 
@@ -1039,6 +1049,11 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Null) => {
                 self.pos += 1;
                 Ok(Expression::new(ExpressionKind::Literal(Literal::Null), line))
+            }
+            Some(TokenKind::ColonColon) => {
+                self.pos += 1; // ::
+                let name = self.expect_get(TokenKind::Identifier)?;
+                Ok(Expression::new(ExpressionKind::Identifier(name), line))
             }
             Some(TokenKind::String) => {
                 let lexeme = self.advance_lexeme().unwrap_or_default();
