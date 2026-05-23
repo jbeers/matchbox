@@ -1,0 +1,6 @@
+<bx:set x = 10>
+<bx:if x GT 5>
+    <bx:output>big</bx:output>
+<bx:else>
+    <bx:output>small</bx:output>
+</bx:if>
