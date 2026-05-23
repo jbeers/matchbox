@@ -86,6 +86,7 @@ pub mod op {
     pub const XOR_OP: u8 = 74;
     pub const EQV_OP: u8 = 75;
     pub const RANGE: u8 = 76;
+    pub const BUFFER_WRITE: u8 = 77;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -167,6 +168,7 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::XOR_OP                  => "XOR_OP",
         op::EQV_OP                  => "EQV_OP",
         op::RANGE                   => "RANGE",
+        op::BUFFER_WRITE            => "BUFFER_WRITE",
         _                           => "UNKNOWN",
     }
 }

@@ -4156,8 +4156,8 @@ impl VM {
                                     } else {
                                         (true, None, None)
                                     }
-                                }
-                                _ => { 
+                }
+                _ => {
                                     self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
                                     (true, None, None)
                                 }
@@ -4344,6 +4344,15 @@ impl VM {
                         } else {
                             println!("{}", out);
                         }
+                    }
+                }
+                op::BUFFER_WRITE => {
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let s = self.to_string(val);
+                    if let Some(ref mut buffer) = self.output_buffer {
+                        buffer.push_str(&s);
+                    } else {
+                        print!("{s}");
                     }
                 }
                 _ => {

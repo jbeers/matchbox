@@ -516,7 +516,7 @@ impl Compiler {
             }
             StatementKind::BufferOutput(expr) => {
                 self.compile_expression(expr)?;
-                self.chunk.emit0(op::PRINT, stmt.line as u32);
+                self.chunk.emit0(op::BUFFER_WRITE, stmt.line as u32);
                 Ok(())
             }
             StatementKind::Destructure { source, bindings } => {
