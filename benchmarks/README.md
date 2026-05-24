@@ -3,6 +3,10 @@
 This benchmark builds a 1,000,000 row in-memory query and then runs `AVG(value)` over it.
 It is intended for comparing MatchBox and BoxLang on the same workload.
 
+There are two script variants:
+- `qoq_avg_1m.bxs` for MatchBox
+- `qoq_avg_1m_boxlang.bxs` for BoxLang
+
 ## Run MatchBox
 
 ```bash
@@ -19,6 +23,12 @@ If you already have a local `matchbox` binary installed:
 
 ```bash
 /usr/bin/time -v boxlang benchmarks/qoq_avg_1m.bxs
+```
+
+If your BoxLang build requires the native queryNew signature, use the BoxLang-specific script:
+
+```bash
+/usr/bin/time -v boxlang benchmarks/qoq_avg_1m_boxlang.bxs
 ```
 
 ## Notes

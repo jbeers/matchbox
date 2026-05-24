@@ -1,10 +1,8 @@
-// QoQ stress benchmark:
-// - build a 1,000,000 row in-memory query
-// - run AVG(value) over the query
-// - print timing information for the build and execution phases
+// BoxLang QoQ stress benchmark.
+// This mirrors the MatchBox benchmark but uses BoxLang's queryNew signature.
 
 rowCount = 1000000
-data = queryNew(["value"], ["integer"])
+data = queryNew("value", "integer")
 
 buildStart = getTickCount()
 for (i = 1; i <= rowCount; i = i + 1) {
