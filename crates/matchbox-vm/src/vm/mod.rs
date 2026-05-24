@@ -1804,6 +1804,17 @@ impl VM {
             return match name.as_str() {
                 "abs" => Some("abs".to_string()),
                 "round" => Some("round".to_string()),
+                "floor" => Some("floor".to_string()),
+                "log" => Some("log".to_string()),
+                "log10" => Some("log10".to_string()),
+                "exp" => Some("exp".to_string()),
+                "sin" => Some("sin".to_string()),
+                "cos" => Some("cos".to_string()),
+                "tan" => Some("tan".to_string()),
+                "asin" => Some("asin".to_string()),
+                "acos" => Some("acos".to_string()),
+                "atan" => Some("atan".to_string()),
+                "atn" => Some("atan".to_string()),
                 _ => None,
             };
         }

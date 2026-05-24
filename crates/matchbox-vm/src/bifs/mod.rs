@@ -1,10 +1,17 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
-use rand::RngExt;
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::cmp::Ordering;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+static MATH_RNG: OnceLock<Mutex<StdRng>> = OnceLock::new();
+
+fn math_rng() -> &'static Mutex<StdRng> {
+    MATH_RNG.get_or_init(|| Mutex::new(StdRng::seed_from_u64(0)))
+}
 
 #[cfg(feature = "bif-jni")]
 mod jni;
@@ -33,12 +40,27 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Math BIFs
     bifs.insert("round".to_string(), round as BxNativeFunction);
+    bifs.insert("floor".to_string(), floor_bif as BxNativeFunction);
     bifs.insert("int".to_string(), int_bif as BxNativeFunction);
     bifs.insert("ceiling".to_string(), ceiling_bif as BxNativeFunction);
     bifs.insert("abs".to_string(), abs_bif as BxNativeFunction);
     bifs.insert("min".to_string(), min_bif as BxNativeFunction);
     bifs.insert("max".to_string(), max_bif as BxNativeFunction);
     bifs.insert("randrange".to_string(), rand_range as BxNativeFunction);
+    bifs.insert("rand".to_string(), rand as BxNativeFunction);
+    bifs.insert("randomize".to_string(), randomize as BxNativeFunction);
+    bifs.insert("pi".to_string(), pi as BxNativeFunction);
+    bifs.insert("log".to_string(), log_bif as BxNativeFunction);
+    bifs.insert("log10".to_string(), log10_bif as BxNativeFunction);
+    bifs.insert("exp".to_string(), exp_bif as BxNativeFunction);
+    bifs.insert("sin".to_string(), sin_bif as BxNativeFunction);
+    bifs.insert("cos".to_string(), cos_bif as BxNativeFunction);
+    bifs.insert("tan".to_string(), tan_bif as BxNativeFunction);
+    bifs.insert("asin".to_string(), asin_bif as BxNativeFunction);
+    bifs.insert("acos".to_string(), acos_bif as BxNativeFunction);
+    bifs.insert("atan".to_string(), atan_bif as BxNativeFunction);
+    bifs.insert("atn".to_string(), atan_bif as BxNativeFunction);
+    bifs.insert("atan2".to_string(), atan2_bif as BxNativeFunction);
 
     // Array BIFs
     bifs.insert("arrayappend".to_string(), array_append as BxNativeFunction);
@@ -879,6 +901,17 @@ fn round(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
+fn floor_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("floor() expects exactly 1 argument".to_string());
+    }
+    if args[0].is_number() {
+        Ok(BxValue::new_number(args[0].as_number().floor()))
+    } else {
+        Err("floor() expects a number".to_string())
+    }
+}
+
 fn int_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 {
         return Err("int() expects exactly 1 argument".to_string());
@@ -943,12 +976,123 @@ fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("randRange() expects exactly 2 arguments".to_string());
     }
     if args[0].is_number() && args[1].is_number() {
-        let mut rng = rand::rng();
+        let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
         let val = rng.random_range((args[0].as_number() as i64)..=(args[1].as_number() as i64));
         Ok(BxValue::new_number(val as f64))
     } else {
         Err("randRange() expects numbers".to_string())
     }
+}
+
+fn rand(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("rand() expects no arguments".to_string());
+    }
+    let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
+    Ok(BxValue::new_number(rng.random::<f64>()))
+}
+
+fn randomize(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("randomize() expects at least 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        return Err(format!("randomize() expects a numeric seed, not {}", id));
+    }
+    if !args[0].is_number() {
+        return Err("randomize() expects a number".to_string());
+    }
+    let seed = args[0].as_number() as u64;
+    let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
+    *rng = StdRng::seed_from_u64(seed);
+    Ok(BxValue::new_null())
+}
+
+fn pi(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("pi() expects no arguments".to_string());
+    }
+    Ok(BxValue::new_number(std::f64::consts::PI))
+}
+
+fn log_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("log() expects 1 or 2 arguments".to_string());
+    }
+    if !args[0].is_number() {
+        return Err("log() expects a number".to_string());
+    }
+    let value = args[0].as_number();
+    if args.len() == 1 {
+        Ok(BxValue::new_number(value.ln()))
+    } else if args[1].is_number() {
+        Ok(BxValue::new_number(value.log(args[1].as_number())))
+    } else {
+        Err("log() expects numeric arguments".to_string())
+    }
+}
+
+fn log10_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("log10() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().log10()))
+}
+
+fn exp_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("exp() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().exp()))
+}
+
+fn sin_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("sin() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().sin()))
+}
+
+fn cos_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("cos() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().cos()))
+}
+
+fn tan_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("tan() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().tan()))
+}
+
+fn asin_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("asin() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().asin()))
+}
+
+fn acos_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("acos() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().acos()))
+}
+
+fn atan_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("atan() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().atan()))
+}
+
+fn atan2_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 || !args[0].is_number() || !args[1].is_number() {
+        return Err("atan2() expects exactly 2 numeric arguments".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().atan2(args[1].as_number())))
 }
 
 fn len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

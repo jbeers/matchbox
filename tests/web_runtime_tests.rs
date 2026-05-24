@@ -361,6 +361,44 @@ fn test_list_helpers() {
 }
 
 #[test]
+fn test_math_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        randomize(12345);
+        first = rand();
+        randomize(12345);
+        second = rand();
+
+        if (first != second) { throw "randomize failed"; }
+        if (first < 0 || first >= 1) { throw "rand range failed"; }
+
+        if (round(1.4) != 1) { throw "round failed"; }
+        if (floor(1.8) != 1) { throw "floor failed"; }
+        if (ceiling(1.2) != 2) { throw "ceiling failed"; }
+        if (log(1) != 0) { throw "log failed"; }
+        if (log10(10) != 1) { throw "log10 failed"; }
+        if (exp(0) != 1) { throw "exp failed"; }
+        if (sin(0) != 0) { throw "sin failed"; }
+        if (cos(0) != 1) { throw "cos failed"; }
+        if (tan(0) != 0) { throw "tan failed"; }
+        if (asin(0) != 0) { throw "asin failed"; }
+        if (acos(1) != 0) { throw "acos failed"; }
+        if (atan(0) != 0) { throw "atan failed"; }
+        if (atan2(0, 1) != 0) { throw "atan2 failed"; }
+        if (pi() < 3.14 || pi() > 3.15) { throw "pi failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_date_time_and_bifs() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());
