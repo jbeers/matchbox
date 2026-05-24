@@ -317,6 +317,50 @@ fn test_string_helpers() {
 }
 
 #[test]
+fn test_list_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        list = "a,b,c";
+        if (listLen(list) != 3) { throw "listLen failed"; }
+        if (listGetAt(list, 2) != "b") { throw "listGetAt failed"; }
+        if (listFirst(list) != "a") { throw "listFirst failed"; }
+        if (listLast(list) != "c") { throw "listLast failed"; }
+        if (listAppend(list, "d") != "a,b,c,d") { throw "listAppend failed"; }
+        if (listRest(list) != "b,c") { throw "listRest failed"; }
+        if (listDeleteAt(list, 2) != "a,c") { throw "listDeleteAt failed"; }
+        if (listFind(list, "c") != 3) { throw "listFind failed"; }
+        if (listFindNoCase("A,B,C", "b") != 2) { throw "listFindNoCase failed"; }
+
+        if (listAppend("1|2|3", "4", "|") != "1|2|3|4") { throw "custom append failed"; }
+        if (listRest("1-and-2-and-3", "-and-", true, true) != "2-and-3") { throw "multi-char rest failed"; }
+        if (listDeleteAt("1-and-2-and-3", 2, "-and-", true, true) != "1-and-3") { throw "multi-char delete failed"; }
+        if (listSort("b,d,c,a", "text", "asc") != "a,b,c,d") { throw "listSort failed"; }
+
+        if (listSort("b,d,c,a", "textnocase", "desc") != "d,c,b,a") { throw "listSort textnocase failed"; }
+
+        if (list.listLen() != 3) { throw "member listLen failed"; }
+        if (list.listGetAt(1) != "a") { throw "member listGetAt failed"; }
+        if (list.listAppend("d") != "a,b,c,d") { throw "member listAppend failed"; }
+        if (list.listFirst() != "a") { throw "member listFirst failed"; }
+        if (list.listLast() != "c") { throw "member listLast failed"; }
+        if (list.listRest() != "b,c") { throw "member listRest failed"; }
+        if (list.listDeleteAt(2) != "a,c") { throw "member listDeleteAt failed"; }
+        if (list.listFind("c") != 3) { throw "member listFind failed"; }
+        if (list.listFindNoCase("B") != 2) { throw "member listFindNoCase failed"; }
+        if (list.listSort("text", "asc") != "a,b,c") { throw "member listSort failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_date_time_and_bifs() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

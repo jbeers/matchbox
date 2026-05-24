@@ -2,6 +2,7 @@ use crate::types::{BxNativeFunction, BxVM, BxValue};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use rand::RngExt;
 use std::collections::HashMap;
+use std::cmp::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -161,10 +162,19 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         parse_date_time_bif as BxNativeFunction,
     );
     bifs.insert("listtoarray".to_string(), list_to_array as BxNativeFunction);
+    bifs.insert("listlen".to_string(), list_len as BxNativeFunction);
+    bifs.insert("listgetat".to_string(), list_get_at as BxNativeFunction);
+    bifs.insert("listappend".to_string(), list_append as BxNativeFunction);
+    bifs.insert("listfirst".to_string(), list_first as BxNativeFunction);
+    bifs.insert("listlast".to_string(), list_last as BxNativeFunction);
+    bifs.insert("listrest".to_string(), list_rest as BxNativeFunction);
+    bifs.insert("listdeleteat".to_string(), list_delete_at as BxNativeFunction);
+    bifs.insert("listfind".to_string(), list_find as BxNativeFunction);
     bifs.insert(
         "listfindnocase".to_string(),
         list_find_no_case as BxNativeFunction,
     );
+    bifs.insert("listsort".to_string(), list_sort as BxNativeFunction);
     bifs.insert("indexof".to_string(), index_of as BxNativeFunction);
     bifs.insert("rematch".to_string(), re_match as BxNativeFunction);
     bifs.insert("mid".to_string(), mid_bif as BxNativeFunction);
@@ -537,40 +547,246 @@ fn list_to_array(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     if args.is_empty() {
         return Err("listToArray() expects at least 1 argument".to_string());
     }
-    let s = vm.to_string(args[0]);
-    let del = if args.len() > 1 {
-        vm.to_string(args[1])
-    } else {
-        ",".to_string()
-    };
-
+    let parts = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
+        if args.len() > 2 { args[2].as_bool() } else { false },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+    );
     let array_id = vm.array_new();
-    for part in s.split(&del) {
-        let s_id = vm.string_new(part.to_string());
+    for part in parts {
+        let s_id = vm.string_new(part);
         vm.array_push(array_id, BxValue::new_ptr(s_id));
     }
-
     Ok(BxValue::new_ptr(array_id))
 }
 
-fn list_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    if args.len() < 2 {
-        return Err("listFindNoCase() expects at least 2 arguments: (list, value)".to_string());
+fn list_len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listLen() expects at least 1 argument".to_string());
     }
-    let list = vm.to_string(args[0]);
-    let value = vm.to_string(args[1]).to_lowercase();
-    let del = if args.len() > 2 {
-        vm.to_string(args[2])
-    } else {
-        ",".to_string()
-    };
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
+        if args.len() > 2 { args[2].as_bool() } else { false },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+    );
+    Ok(BxValue::new_number(items.len() as f64))
+}
 
-    for (idx, part) in list.split(&del).enumerate() {
-        if part.trim().to_lowercase() == value {
+fn list_get_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listGetAt() expects at least 2 arguments: (list, position)".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 4 { args[4].as_bool() } else { false },
+    );
+    let pos = args[1].as_number() as isize;
+    if pos < 1 || pos as usize > items.len() {
+        return Err(format!("listGetAt() position {} out of range", pos));
+    }
+    Ok(BxValue::new_ptr(vm.string_new(items[(pos - 1) as usize].clone())))
+}
+
+fn list_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listAppend() expects at least 2 arguments: (list, value)".to_string());
+    }
+    let delimiter = if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() };
+    let multi = if args.len() > 4 { args[4].as_bool() } else { false };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 3 { args[3].as_bool() } else { false },
+        multi,
+    );
+    items.push(vm.to_string(args[1]));
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+}
+
+fn list_first(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listFirst() expects at least 1 argument".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
+        if args.len() > 2 { args[2].as_bool() } else { false },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+    );
+    let first = items.first().cloned().unwrap_or_default();
+    Ok(BxValue::new_ptr(vm.string_new(first)))
+}
+
+fn list_last(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listLast() expects at least 1 argument".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
+        if args.len() > 2 { args[2].as_bool() } else { false },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+    );
+    let last = items.last().cloned().unwrap_or_default();
+    Ok(BxValue::new_ptr(vm.string_new(last)))
+}
+
+fn list_rest(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listRest() expects at least 1 argument".to_string());
+    }
+    let delimiter = if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() };
+    let multi = if args.len() > 3 { args[3].as_bool() } else { false };
+    let offset = if args.len() > 4 { args[4].as_number() as usize } else { 1 };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 2 { args[2].as_bool() } else { false },
+        multi,
+    );
+    let cutoff = offset.min(items.len());
+    items.drain(0..cutoff);
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+}
+
+fn list_delete_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listDeleteAt() expects at least 2 arguments: (list, position)".to_string());
+    }
+    let delimiter = if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() };
+    let multi = if args.len() > 4 { args[4].as_bool() } else { false };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 3 { args[3].as_bool() } else { false },
+        multi,
+    );
+    let pos = args[1].as_number() as isize;
+    if pos < 1 || pos as usize > items.len() {
+        return Err(format!("listDeleteAt() position {} out of range", pos));
+    }
+    items.remove((pos - 1) as usize);
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+}
+
+fn list_find(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    list_find_internal(vm, args, false)
+}
+
+fn list_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    list_find_internal(vm, args, true)
+}
+
+fn list_find_internal(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listFind() expects at least 2 arguments: (list, value)".to_string());
+    }
+
+    let value = if no_case {
+        vm.to_string(args[1]).to_lowercase()
+    } else {
+        vm.to_string(args[1])
+    };
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() },
+        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 4 { args[4].as_bool() } else { false },
+    );
+
+    for (idx, part) in items.iter().enumerate() {
+        let candidate = if no_case {
+            part.to_lowercase()
+        } else {
+            part.clone()
+        };
+        if candidate == value {
             return Ok(BxValue::new_number((idx + 1) as f64));
         }
     }
     Ok(BxValue::new_number(0.0))
+}
+
+fn list_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listSort() expects at least 1 argument".to_string());
+    }
+    let delimiter = if args.len() > 3 { vm.to_string(args[3]) } else { ",".to_string() };
+    let multi = if args.len() > 5 { args[5].as_bool() } else { false };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 4 { args[4].as_bool() } else { false },
+        multi,
+    );
+    let sort_type = if args.len() > 1 { vm.to_string(args[1]).to_lowercase() } else { "text".to_string() };
+    let sort_order = if args.len() > 2 { vm.to_string(args[2]).to_lowercase() } else { "asc".to_string() };
+
+    items.sort_by(|a, b| {
+        let ord = match sort_type.as_str() {
+            "numeric" => {
+                let na = a.trim().parse::<f64>().unwrap_or(0.0);
+                let nb = b.trim().parse::<f64>().unwrap_or(0.0);
+                na.partial_cmp(&nb).unwrap_or(Ordering::Equal)
+            }
+            "textnocase" => a.to_lowercase().cmp(&b.to_lowercase()),
+            _ => a.cmp(b),
+        };
+        if sort_order == "desc" { ord.reverse() } else { ord }
+    });
+
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+}
+
+fn parse_list_items(list: &str, delimiter: String, include_empty: bool, multi: bool) -> Vec<String> {
+    if list.is_empty() {
+        return Vec::new();
+    }
+    if delimiter.is_empty() {
+        return vec![list.to_string()];
+    }
+
+    let mut items = Vec::new();
+    if multi {
+        for part in list.split(&delimiter) {
+            if include_empty || !part.is_empty() {
+                items.push(part.to_string());
+            }
+        }
+    } else {
+        let delims: Vec<char> = delimiter.chars().collect();
+        let mut current = String::new();
+        for ch in list.chars() {
+            if delims.contains(&ch) {
+                if include_empty || !current.is_empty() {
+                    items.push(current.clone());
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        }
+        if include_empty || !current.is_empty() {
+            items.push(current);
+        }
+    }
+    items
+}
+
+fn join_list(items: &[String], delimiter: &str, multi: bool) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    if multi {
+        items.join(delimiter)
+    } else {
+        let join_delimiter = delimiter.chars().next().unwrap_or(',');
+        items.join(&join_delimiter.to_string())
+    }
 }
 
 fn index_of(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
