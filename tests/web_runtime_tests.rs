@@ -317,6 +317,83 @@ fn test_string_helpers() {
 }
 
 #[test]
+fn test_regex_match_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        case_sensitive = reMatch("[abc]", "abc");
+        case_insensitive = reMatchNoCase("[abc]", "AbC");
+
+        if (len(case_sensitive) != 3) { throw "reMatch length failed"; }
+        if (case_sensitive[1] != "a" || case_sensitive[2] != "b" || case_sensitive[3] != "c") {
+            throw "reMatch content failed";
+        }
+
+        if (len(case_insensitive) != 3) { throw "reMatchNoCase length failed"; }
+        if (case_insensitive[1] != "A" || case_insensitive[2] != "b" || case_insensitive[3] != "C") {
+            throw "reMatchNoCase content failed";
+        }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
+fn test_regex_find_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        one = reFind("(1)[2-3]", "test 123 test 123!", 1, true, "one");
+        all = reFind("(1)[2-3]", "test 123 test 123!", 1, false, "all");
+        no_case = reFindNoCase("test", "THIS IS A TEST", 1, false, "one");
+
+        if (one.len[1] != 2 || one.len[2] != 1) { throw "reFind subexpression lengths failed"; }
+        if (one.match[1] != "12" || one.match[2] != "1") { throw "reFind subexpression matches failed"; }
+        if (one.pos[1] != 6 || one.pos[2] != 6) { throw "reFind subexpression positions failed"; }
+
+        if (len(all) != 2 || all[1] != 6 || all[2] != 15) { throw "reFind all positions failed"; }
+        if (no_case != 11) { throw "reFindNoCase failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
+fn test_regex_replace_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        all = reReplace("foo BAR foo", "foo", "qux", "all");
+        one = reReplace("foo BAR foo", "foo", "qux", "one");
+        no_case = "foo BAR foo".reReplaceNoCase("foo", "qux", "all");
+
+        if (all != "qux BAR qux") { throw "reReplace all failed"; }
+        if (one != "qux BAR foo") { throw "reReplace one failed"; }
+        if (no_case != "qux BAR qux") { throw "reReplaceNoCase member failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_list_helpers() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

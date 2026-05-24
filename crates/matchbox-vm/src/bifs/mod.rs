@@ -206,6 +206,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "futureonerror".to_string(),
         future_on_error as BxNativeFunction,
     );
+    bifs.insert("rematch".to_string(), re_match as BxNativeFunction);
+    bifs.insert("rematchnocase".to_string(), re_match_no_case as BxNativeFunction);
+    bifs.insert("refind".to_string(), re_find as BxNativeFunction);
+    bifs.insert("refindnocase".to_string(), re_find_no_case as BxNativeFunction);
+    bifs.insert("rereplace".to_string(), re_replace as BxNativeFunction);
+    bifs.insert(
+        "rereplacenocase".to_string(),
+        re_replace_no_case as BxNativeFunction,
+    );
 
     // System BIFs
     bifs.insert("createuuid".to_string(), create_uuid as BxNativeFunction);
@@ -835,18 +844,265 @@ fn chr_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 }
 
 fn re_match(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_match(vm, args, false)
+}
+
+fn re_match_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_match(vm, args, true)
+}
+
+fn re_find(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_find(vm, args, false)
+}
+
+fn re_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_find(vm, args, true)
+}
+
+fn re_replace(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_replace(vm, args, false)
+}
+
+fn re_replace_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_replace(vm, args, true)
+}
+
+fn regex_prepare(pattern: &str, no_case: bool) -> String {
+    let pattern = regex_posix_replace(pattern, no_case);
+    regex_replace_non_quantifier_curly_braces(&pattern)
+}
+
+fn regex_match(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("reMatch() expects 2 arguments: (regex, string)".to_string());
     }
-    let pattern = vm.to_string(args[0]);
+    let pattern = regex_prepare(&vm.to_string(args[0]), no_case);
     let text = vm.to_string(args[1]);
-    let regex = regex::Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
     let array_id = vm.array_new();
     for cap in regex.find_iter(&text) {
         let s_id = vm.string_new(cap.as_str().to_string());
         vm.array_push(array_id, BxValue::new_ptr(s_id));
     }
     Ok(BxValue::new_ptr(array_id))
+}
+
+fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("reFind() expects at least 2 arguments: (regex, string)".to_string());
+    }
+
+    let pattern = regex_prepare(&vm.to_string(args[0]), no_case);
+    let text = vm.to_string(args[1]);
+    let mut start = if args.len() > 2 { args[2].as_number() as isize } else { 1 };
+    let return_subs = if args.len() > 3 { args[3].as_bool() } else { false };
+    let scope = if args.len() > 4 {
+        vm.to_string(args[4]).to_lowercase()
+    } else {
+        "one".to_string()
+    };
+    if start < 1 {
+        start = 1;
+    }
+    let start_idx = (start - 1) as usize;
+    let start_byte_idx = char_to_byte_index(&text, start_idx);
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
+    let region = &text[start_byte_idx..];
+    let mut matches = Vec::new();
+    for cap in regex.captures_iter(region) {
+        let Some(m) = cap.get(0) else { continue };
+        let mut len_array = vec![BxValue::new_number(m.as_str().chars().count() as f64)];
+        let mut match_array = vec![BxValue::new_ptr(vm.string_new(m.as_str().to_string()))];
+        let mut pos_array = vec![BxValue::new_number(char_count_to_pos(region, m.start()) as f64 + start_idx as f64)];
+        for idx in 1..=cap.len().saturating_sub(1) {
+            match cap.get(idx) {
+                Some(group) => {
+                    len_array.push(BxValue::new_number(group.as_str().chars().count() as f64));
+                    match_array.push(BxValue::new_ptr(vm.string_new(group.as_str().to_string())));
+                    pos_array.push(BxValue::new_number(char_count_to_pos(region, group.start()) as f64 + start_idx as f64));
+                }
+                None => {
+                    len_array.push(BxValue::new_number(0.0));
+                    match_array.push(BxValue::new_ptr(vm.string_new(String::new())));
+                    pos_array.push(BxValue::new_number(0.0));
+                }
+            }
+        }
+        let len_id = vm.array_new();
+        for item in len_array { vm.array_push(len_id, item); }
+        let match_id = vm.array_new();
+        for item in match_array { vm.array_push(match_id, item); }
+        let pos_id = vm.array_new();
+        for item in pos_array { vm.array_push(pos_id, item); }
+        let struct_id = vm.struct_new();
+        vm.struct_set(struct_id, "len", BxValue::new_ptr(len_id));
+        vm.struct_set(struct_id, "match", BxValue::new_ptr(match_id));
+        vm.struct_set(struct_id, "pos", BxValue::new_ptr(pos_id));
+        matches.push(BxValue::new_ptr(struct_id));
+        if scope == "one" {
+            break;
+        }
+    }
+    if return_subs {
+        if matches.is_empty() {
+            let struct_id = vm.struct_new();
+            let len_id = vm.array_new();
+            vm.array_push(len_id, BxValue::new_number(0.0));
+            let match_id = vm.array_new();
+            let empty_id = vm.string_new(String::new());
+            vm.array_push(match_id, BxValue::new_ptr(empty_id));
+            let pos_id = vm.array_new();
+            vm.array_push(pos_id, BxValue::new_number(0.0));
+            vm.struct_set(struct_id, "len", BxValue::new_ptr(len_id));
+            vm.struct_set(struct_id, "match", BxValue::new_ptr(match_id));
+            vm.struct_set(struct_id, "pos", BxValue::new_ptr(pos_id));
+            if scope == "all" {
+                let arr_id = vm.array_new();
+                vm.array_push(arr_id, BxValue::new_ptr(struct_id));
+                Ok(BxValue::new_ptr(arr_id))
+            } else {
+                Ok(BxValue::new_ptr(struct_id))
+            }
+        } else if scope == "all" {
+            let arr_id = vm.array_new();
+            for m in matches { vm.array_push(arr_id, m); }
+            Ok(BxValue::new_ptr(arr_id))
+        } else {
+            Ok(matches.remove(0))
+        }
+    } else {
+        if matches.is_empty() {
+            Ok(BxValue::new_number(0.0))
+        } else if scope == "all" {
+            let arr_id = vm.array_new();
+            for m in matches {
+                if let Some(struct_id) = m.as_gc_id() {
+                    let pos_val = vm.struct_get(struct_id, "pos");
+                    if let Some(pos_arr_id) = pos_val.as_gc_id() {
+                        let first = vm.array_get(pos_arr_id, 0);
+                        vm.array_push(arr_id, first);
+                    }
+                }
+            }
+            Ok(BxValue::new_ptr(arr_id))
+        } else {
+            if let Some(struct_id) = matches[0].as_gc_id() {
+                let pos_val = vm.struct_get(struct_id, "pos");
+                if let Some(pos_arr_id) = pos_val.as_gc_id() {
+                    Ok(vm.array_get(pos_arr_id, 0))
+                } else {
+                    Ok(BxValue::new_number(0.0))
+                }
+            } else {
+                Ok(BxValue::new_number(0.0))
+            }
+        }
+    }
+}
+
+fn regex_replace(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("reReplace() expects at least 3 arguments: (string, regex, replacement)".to_string());
+    }
+            let string = vm.to_string(args[0]);
+    let pattern = regex_prepare(&vm.to_string(args[1]), no_case);
+    let substring = vm.to_string(args[2]);
+    let scope = if args.len() > 3 { vm.to_string(args[3]).to_lowercase() } else { "one".to_string() };
+
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
+
+    let result = if scope == "all" {
+        regex.replace_all(&string, substring.as_str()).to_string()
+    } else {
+        regex.replace(&string, substring.as_str()).to_string()
+    };
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
+    if char_idx == 0 {
+        return 0;
+    }
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
+}
+
+fn char_count_to_pos(text: &str, byte_idx: usize) -> usize {
+    text[..byte_idx].chars().count() + 1
+}
+
+fn regex_posix_replace(expression: &str, no_case: bool) -> String {
+    let mut return_expression = expression.to_string();
+    let replacements = [
+        ("[:alnum:]", "a-zA-Z0-9"),
+        ("[:alpha:]", "a-zA-Z"),
+        ("[:blank:]", " \\t"),
+        ("[:cntrl:]", "\\x00-\\x1F\\x7F"),
+        ("[:digit:]", "0-9"),
+        ("[:graph:]", "\\x21-\\x7E"),
+        ("[:lower:]", if no_case { "a-zA-Z" } else { "a-z" }),
+        ("[:print:]", "\\x20-\\x7E"),
+        ("[:punct:]", "!\"#$%&'()*+,-./:;<=>?@\\[\\]^_`{|}~"),
+        ("[:space:]", "\\s"),
+        ("[:upper:]", if no_case { "a-zA-Z" } else { "A-Z" }),
+        ("[:xdigit:]", "0-9a-fA-F"),
+    ];
+    for (needle, replacement) in replacements {
+        return_expression = return_expression.replace(needle, replacement);
+        return_expression = return_expression.replace(&format!("[{}]", needle), &format!("[{}]", replacement));
+    }
+    return_expression
+}
+
+fn regex_replace_non_quantifier_curly_braces(input: &str) -> String {
+    let mut escaped = String::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            if i + 1 < chars.len() {
+                escaped.push(c);
+                escaped.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+        }
+        if c == '{' {
+            let mut j = i + 1;
+            let mut has_digit = false;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                has_digit = true;
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '}' && has_digit {
+                escaped.push(c);
+                i += 1;
+                continue;
+            }
+            escaped.push_str("\\{");
+        } else if c == '}' {
+            escaped.push_str("\\}");
+        } else {
+            escaped.push(c);
+        }
+        i += 1;
+    }
+    escaped
 }
 
 fn mid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
