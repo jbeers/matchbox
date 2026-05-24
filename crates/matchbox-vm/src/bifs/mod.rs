@@ -223,6 +223,13 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         re_replace_no_case as BxNativeFunction,
     );
 
+    // Crypto BIFs
+    #[cfg(feature = "bif-crypto")]
+    {
+        bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
+        bifs.insert("hmac".to_string(), crypto::hmac_bif as BxNativeFunction);
+    }
+
     // System BIFs
     bifs.insert("createuuid".to_string(), create_uuid as BxNativeFunction);
     bifs.insert("createguid".to_string(), create_guid as BxNativeFunction);
@@ -338,10 +345,6 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "loadproperties".to_string(),
         json::load_properties as BxNativeFunction,
     );
-
-    // Crypto BIFs
-    #[cfg(feature = "bif-crypto")]
-    bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
 
     // Datasource BIFs
     #[cfg(feature = "bif-datasource")]

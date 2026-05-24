@@ -477,6 +477,46 @@ fn test_utility_helpers() {
 }
 
 #[test]
+fn test_crypto_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        input = "Hello World";
+
+        if (hash(input) != "b10a8db164e0754105b7a99be72e3fe5") { throw "default hash failed"; }
+        if (hash(input, "MD5") != "b10a8db164e0754105b7a99be72e3fe5") { throw "md5 hash failed"; }
+        if (hash(input, "SHA") != "0a4d55a8d778e5022fab701977c5d840bbc486d0") { throw "sha1 hash failed"; }
+        if (hash(input, "SHA-256") != "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e") { throw "sha256 hash failed"; }
+        if (hash(input, "SHA-384") != "99514329186b2f6ae4a1329e7ee6c610a729636335174ac6b740f9028396fcc803d0e93863a7c3d90f86beee782f4f3f") { throw "sha384 hash failed"; }
+        if (hash(input, "SHA-512") != "2c74fd17edafd80e8447b0d46741ee243b7eb74dd2149a0ab1b9246fb30382f27e853d8585719e0e67cbda0daa8f51671064615d645ae27acb15bfb1447f459b") { throw "sha512 hash failed"; }
+
+        if (hash("foo", "QUICK") != "4d780c14822d4653") { throw "quick hash failed"; }
+        if (hash(input, "bxmX_COMPAT") != hash(input, "MD5")) { throw "compat hash failed"; }
+        if (hash(bytesNew([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100])) != hash(input)) { throw "byte hash failed"; }
+        if (hash("hello world", "md5", "utf-8", 2) != "241d8a27c836427bd7f04461b60e7359") { throw "hash iterations failed"; }
+
+        if (hmac("Hmac me baby!", "foo") != "48bfb8004f92d6c9e9eac9728c5d919c") { throw "hmac md5 failed"; }
+        if ("Hmac me baby!".hmac("foo") != "48bfb8004f92d6c9e9eac9728c5d919c") { throw "member hmac failed"; }
+        if (lcase(hmac(
+            "foo",
+            bytesNew([15, 107, 76, 217, 13, 96, 99, 125, 52, 165, 71, 238, 181, 130, 111, 168, 231, 31, 85, 175, 207, 166, 65, 15, 187, 54, 5, 66, 136, 183, 100, 205]),
+            "HMACSHA256",
+            "UTF-8"
+        )) != "3483aeb10dab06f29b8037366fdf819b5c0c09a99213cae50a3474d4edbbd400") {
+            throw "hmac sha256 failed";
+        }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_list_helpers() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

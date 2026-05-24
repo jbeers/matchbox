@@ -1837,6 +1837,8 @@ impl VM {
                     "refindnocase" => Some("refindnocase".to_string()),
                     "rereplace" => Some("rereplace".to_string()),
                     "rereplacenocase" => Some("rereplacenocase".to_string()),
+                    "hash" => Some("hash".to_string()),
+                    "hmac" => Some("hmac".to_string()),
                     "indexof" => Some("indexof".to_string()),
                     "left" => Some("left".to_string()),
                     "right" => Some("right".to_string()),
