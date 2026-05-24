@@ -1868,6 +1868,7 @@ impl VM {
                     "filter" => Some("arrayfilter".to_string()),
                     "tolist" => Some("arraytolist".to_string()),
                     "tojson" => Some("serializejson".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
                 GcObject::Struct(_) => match name.as_str() {
@@ -1877,6 +1878,7 @@ impl VM {
                     "isempty" => Some("structisempty".to_string()),
                     "each" => Some("structeach".to_string()),
                     "tojson" => Some("serializejson".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
                 GcObject::Future(_) => match name.as_str() {
@@ -1890,6 +1892,7 @@ impl VM {
                     "format" => Some("datetimeformat".to_string()),
                     "dateformat" => Some("dateformat".to_string()),
                     "datetimeformat" => Some("datetimeformat".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
                 #[cfg(all(target_arch = "wasm32", feature = "js"))]

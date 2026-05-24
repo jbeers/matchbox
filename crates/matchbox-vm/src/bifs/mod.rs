@@ -131,16 +131,23 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "writeoutput".to_string(),
         write_output_bif as BxNativeFunction,
     );
+    bifs.insert("duplicate".to_string(), duplicate_bif as BxNativeFunction);
     bifs.insert(
         "createobject".to_string(),
         create_object as BxNativeFunction,
     );
     bifs.insert("isnull".to_string(), is_null_bif as BxNativeFunction);
     bifs.insert("isnumeric".to_string(), is_numeric_bif as BxNativeFunction);
+    bifs.insert("isarray".to_string(), is_array_bif as BxNativeFunction);
+    bifs.insert("isstruct".to_string(), is_struct_bif as BxNativeFunction);
+    bifs.insert("isboolean".to_string(), is_boolean_bif as BxNativeFunction);
+    bifs.insert("isstring".to_string(), is_string_bif as BxNativeFunction);
+    bifs.insert("isdate".to_string(), is_date_bif as BxNativeFunction);
     bifs.insert(
         "issimplevalue".to_string(),
         is_simple_value_bif as BxNativeFunction,
     );
+    bifs.insert("isobject".to_string(), is_object_bif as BxNativeFunction);
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
@@ -1379,6 +1386,83 @@ fn write_output_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     Ok(BxValue::new_bool(true))
 }
 
+fn duplicate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("duplicate() expects at least 1 argument".to_string());
+    }
+    let deep = args.get(1).map(|v| v.as_bool()).unwrap_or(true);
+    let mut seen = HashMap::new();
+    duplicate_value(vm, args[0], deep, &mut seen)
+}
+
+fn duplicate_value(
+    vm: &mut dyn BxVM,
+    value: BxValue,
+    deep: bool,
+    seen: &mut HashMap<usize, BxValue>,
+) -> Result<BxValue, String> {
+    if value.is_null() || value.is_bool() || value.is_number() {
+        return Ok(value);
+    }
+
+    if vm.is_string_value(value) {
+        return Ok(BxValue::new_ptr(vm.string_new(vm.to_string(value))));
+    }
+
+    if vm.is_bytes(value) {
+        return Ok(BxValue::new_ptr(vm.bytes_new(vm.to_bytes(value)?)));
+    }
+
+    if let Some(type_name) = vm.type_name_from_value(value) {
+        if type_name.eq_ignore_ascii_case("datetime") {
+            let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+            return Ok(BxValue::new_ptr(vm.datetime_new(dt)));
+        }
+    }
+
+    let Some(id) = value.as_gc_id() else {
+        return Ok(value);
+    };
+
+    if let Some(existing) = seen.get(&id) {
+        return Ok(*existing);
+    }
+
+    if vm.is_array_value(value) {
+        let new_id = vm.array_new();
+        let duplicated = BxValue::new_ptr(new_id);
+        seen.insert(id, duplicated);
+        for idx in 0..vm.array_len(id) {
+            let item = vm.array_get(id, idx);
+            let copied = if deep {
+                duplicate_value(vm, item, true, seen)?
+            } else {
+                item
+            };
+            vm.array_push(new_id, copied);
+        }
+        return Ok(duplicated);
+    }
+
+    if vm.is_struct_value(value) {
+        let new_id = vm.struct_new();
+        let duplicated = BxValue::new_ptr(new_id);
+        seen.insert(id, duplicated);
+        for key in vm.struct_key_array(id) {
+            let item = vm.struct_get(id, &key);
+            let copied = if deep {
+                duplicate_value(vm, item, true, seen)?
+            } else {
+                item
+            };
+            vm.struct_set(new_id, &key, copied);
+        }
+        return Ok(duplicated);
+    }
+
+    Ok(value)
+}
+
 // --- System BIFs ---
 
 fn create_uuid(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
@@ -2208,6 +2292,76 @@ fn is_null_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     Ok(BxValue::new_bool(args[0].is_null()))
 }
 
+fn is_array_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_array_value(args[0])))
+}
+
+fn is_struct_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_struct_value(args[0])))
+}
+
+fn is_boolean_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_bool = value.is_bool()
+        || value.is_number()
+        || matches!(
+            vm.to_string(value).to_ascii_lowercase().as_str(),
+            "true" | "false" | "yes" | "no" | "1" | "0"
+        );
+    Ok(BxValue::new_bool(is_bool))
+}
+
+fn is_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_string_value(args[0])))
+}
+
+fn is_date_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_date = vm
+        .type_name_from_value(value)
+        .map(|name| name.eq_ignore_ascii_case("datetime"))
+        .unwrap_or(false)
+        || parse_datetime_input(&vm.to_string(value), None, None).is_ok();
+    Ok(BxValue::new_bool(is_date))
+}
+
+fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_object = if value.is_null()
+        || value.is_bool()
+        || value.is_number()
+        || vm.is_string_value(value)
+        || vm.is_array_value(value)
+        || vm.is_struct_value(value)
+        || vm.is_bytes(value)
+    {
+        false
+    } else if let Some(type_name) = vm.type_name_from_value(value) {
+        !matches!(type_name.to_ascii_lowercase().as_str(), "datetime" | "range")
+    } else {
+        value.as_gc_id().is_some()
+    };
+    Ok(BxValue::new_bool(is_object))
+}
+
 fn is_numeric_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Ok(BxValue::new_bool(false));
@@ -2229,6 +2383,9 @@ fn is_simple_value_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         return Ok(BxValue::new_bool(false));
     }
     let val = &args[0];
-    let is_simple = val.is_number() || val.is_bool() || vm.is_string_value(*val);
+    let is_simple = val.is_number()
+        || val.is_bool()
+        || vm.is_string_value(*val)
+        || vm.type_name_from_value(*val).map(|name| name.eq_ignore_ascii_case("datetime")).unwrap_or(false);
     Ok(BxValue::new_bool(is_simple))
 }

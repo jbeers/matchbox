@@ -433,6 +433,50 @@ fn test_json_helpers() {
 }
 
 #[test]
+fn test_utility_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        uuid = createUUID();
+        if (len(uuid) != 36) { throw "createUUID length failed"; }
+        if (uuid != uCase(uuid)) { throw "createUUID case failed"; }
+
+        ref = {
+            nested: [1, { value: "orig" }],
+            stamp: now(),
+            raw: bytesNew([1, 2, 3])
+        };
+
+        dup = duplicate(ref);
+        memberDup = ref.duplicate();
+
+        dup.nested[2].value = "changed";
+        memberDup.nested[2].value = "member";
+
+        if (ref.nested[2].value != "orig") { throw "duplicate deep copy failed"; }
+        if (dup.nested[2].value != "changed") { throw "duplicate mutation failed"; }
+        if (memberDup.nested[2].value != "member") { throw "member duplicate mutation failed"; }
+        if (!isArray(ref.nested)) { throw "isArray failed"; }
+        if (!isStruct(ref)) { throw "isStruct failed"; }
+        if (!isDate(ref.stamp)) { throw "isDate failed"; }
+        if (!isBinary(ref.raw)) { throw "isBinary failed"; }
+        if (!isBoolean(true) || !isBoolean("yes") || isBoolean("randomstring")) { throw "isBoolean failed"; }
+        if (!isString("abc") || isString(ref)) { throw "isString failed"; }
+        if (isObject(ref) || isObject(ref.nested) || isObject(ref.stamp)) { throw "isObject failed"; }
+        if (!isSimpleValue(ref.stamp)) { throw "isSimpleValue date failed"; }
+
+        sleep(1);
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_list_helpers() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());
