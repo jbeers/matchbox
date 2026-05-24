@@ -1,0 +1,33 @@
+// BoxLang variant of the repeated small-query QoQ micro benchmark.
+
+rowCount = 10
+iterations = 10000
+data = queryNew("value", "integer")
+
+for (i = 1; i <= rowCount; i = i + 1) {
+    queryAddRow(data, { value: i })
+}
+
+expected = (rowCount + 1) / 2
+sum = 0
+
+start = getTickCount()
+for (i = 1; i <= iterations; i = i + 1) {
+    result = queryExecute(
+        "SELECT AVG(value) AS avg_value FROM data",
+        null,
+        { dbType: "query" }
+    )
+    avgValue = queryColumnData(result, "avg_value")[1]
+    sum = sum + avgValue
+}
+elapsed = getTickCount() - start
+
+if (abs(sum - (expected * iterations)) > 0.0001) {
+    throw "Expected accumulated average " & (expected * iterations) & ", got " & sum
+}
+
+println("rows = " & rowCount)
+println("iterations = " & iterations)
+println("elapsed ms = " & elapsed)
+println("avg value = " & (sum / iterations))

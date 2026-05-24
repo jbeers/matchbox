@@ -6,6 +6,8 @@ It is intended for comparing MatchBox and BoxLang on the same workload.
 There are two script variants:
 - `qoq_avg_1m.bxs` for MatchBox
 - `qoq_avg_1m_boxlang.bxs` for BoxLang
+- `qoq_many_small_queries.bxs` for MatchBox
+- `qoq_many_small_queries_boxlang.bxs` for BoxLang
 
 ## Run MatchBox
 
@@ -29,6 +31,13 @@ If your BoxLang build requires the native queryNew signature, use the BoxLang-sp
 
 ```bash
 /usr/bin/time -v boxlang benchmarks/qoq_avg_1m_boxlang.bxs
+```
+
+For a micro benchmark that stresses repeated QoQ execution instead of large-row aggregation:
+
+```bash
+/usr/bin/time -v cargo run --features qoq -- benchmarks/qoq_many_small_queries.bxs
+/usr/bin/time -v boxlang benchmarks/qoq_many_small_queries_boxlang.bxs
 ```
 
 ## Notes
