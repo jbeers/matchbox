@@ -284,6 +284,39 @@ fn test_phrase_word_operators() {
 }
 
 #[test]
+fn test_string_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        s = "BoxLang is great";
+
+        if (find("Lang", s) != 4) { throw "find failed"; }
+        if (findNoCase("lang", s) != 4) { throw "findNoCase failed"; }
+        if (find("Lang", s, 2) != 4) { throw "find start failed"; }
+        if (find("zzz", s) != 0) { throw "find not-found failed"; }
+
+        if (s.find("Lang") != 4) { throw "member find failed"; }
+        if (s.findNoCase("lang") != 4) { throw "member findNoCase failed"; }
+
+        if ("abcdef".left(3) != "abc") { throw "left failed"; }
+        if ("abcdef".right(3) != "def") { throw "right failed"; }
+        if ("abcdef".mid(2, 3) != "bcd") { throw "mid failed"; }
+        if ("abcdef".reverse() != "fedcba") { throw "reverse failed"; }
+        if ("  hi  ".trim() != "hi") { throw "trim failed"; }
+        if (spanExcluding("MyString", "inS") != "My") { throw "spanExcluding failed"; }
+        if ("Highway Star".spanIncluding("High") != "High") { throw "spanIncluding failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_date_time_and_bifs() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

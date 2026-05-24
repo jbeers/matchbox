@@ -121,6 +121,27 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
+    bifs.insert("find".to_string(), find_bif as BxNativeFunction);
+    bifs.insert(
+        "findnocase".to_string(),
+        find_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert("stringfind".to_string(), string_find_bif as BxNativeFunction);
+    bifs.insert(
+        "stringfindnocase".to_string(),
+        string_find_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert("left".to_string(), left_bif as BxNativeFunction);
+    bifs.insert("right".to_string(), right_bif as BxNativeFunction);
+    bifs.insert("reverse".to_string(), reverse_bif as BxNativeFunction);
+    bifs.insert(
+        "spanexcluding".to_string(),
+        span_excluding_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "spanincluding".to_string(),
+        span_including_bif as BxNativeFunction,
+    );
     bifs.insert("tostring".to_string(), to_string_bif as BxNativeFunction);
     bifs.insert("now".to_string(), now as BxNativeFunction);
     bifs.insert("createdate".to_string(), create_date as BxNativeFunction);
@@ -345,6 +366,163 @@ fn trim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let s = vm.to_string(args[0]).trim().to_string();
     Ok(BxValue::new_ptr(vm.string_new(s)))
+}
+
+fn find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, false, true)
+}
+
+fn find_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, true, true)
+}
+
+fn string_find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, false, false)
+}
+
+fn string_find_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, true, false)
+}
+
+fn find_bif_internal(
+    vm: &mut dyn BxVM,
+    args: &[BxValue],
+    ignore_case: bool,
+    substring_first: bool,
+) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("find() expects at least 2 arguments: (substring, string)".to_string());
+    }
+
+    let (substring, input) = if substring_first {
+        (vm.to_string(args[0]), vm.to_string(args[1]))
+    } else {
+        (vm.to_string(args[1]), vm.to_string(args[0]))
+    };
+    let start = if args.len() > 2 {
+        args[2].as_number() as isize
+    } else {
+        1
+    };
+    let start = start.max(1) as usize;
+    let start_idx = start.saturating_sub(1);
+    let input_chars = input.chars().count();
+    let start_byte_idx = if start_idx >= input_chars {
+        input.len()
+    } else {
+        input
+            .char_indices()
+            .nth(start_idx)
+            .map(|(idx, _)| idx)
+            .unwrap_or(input.len())
+    };
+    let haystack = &input[start_byte_idx..];
+
+    let position = if ignore_case {
+        let needle = substring.to_lowercase();
+        let hay = haystack.to_lowercase();
+        hay.find(&needle)
+            .map(|idx| idx + start_idx + 1)
+    } else {
+        haystack.find(&substring).map(|idx| idx + start_idx + 1)
+    };
+
+    Ok(BxValue::new_number(position.unwrap_or(0) as f64))
+}
+
+fn left_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("left() expects 2 arguments: (string, count)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+
+    let count = args[1].as_number() as isize;
+    if count == 0 {
+        return Err("Count cannot be zero".to_string());
+    }
+
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len() as isize;
+    let end = if count > 0 {
+        count.min(len)
+    } else {
+        (len + count).max(0)
+    } as usize;
+
+    Ok(BxValue::new_ptr(vm.string_new(chars[..end].iter().collect())))
+}
+
+fn right_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("right() expects 2 arguments: (string, count)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+
+    let count = args[1].as_number() as isize;
+    if count == 0 {
+        return Err("Count cannot be zero.".to_string());
+    }
+
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len() as isize;
+    let start = if count > 0 {
+        (len - count.max(0)).max(0)
+    } else {
+        (-count).min(len)
+    } as usize;
+
+    Ok(BxValue::new_ptr(vm.string_new(chars[start..].iter().collect())))
+}
+
+fn reverse_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("reverse() expects exactly 1 argument".to_string());
+    }
+
+    let reversed = vm.to_string(args[0]).chars().rev().collect::<String>();
+    Ok(BxValue::new_ptr(vm.string_new(reversed)))
+}
+
+fn span_excluding_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("spanExcluding() expects 2 arguments: (string, set)".to_string());
+    }
+
+    let input = vm.to_string(args[0]);
+    let set = vm.to_string(args[1]);
+    if input.is_empty() {
+        return Err("spanExcluding() expects a non-empty string".to_string());
+    }
+
+    let end = input
+        .chars()
+        .position(|ch| set.chars().any(|needle| needle == ch))
+        .unwrap_or_else(|| input.chars().count());
+    Ok(BxValue::new_ptr(vm.string_new(input.chars().take(end).collect())))
+}
+
+fn span_including_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("spanIncluding() expects 2 arguments: (string, set)".to_string());
+    }
+
+    let input = vm.to_string(args[0]);
+    let set = vm.to_string(args[1]);
+    if input.is_empty() {
+        return Err("spanIncluding() expects a non-empty string".to_string());
+    }
+
+    let end = input
+        .chars()
+        .position(|ch| !set.chars().any(|needle| needle == ch))
+        .unwrap_or_else(|| input.chars().count());
+    Ok(BxValue::new_ptr(vm.string_new(input.chars().take(end).collect())))
 }
 
 fn to_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

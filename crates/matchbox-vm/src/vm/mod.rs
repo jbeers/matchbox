@@ -1799,9 +1799,9 @@ impl VM {
 
 
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
-        let name = method_name;
+        let name = method_name.to_ascii_lowercase();
         if receiver.is_number() {
-            return match name {
+            return match name.as_str() {
                 "abs" => Some("abs".to_string()),
                 "round" => Some("round".to_string()),
                 _ => None,
@@ -1810,15 +1810,25 @@ impl VM {
 
         if let Some(id) = receiver.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(_) => match name {
+                GcObject::String(_) => match name.as_str() {
                     "len" | "length" => Some("len".to_string()),
                     "ucase" | "touppercase" => Some("ucase".to_string()),
                     "lcase" | "tolowercase" => Some("lcase".to_string()),
                     "split" => Some("listtoarray".to_string()),
+                    "trim" => Some("trim".to_string()),
+                    "find" => Some("stringfind".to_string()),
+                    "findnocase" => Some("stringfindnocase".to_string()),
                     "indexof" => Some("indexof".to_string()),
+                    "left" => Some("left".to_string()),
+                    "right" => Some("right".to_string()),
+                    "mid" => Some("mid".to_string()),
+                    "reverse" => Some("reverse".to_string()),
+                    "spanexcluding" => Some("spanexcluding".to_string()),
+                    "spanincluding" => Some("spanincluding".to_string()),
+                    "replace" => Some("replace".to_string()),
                     _ => None,
                 },
-                GcObject::Array(_) => match name {
+                GcObject::Array(_) => match name.as_str() {
                     "len" | "length" | "count" => Some("len".to_string()),
                     "append" | "add" => Some("arrayappend".to_string()),
                     "resize" => Some("arrayresize".to_string()),
@@ -1830,7 +1840,7 @@ impl VM {
                     "tolist" => Some("arraytolist".to_string()),
                     _ => None,
                 },
-                GcObject::Struct(_) => match name {
+                GcObject::Struct(_) => match name.as_str() {
                     "len" | "count" => Some("len".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
                     "find" => Some("structfind".to_string()),
@@ -1838,12 +1848,12 @@ impl VM {
                     "each" => Some("structeach".to_string()),
                     _ => None,
                 },
-                GcObject::Future(_) => match name {
+                GcObject::Future(_) => match name.as_str() {
                     "onerror" => Some("futureonerror".to_string()),
                     "get" => Some("futureget".to_string()),
                     _ => None,
                 },
-                GcObject::DateTime(_) => match name {
+                GcObject::DateTime(_) => match name.as_str() {
                     "add" => Some("dateadd".to_string()),
                     "diff" => Some("datediff".to_string()),
                     "format" => Some("datetimeformat".to_string()),
