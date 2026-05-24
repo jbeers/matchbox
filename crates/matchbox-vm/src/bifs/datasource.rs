@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 #[cfg(feature = "bif-datasource")]
 use crate::datasource::traits::{
-    DatasourceConfig, QueryColumn, QueryColumnType, QueryParam, SqlValue,
+    DatasourceConfig, QueryColumn, QueryColumnType, QueryParam, QueryResult, SqlValue,
 };
 #[cfg(feature = "bif-datasource")]
 use crate::datasource::{bx_to_sql, registry, sql_to_bx, BxQuery};

@@ -1,0 +1,33 @@
+// QoQ stress benchmark:
+// - build a 1,000,000 row in-memory query
+// - run AVG(value) over the query
+// - print timing information for the build and execution phases
+
+rowCount = 1000000
+data = queryNew(["value"])
+
+buildStart = getTickCount()
+for (i = 1; i <= rowCount; i = i + 1) {
+    queryAddRow(data, { value: i })
+}
+buildElapsed = getTickCount() - buildStart
+
+execStart = getTickCount()
+result = queryExecute(
+    "SELECT AVG(value) AS avg_value FROM data",
+    null,
+    { dbType: "query" }
+)
+execElapsed = getTickCount() - execStart
+
+avgValue = queryColumnData(result, "avg_value")[1]
+expected = (rowCount + 1) / 2
+
+if (abs(avgValue - expected) > 0.0001) {
+    throw "Expected average " & expected & ", got " & avgValue
+}
+
+println("rows =", rowCount)
+println("build ms =", buildElapsed)
+println("qoq ms =", execElapsed)
+println("avg value =", avgValue)
