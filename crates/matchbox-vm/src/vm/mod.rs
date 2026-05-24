@@ -1829,6 +1829,8 @@ impl VM {
                     "trim" => Some("trim".to_string()),
                     "find" => Some("stringfind".to_string()),
                     "findnocase" => Some("stringfindnocase".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
+                    "fromjson" => Some("deserializejson".to_string()),
                     "rematch" => Some("rematch".to_string()),
                     "rematchnocase" => Some("rematchnocase".to_string()),
                     "refind" => Some("refind".to_string()),
@@ -1865,6 +1867,7 @@ impl VM {
                     "reduce" => Some("arrayreduce".to_string()),
                     "filter" => Some("arrayfilter".to_string()),
                     "tolist" => Some("arraytolist".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
                     _ => None,
                 },
                 GcObject::Struct(_) => match name.as_str() {
@@ -1873,6 +1876,7 @@ impl VM {
                     "find" => Some("structfind".to_string()),
                     "isempty" => Some("structisempty".to_string()),
                     "each" => Some("structeach".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
                     _ => None,
                 },
                 GcObject::Future(_) => match name.as_str() {
@@ -6422,12 +6426,12 @@ impl VM {
     }
 
     pub fn bx_to_json(&self, val: &BxValue) -> serde_json::Value {
-        if val.is_number() {
+        if val.is_int() {
+            serde_json::Value::Number(val.as_int().into())
+        } else if val.is_number() {
             serde_json::Number::from_f64(val.as_number())
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null)
-        } else if val.is_int() {
-            serde_json::Value::Number(val.as_int().into())
         } else if val.is_bool() {
             serde_json::Value::Bool(val.as_bool())
         } else if val.is_null() {

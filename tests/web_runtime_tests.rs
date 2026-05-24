@@ -394,6 +394,45 @@ fn test_regex_replace_helpers() {
 }
 
 #[test]
+fn test_json_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        payload = {
+            name: "MatchBox",
+            values: [1, 2, null, true, false]
+        };
+
+        json = serializeJSON(payload);
+        member_json = payload.toJSON();
+        roundtrip = deserializeJSON(json);
+        member_roundtrip = json.fromJSON();
+
+        if (!isJSON(json)) { throw "isJSON failed"; }
+        if (isJSON("not json")) { throw "isJSON false-positive"; }
+        if (json != '{"name":"MatchBox","values":[1.0,2.0,null,true,false]}') {
+            throw "serializeJSON failed: " & json;
+        }
+        if (member_json != json) { throw "member toJSON failed"; }
+        if (roundtrip.name != "MatchBox") { throw "deserializeJSON struct failed"; }
+        if (member_roundtrip.name != "MatchBox") { throw "member fromJSON struct failed"; }
+        if (roundtrip.values[1] != 1 || roundtrip.values[3] != null || roundtrip.values[5] != false) {
+            throw "deserializeJSON array failed";
+        }
+
+        if (serializeJSON(null) != "null") { throw "serializeJSON null failed"; }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_list_helpers() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());

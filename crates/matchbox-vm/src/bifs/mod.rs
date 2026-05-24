@@ -311,13 +311,22 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // JSON BIFs
     bifs.insert(
+        "deserializejson".to_string(),
+        json::json_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
         "jsondeserialize".to_string(),
         json::json_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
+        "serializejson".to_string(),
+        json::json_serialize as BxNativeFunction,
     );
     bifs.insert(
         "jsonserialize".to_string(),
         json::json_serialize as BxNativeFunction,
     );
+    bifs.insert("isjson".to_string(), json::is_json as BxNativeFunction);
     bifs.insert(
         "loadproperties".to_string(),
         json::load_properties as BxNativeFunction,
