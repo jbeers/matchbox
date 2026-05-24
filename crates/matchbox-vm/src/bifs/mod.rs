@@ -1,5 +1,5 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
-use chrono::Local;
+use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
 use rand::RngExt;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -57,6 +57,11 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         array_clear_bif as BxNativeFunction,
     );
     bifs.insert("arrayset".to_string(), array_set_bif as BxNativeFunction);
+    bifs.insert("arrayswap".to_string(), array_swap_bif as BxNativeFunction);
+    bifs.insert(
+        "arrayresize".to_string(),
+        array_resize_bif as BxNativeFunction,
+    );
     bifs.insert("bytesnew".to_string(), bytes_new as BxNativeFunction);
     bifs.insert("byteslen".to_string(), bytes_len_bif as BxNativeFunction);
     bifs.insert("bytesget".to_string(), bytes_get_bif as BxNativeFunction);
@@ -90,6 +95,11 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "structclear".to_string(),
         struct_clear_bif as BxNativeFunction,
     );
+    bifs.insert("structfind".to_string(), struct_find_bif as BxNativeFunction);
+    bifs.insert(
+        "structisempty".to_string(),
+        struct_is_empty_bif as BxNativeFunction,
+    );
     bifs.insert("structcount".to_string(), len as BxNativeFunction);
 
     // Core BIFs
@@ -112,6 +122,23 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
     bifs.insert("tostring".to_string(), to_string_bif as BxNativeFunction);
+    bifs.insert("now".to_string(), now as BxNativeFunction);
+    bifs.insert("createdate".to_string(), create_date as BxNativeFunction);
+    bifs.insert(
+        "createdatetime".to_string(),
+        create_date_time as BxNativeFunction,
+    );
+    bifs.insert("dateadd".to_string(), date_add as BxNativeFunction);
+    bifs.insert("datediff".to_string(), date_diff as BxNativeFunction);
+    bifs.insert("dateformat".to_string(), date_format_bif as BxNativeFunction);
+    bifs.insert(
+        "datetimeformat".to_string(),
+        date_time_format_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "parsedatetime".to_string(),
+        parse_date_time_bif as BxNativeFunction,
+    );
     bifs.insert("listtoarray".to_string(), list_to_array as BxNativeFunction);
     bifs.insert(
         "listfindnocase".to_string(),
@@ -651,6 +678,54 @@ fn array_clear_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     }
 }
 
+fn array_swap_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("arraySwap() expects 3 arguments: (array, fromIndex, toIndex)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let from = args[1].as_number() as usize;
+        let to = args[2].as_number() as usize;
+        if from == 0 || to == 0 {
+            return Err("Array index must be 1-based".to_string());
+        }
+        let from_idx = from - 1;
+        let to_idx = to - 1;
+        let len = vm.array_len(id);
+        if from_idx >= len || to_idx >= len {
+            return Err("arraySwap() index out of bounds".to_string());
+        }
+        let left = vm.array_get(id, from_idx);
+        let right = vm.array_get(id, to_idx);
+        vm.array_set(id, from_idx, right)?;
+        vm.array_set(id, to_idx, left)?;
+        Ok(args[0])
+    } else {
+        Err("arraySwap() expects an array as the first argument".to_string())
+    }
+}
+
+fn array_resize_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("arrayResize() expects 2 arguments: (array, size)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let size = args[1].as_number() as isize;
+        if size < 0 {
+            return Err("arrayResize() size must be non-negative".to_string());
+        }
+        let size = size as usize;
+        let current = vm.array_len(id);
+        if size > current {
+            for _ in current..size {
+                vm.array_push(id, BxValue::new_null());
+            }
+        }
+        Ok(args[0])
+    } else {
+        Err("arrayResize() expects an array as the first argument".to_string())
+    }
+}
+
 fn array_set_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 3 {
         return Err("arraySet() expects 3 arguments: (array, index, value)".to_string());
@@ -833,12 +908,439 @@ fn struct_clear_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
 }
 
+fn struct_find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("structFind() expects at least 2 arguments: (struct, key)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let key = vm.to_string(args[1]);
+        let found = vm.struct_get(id, &key);
+        if found.is_null() {
+            if args.len() >= 3 {
+                Ok(args[2])
+            } else {
+                Err(format!("Key '{}' not found in struct", key))
+            }
+        } else {
+            Ok(found)
+        }
+    } else {
+        Err("structFind() expects a struct as the first argument".to_string())
+    }
+}
+
+fn struct_is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structIsEmpty() expects 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        Ok(BxValue::new_bool(vm.struct_len(id) == 0))
+    } else {
+        Err("structIsEmpty() expects a struct".to_string())
+    }
+}
+
 // --- Date/Time BIFs ---
 
+fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
+    let tz = tz?.trim();
+    if tz.is_empty() || tz.eq_ignore_ascii_case("utc") || tz.eq_ignore_ascii_case("gmt") || tz == "z" {
+        return FixedOffset::east_opt(0);
+    }
+
+    let raw = tz.strip_prefix("UTC").or_else(|| tz.strip_prefix("utc")).unwrap_or(tz);
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return FixedOffset::east_opt(0);
+    }
+
+    let sign = match raw.chars().next()? {
+        '+' => 1,
+        '-' => -1,
+        _ => return None,
+    };
+    let digits = &raw[1..];
+    let digits = digits.replace(':', "");
+    if digits.len() != 2 && digits.len() != 4 {
+        return None;
+    }
+    let hours: i32 = digits[0..2].parse().ok()?;
+    let mins: i32 = if digits.len() == 4 { digits[2..4].parse().ok()? } else { 0 };
+    let total = sign * (hours * 3600 + mins * 60);
+    FixedOffset::east_opt(total)
+}
+
+fn translate_datetime_format(fmt: &str) -> String {
+    let mut out = String::new();
+    let mut chars = fmt.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' {
+            while let Some(next) = chars.next() {
+                if next == '\'' {
+                    break;
+                }
+                out.push(next);
+            }
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() {
+            let mut count = 1usize;
+            while chars.peek().copied() == Some(ch) {
+                count += 1;
+                chars.next();
+            }
+            let token = match (ch, count) {
+                ('y', 4) => "%Y",
+                ('y', 2) => "%y",
+                ('M', 4) => "%B",
+                ('M', 3) => "%b",
+                ('M', 2) => "%m",
+                ('M', 1) => "%-m",
+                ('d', 2) => "%d",
+                ('d', 1) => "%-d",
+                ('H', 2) => "%H",
+                ('H', 1) => "%-H",
+                ('h', 2) => "%I",
+                ('h', 1) => "%-I",
+                ('m', 2) => "%M",
+                ('m', 1) => "%-M",
+                ('s', 2) => "%S",
+                ('s', 1) => "%-S",
+                ('S', n) => {
+                    out.push_str(&format!("%.{}f", n));
+                    continue;
+                }
+                ('X', 1) => "%:z",
+                ('X', 2) => "%:z",
+                ('X', 3) => "%:z",
+                ('Z', _) => "%z",
+                _ => {
+                    for _ in 0..count {
+                        out.push(ch);
+                    }
+                    continue;
+                }
+            };
+            out.push_str(token);
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn format_datetime(dt: DateTime<Utc>, format: Option<&str>, default_format: &str, tz: Option<&str>) -> Result<String, String> {
+    let format = format.unwrap_or(default_format).trim();
+    if format.eq_ignore_ascii_case("yyyy-MM-dd'T'HH:mm:ss.SSSX") {
+        let formatted = if let Some(offset) = parse_timezone_offset(tz) {
+            dt.with_timezone(&offset).format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
+        } else {
+            dt.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
+        };
+        return Ok(if formatted.ends_with("+00:00") {
+            formatted.trim_end_matches("+00:00").to_string() + "Z"
+        } else if formatted.ends_with("+0000") {
+            formatted.trim_end_matches("+0000").to_string() + "Z"
+        } else {
+            formatted
+        });
+    }
+    let (format, alias) = match format.to_ascii_lowercase().as_str() {
+        "short" => (Some("dd-MMM-yy"), None),
+        "long" => (Some("MMMM d, yyyy"), None),
+        "iso" | "iso8601" => (Some("yyyy-MM-dd"), None),
+        _ => (None, Some(format)),
+    };
+
+    let chrono_format = if let Some(alias_fmt) = format {
+        alias_fmt.to_string()
+    } else {
+        translate_datetime_format(alias.unwrap())
+    };
+
+    let formatted = if let Some(offset) = parse_timezone_offset(tz) {
+        dt.with_timezone(&offset).format(&chrono_format).to_string()
+    } else {
+        dt.format(&chrono_format).to_string()
+    };
+
+    if format.is_none() && alias.unwrap_or("").contains('X') {
+        if formatted.ends_with("+00:00") {
+            Ok(formatted.trim_end_matches("+00:00").to_string() + "Z")
+        } else if formatted.ends_with("+0000") {
+            Ok(formatted.trim_end_matches("+0000").to_string() + "Z")
+        } else {
+            Ok(formatted)
+        }
+    } else {
+        Ok(formatted)
+    }
+}
+
+fn parse_datetime_with_format(input: &str, format: &str, tz: Option<&str>) -> Result<DateTime<Utc>, String> {
+    let chrono_format = translate_datetime_format(format);
+    let has_offset = chrono_format.contains("%:z") || chrono_format.contains("%z");
+    if has_offset {
+        let normalized = if input.ends_with('Z') {
+            format!("{}+00:00", &input[..input.len().saturating_sub(1)])
+        } else if input.len() >= 5 {
+            let suffix = &input[input.len() - 5..];
+            if (suffix.starts_with('+') || suffix.starts_with('-')) && suffix[1..].chars().all(|c| c.is_ascii_digit()) {
+                format!("{}{}:{}", &input[..input.len() - 5], &suffix[..3], &suffix[3..5])
+            } else {
+                input.to_string()
+            }
+        } else {
+            input.to_string()
+        };
+        let parsed = DateTime::parse_from_str(&normalized, &chrono_format)
+            .or_else(|_| DateTime::parse_from_str(input, &chrono_format))
+            .map_err(|e| e.to_string())?;
+        Ok(parsed.with_timezone(&Utc))
+    } else if chrono_format.contains("%Y") || chrono_format.contains("%m") || chrono_format.contains("%d") {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(input, &chrono_format) {
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset.from_local_datetime(&parsed).single().unwrap().with_timezone(&Utc))
+        } else if let Ok(parsed) = NaiveDate::parse_from_str(input, &chrono_format) {
+            let naive = parsed.and_hms_opt(0, 0, 0).unwrap();
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc))
+        } else {
+            Err(format!("Unable to parse date '{}'", input))
+        }
+    } else {
+        Err(format!("Unsupported date format '{}'", format))
+    }
+}
+
+fn parse_datetime_input(input: &str, format: Option<&str>, tz: Option<&str>) -> Result<DateTime<Utc>, String> {
+    if let Some(format) = format {
+        return parse_datetime_with_format(input, format, tz);
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(input) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    let normalized = if input.ends_with('Z') {
+        format!("{}+00:00", &input[..input.len().saturating_sub(1)])
+    } else if input.len() >= 5 {
+        let suffix = &input[input.len() - 5..];
+        if (suffix.starts_with('+') || suffix.starts_with('-')) && suffix[1..].chars().all(|c| c.is_ascii_digit()) {
+            format!("{}{}:{}", &input[..input.len() - 5], &suffix[..3], &suffix[3..5])
+        } else {
+            input.to_string()
+        }
+    } else {
+        input.to_string()
+    };
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(&normalized) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    let naive_patterns = [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y.%m.%d",
+        "%m/%d/%Y",
+    ];
+    for pattern in naive_patterns {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(input, pattern) {
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset.from_local_datetime(&parsed).single().unwrap().with_timezone(&Utc));
+        }
+        if let Ok(parsed) = NaiveDate::parse_from_str(input, pattern) {
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset.from_local_datetime(&parsed.and_hms_opt(0, 0, 0).unwrap()).single().unwrap().with_timezone(&Utc));
+        }
+    }
+
+    Err(format!("Unable to parse date '{}'", input))
+}
+
+fn datetime_from_parts(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    millis: u32,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
+    let date = NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| format!("Invalid date {}-{}-{}", year, month, day))?;
+    let naive = date
+        .and_hms_milli_opt(hour, minute, second, millis)
+        .ok_or_else(|| "Invalid time components".to_string())?;
+    let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+    Ok(offset
+        .from_local_datetime(&naive)
+        .single()
+        .ok_or_else(|| "Could not resolve local datetime".to_string())?
+        .with_timezone(&Utc))
+}
+
+fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
+    let total_months = dt.year() * 12 + (dt.month() as i32 - 1) + months;
+    let new_year = total_months.div_euclid(12);
+    let new_month = total_months.rem_euclid(12) + 1;
+    let last_day = match new_month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (new_year % 4 == 0 && new_year % 100 != 0) || (new_year % 400 == 0);
+            if leap { 29 } else { 28 }
+        }
+        _ => 30,
+    };
+    let day = dt.day().min(last_day);
+    let naive = NaiveDate::from_ymd_opt(new_year, new_month as u32, day)
+        .unwrap()
+        .and_hms_milli_opt(dt.hour(), dt.minute(), dt.second(), dt.timestamp_subsec_millis())
+        .unwrap();
+    Utc.from_utc_datetime(&naive)
+}
+
+fn date_diff_months(a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
+    let a_total = a.year() as i64 * 12 + a.month() as i64 - 1;
+    let b_total = b.year() as i64 * 12 + b.month() as i64 - 1;
+    let mut months = a_total - b_total;
+    let adjusted = add_months(b, months as i32);
+    if months > 0 && adjusted > a {
+        months -= 1;
+    } else if months < 0 && adjusted < a {
+        months += 1;
+    }
+    months
+}
+
 fn now(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    let now = Local::now();
-    let s = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    Ok(BxValue::new_ptr(vm.string_new(s)))
+    let now = Utc::now();
+    Ok(BxValue::new_ptr(vm.datetime_new(now)))
+}
+
+fn create_date(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("createDate() expects at least 3 arguments: (year, month, day)".to_string());
+    }
+    let tz = args.get(3).map(|v| vm.to_string(*v));
+    let dt = datetime_from_parts(
+        args[0].as_number() as i32,
+        args[1].as_number() as u32,
+        args[2].as_number() as u32,
+        0,
+        0,
+        0,
+        0,
+        tz.as_deref(),
+    )?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
+}
+
+fn create_date_time(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 7 {
+        return Err("createDateTime() expects at least 7 arguments".to_string());
+    }
+    let tz = args.get(7).map(|v| vm.to_string(*v));
+    let dt = datetime_from_parts(
+        args[0].as_number() as i32,
+        args[1].as_number() as u32,
+        args[2].as_number() as u32,
+        args[3].as_number() as u32,
+        args[4].as_number() as u32,
+        args[5].as_number() as u32,
+        args[6].as_number() as u32,
+        tz.as_deref(),
+    )?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
+}
+
+fn date_add(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("dateAdd() expects 3 arguments".to_string());
+    }
+    let is_member = args[0].as_gc_id().is_some() && !vm.is_string_value(args[0]);
+    let (datepart, number, value) = if is_member {
+        (vm.to_string(args[1]), args[2].as_number(), args[0])
+    } else {
+        (vm.to_string(args[0]), args[1].as_number(), args[2])
+    };
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let result = match datepart.trim().to_ascii_lowercase().as_str() {
+        "yyyy" | "yy" | "year" | "years" => add_months(dt, (number.round() as i32) * 12),
+        "m" | "month" | "months" => add_months(dt, number.round() as i32),
+        "ww" | "w" | "week" | "weeks" => dt + Duration::days((number * 7.0).round() as i64),
+        "d" | "day" | "days" => dt + Duration::days(number.round() as i64),
+        "h" | "hour" | "hours" => dt + Duration::hours(number.round() as i64),
+        "n" | "minute" | "minutes" => dt + Duration::minutes(number.round() as i64),
+        "s" | "second" | "seconds" => dt + Duration::milliseconds((number * 1000.0).round() as i64),
+        _ => return Err(format!("Unsupported date part '{}'", datepart)),
+    };
+    Ok(BxValue::new_ptr(vm.datetime_new(result)))
+}
+
+fn date_diff(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("dateDiff() expects 3 arguments".to_string());
+    }
+    let is_member = args[0].as_gc_id().is_some() && !vm.is_string_value(args[0]);
+    let (datepart, left, right) = if is_member {
+        (vm.to_string(args[1]), args[0], args[2])
+    } else {
+        (vm.to_string(args[0]), args[1], args[2])
+    };
+    let left_dt = parse_datetime_input(&vm.to_string(left), None, None)?;
+    let right_dt = parse_datetime_input(&vm.to_string(right), None, None)?;
+    let diff = match datepart.trim().to_ascii_lowercase().as_str() {
+        "yyyy" | "yy" | "year" | "years" => (date_diff_months(left_dt, right_dt) / 12) as f64,
+        "m" | "month" | "months" => date_diff_months(left_dt, right_dt) as f64,
+        "ww" | "w" | "week" | "weeks" => (left_dt.signed_duration_since(right_dt).num_days() / 7) as f64,
+        "d" | "day" | "days" => left_dt.signed_duration_since(right_dt).num_days() as f64,
+        "h" | "hour" | "hours" => left_dt.signed_duration_since(right_dt).num_hours() as f64,
+        "n" | "minute" | "minutes" => left_dt.signed_duration_since(right_dt).num_minutes() as f64,
+        "s" | "second" | "seconds" => left_dt.signed_duration_since(right_dt).num_seconds() as f64,
+        _ => return Err(format!("Unsupported date part '{}'", datepart)),
+    };
+    Ok(BxValue::new_number(diff))
+}
+
+fn date_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("dateFormat() expects at least 1 argument".to_string());
+    }
+    let value = args[0];
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yy", tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+}
+
+fn date_time_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("dateTimeFormat() expects at least 1 argument".to_string());
+    }
+    let value = args[0];
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yyyy HH:mm:ss", tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+}
+
+fn parse_date_time_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("parseDateTime() expects at least 1 argument".to_string());
+    }
+    let value = vm.to_string(args[0]);
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&value, format.as_deref(), tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
 }
 
 fn get_tick_count(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {

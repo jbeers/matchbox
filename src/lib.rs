@@ -109,6 +109,73 @@ The embedded HTTP transport for `listen()` and heavier server features is not im
     bail!(message)
 }
 
+pub fn include_bif(vm: &mut dyn types::BxVM, args: &[types::BxValue]) -> Result<types::BxValue, String> {
+    if args.is_empty() {
+        return Err("include() expects 1 argument".to_string());
+    }
+
+    let include_path = vm.to_string(args[0]);
+    let current_file = vm
+        .current_chunk()
+        .and_then(|chunk| {
+            let chunk = chunk.borrow();
+            if chunk.filename.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(&chunk.filename))
+            }
+        })
+        .unwrap_or_else(|| std_env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    let base_dir = current_file.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let raw_path = Path::new(&include_path);
+    let resolved = if raw_path.is_absolute() {
+        raw_path.to_path_buf()
+    } else {
+        base_dir.join(raw_path)
+    };
+
+    let file_path = if resolved.exists() {
+        resolved
+    } else if resolved.extension().is_none() {
+        let with_bxs = resolved.with_extension("bxs");
+        if with_bxs.exists() {
+            with_bxs
+        } else {
+            let with_bx = resolved.with_extension("bx");
+            if with_bx.exists() {
+                with_bx
+            } else {
+                return Err(format!(
+                    "Include file not found: {}",
+                    resolved.display()
+                ));
+            }
+        }
+    } else {
+        return Err(format!("Include file not found: {}", resolved.display()));
+    };
+
+    let source = fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read include file {}: {}", file_path.display(), e))?;
+    let source_path = file_path.to_str().unwrap_or("<include>");
+    let ast = if file_path.extension().and_then(|s| s.to_str()) == Some("bxm") {
+        parser::parse_bxm(&source, Some(source_path))
+            .map_err(|e| format!("Parse error in include {}: {}", file_path.display(), e))?
+    } else {
+        parser::parse(&source, Some(source_path))
+            .map_err(|e| format!("Parse error in include {}: {}", file_path.display(), e))?
+    };
+
+    let mut compiler = compiler::Compiler::new(source_path);
+    let chunk = compiler
+        .compile(&ast, &source)
+        .map_err(|e| format!("Compile error in include {}: {}", file_path.display(), e))?;
+
+    vm.interpret_chunk(chunk)?;
+    Ok(types::BxValue::new_null())
+}
+
 fn collect_esp32_unsupported_features_in_stmt(
     stmt: &ast::Statement,
     findings: &mut Vec<Esp32UnsupportedFeature>,
@@ -1572,6 +1639,7 @@ pub fn run_chunk(chunk: Chunk, modules: &[modules::ModuleInfo]) -> Result<()> {
 
     let mut external_bifs = HashMap::new();
     let mut native_classes = HashMap::new();
+    external_bifs.insert("include".to_string(), include_bif as types::BxNativeFunction);
 
     #[cfg(feature = "bif-tui")]
     {
@@ -1612,7 +1680,10 @@ fn run_repl() -> Result<()> {
     println!("Type 'exit' or 'quit' to exit.");
 
     let args: Vec<String> = std_env::args().collect();
-    let mut vm = vm::VM::new_with_args(args);
+    let mut external_bifs = HashMap::new();
+    external_bifs.insert("include".to_string(), include_bif as types::BxNativeFunction);
+    let mut vm = vm::VM::new_with_bifs(external_bifs, HashMap::new());
+    vm.cli_args = args;
 
     // Load full prelude for REPL
 

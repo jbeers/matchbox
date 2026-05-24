@@ -168,6 +168,7 @@ pub trait BxVM {
     fn construct_native_class(&mut self, class_name: &str, args: &[BxValue]) -> Result<BxValue, String>;
     fn instance_class_name(&self, receiver: BxValue) -> Result<String, String>;
     fn instance_variables_json(&self, receiver: BxValue) -> Result<serde_json::Value, String>;
+    fn datetime_new(&mut self, dt: chrono::DateTime<chrono::Utc>) -> usize;
     fn string_new(&mut self, s: String) -> usize;
     fn to_string(&self, val: BxValue) -> String;
     fn to_box_string(&self, val: BxValue) -> BoxString;

@@ -1,4 +1,5 @@
 use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject, BxRange, box_string::BoxString};
+use chrono::{DateTime, Utc};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -10,6 +11,7 @@ pub enum GcObject {
     Bytes(Vec<u8>),
     Array(Vec<BxValue>),
     Range(BxRange),
+    DateTime(DateTime<Utc>),
     Struct(BxStruct),
     Instance(BxInstance),
     Future(BxFuture),
@@ -189,7 +191,7 @@ impl Heap {
 
     fn push_children(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) => {}
+            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) | GcObject::DateTime(_) => {}
             GcObject::NativeObject(obj) => {
                 let mut tracer = WorklistTracer { worklist, heap: self };
                 // Use unsafe to bypass RefCell borrow check during tracing.
@@ -234,7 +236,7 @@ impl Heap {
 
     fn push_children_young(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) => {}
+            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) | GcObject::DateTime(_) => {}
             GcObject::NativeObject(obj) => {
                 let mut tracer = YoungWorklistTracer { worklist, heap: self };
                 unsafe {

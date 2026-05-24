@@ -2,6 +2,7 @@ use crate::ast::{
     ClassMember, Expression, ExpressionKind, FunctionBody, FunctionModifiers as AstFunctionModifiers,
     Literal, Statement, StatementKind, StringPart,
 };
+use crate::parser;
 use anyhow::{bail, Result};
 use matchbox_vm::types::{
     box_string::BoxString, BxClass, BxCompiledFunction, BxInterface, ClassModifiers as VmClassModifiers,
@@ -34,15 +35,17 @@ pub struct Compiler {
     catch_exception_slots: Vec<usize>,
     class_methods: HashSet<String>, // Method names of the current class being compiled
     /// Directory to resolve unqualified source paths against (e.g. sibling interfaces).
-    source_dir: Option<PathBuf>,
+    pub source_dir: Option<PathBuf>,
     /// Tracks which class names (lowercased) are known to define an init() method.
     /// Propagated to sub-compilers so that `new` expressions in functions/methods
     /// can still determine whether to emit an `init` invocation.
     class_has_init_map: HashMap<String, bool>,
+    current_function_is_static: bool,
 }
 
 impl Compiler {
     pub fn new(filename: &str) -> Self {
+        let source_dir = Path::new(filename).parent().map(|p| p.to_path_buf());
         Compiler {
             chunk: Chunk::new(filename),
             locals: Vec::new(),
@@ -57,12 +60,14 @@ impl Compiler {
             loop_locals: Vec::new(),
             catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
-            source_dir: None,
+            source_dir,
             class_has_init_map: HashMap::new(),
+            current_function_is_static: false,
         }
     }
 
     pub fn with_chunk(chunk: Chunk) -> Self {
+        let source_dir = Path::new(&chunk.filename).parent().map(|p| p.to_path_buf());
         Compiler {
             chunk,
             locals: Vec::new(),
@@ -77,8 +82,9 @@ impl Compiler {
             loop_locals: Vec::new(),
             catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
-            source_dir: None,
+            source_dir,
             class_has_init_map: HashMap::new(),
+            current_function_is_static: false,
         }
     }
 
@@ -156,6 +162,21 @@ impl Compiler {
                 let mut methods = HashMap::new();
                 let mut properties = Vec::new();
 
+                if class_modifiers.is_final && extends.is_some() {
+                    bail!("Class {} is final and cannot extend another class", name);
+                }
+                if let Some(parent_name) = extends.as_ref() {
+                    if let Some(parent_class) = self.find_class_constant(parent_name)? {
+                        if parent_class.modifiers.is_final {
+                            bail!(
+                                "Class {} cannot extend final class {}",
+                                name,
+                                parent_class.name
+                            );
+                        }
+                    }
+                }
+
                 // Collect method names so unqualified calls inside methods resolve correctly.
                 let mut class_method_names = HashSet::new();
                 for member in members.iter() {
@@ -199,6 +220,24 @@ impl Compiler {
                             } => {
                                 if let FunctionBody::Abstract = body {
                                     bail!("Abstract functions only allowed in interfaces");
+                                }
+                                if let Some(parent_name) = extends.as_ref() {
+                                    if let Some(parent_class) = self.find_class_constant(parent_name)? {
+                                        if let Some((_, final_method)) = parent_class
+                                            .methods
+                                            .iter()
+                                            .find(|(method_name, _)| method_name.eq_ignore_ascii_case(func_name))
+                                        {
+                                            if final_method.modifiers.is_final {
+                                                bail!(
+                                                    "Method {} on class {} overrides final method from {}",
+                                                    func_name,
+                                                    name,
+                                                    parent_class.name
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                                 let mut method_compiler =
                                     Compiler::with_chunk(self.chunk.new_sub_chunk());
@@ -541,8 +580,17 @@ impl Compiler {
                 Ok(())
             }
             StatementKind::Include(expr) => {
-                self.compile_expression(expr)?;
-                self.chunk.emit0(op::POP, stmt.line as u32);
+                if let Some(include_path) = self.literal_include_path(expr) {
+                    self.compile_include_file(&include_path)?;
+                } else {
+                    let include_idx = self
+                        .chunk
+                        .add_constant(Constant::String(BoxString::new("include")));
+                    self.chunk.emit1(op::GET_GLOBAL, include_idx, stmt.line as u32);
+                    self.compile_expression(expr)?;
+                    self.chunk.emit1(op::CALL, 1, stmt.line as u32);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
+                }
                 Ok(())
             }
             StatementKind::BufferOutput(expr) => {
@@ -1374,6 +1422,9 @@ impl Compiler {
                 if resolved_path.contains('.') {
                     let class_val = self.load_class_from_path(&resolved_path)?;
                     if let Constant::Class(ref cls) = class_val {
+                        if cls.modifiers.is_abstract {
+                            bail!("Cannot instantiate abstract class {}", cls.name);
+                        }
                         class_has_init = cls
                             .methods
                             .iter()
@@ -1382,13 +1433,24 @@ impl Compiler {
                     let class_idx = self.chunk.add_constant(class_val);
                     self.chunk.emit1(op::CONSTANT, class_idx, expr.line);
                 } else {
+                    if let Some(class) = self.find_class_constant(&resolved_path)? {
+                        if class.modifiers.is_abstract {
+                            bail!("Cannot instantiate abstract class {}", class.name);
+                        }
+                        class_has_init = class
+                            .methods
+                            .iter()
+                            .any(|(n, _)| n.eq_ignore_ascii_case("init"));
+                    }
                     // Check inline classes in this chunk or any parent chunk tracked
                     // via the shared class_has_init_map.
-                    class_has_init = self
+                    if !class_has_init {
+                        class_has_init = self
                         .class_has_init_map
                         .get(&resolved_path.to_lowercase())
                         .copied()
                         .unwrap_or(false);
+                    }
                     if !class_has_init {
                         class_has_init = self.chunk.constants.iter().any(|c| {
                             if let Constant::Class(cls) = c {
@@ -1812,6 +1874,9 @@ impl Compiler {
                     .map(|p| p.to_lowercase().starts_with("js:"))
                     == Some(true);
                 if lower_name == "this" {
+                    if self.current_function_is_static {
+                        bail!("Cannot reference 'this' in a static function");
+                    }
                     let idx = self
                         .chunk
                         .add_constant(Constant::String(BoxString::new("this")));
@@ -2233,6 +2298,7 @@ impl Compiler {
         sub_compiler.class_methods = self.class_methods.clone();
         sub_compiler.current_line = self.current_line;
         sub_compiler.class_has_init_map = self.class_has_init_map.clone();
+        sub_compiler.current_function_is_static = modifiers.is_static;
 
         let mut min_arity = 0;
         for (i, param) in params.iter().enumerate() {
@@ -2360,6 +2426,99 @@ impl Compiler {
             }
         }
         None
+    }
+
+    fn find_class_constant(&mut self, class_name: &str) -> Result<Option<BxClass>> {
+        let lower_name = class_name.to_lowercase();
+        for constant in &self.chunk.constants {
+            if let Constant::Class(class) = constant {
+                if class.name.to_lowercase() == lower_name {
+                    return Ok(Some(class.clone()));
+                }
+            }
+        }
+
+        if class_name.contains('.') {
+            if let Ok(class_val) = self.load_class_from_path(class_name) {
+                if let Constant::Class(class) = class_val {
+                    return Ok(Some(class));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn literal_include_path(&self, expr: &Expression) -> Option<String> {
+        match &expr.kind {
+            ExpressionKind::Literal(Literal::String(parts)) if parts.len() == 1 => {
+                if let StringPart::Text(text) = &parts[0] {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn compile_include_file(&mut self, include_path: &str) -> Result<()> {
+        let base_dir = self
+            .source_dir
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let raw_path = Path::new(include_path);
+        let resolved = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            base_dir.join(raw_path)
+        };
+
+        let file_path = if resolved.exists() {
+            resolved
+        } else if resolved.extension().is_none() {
+            let with_bxs = resolved.with_extension("bxs");
+            if with_bxs.exists() {
+                with_bxs
+            } else {
+                let with_bx = resolved.with_extension("bx");
+                if with_bx.exists() {
+                    with_bx
+                } else {
+                    bail!("Include file not found: {}", resolved.display());
+                }
+            }
+        } else {
+            bail!("Include file not found: {}", resolved.display());
+        };
+
+        let source = fs::read_to_string(&file_path)?;
+        let source_path = file_path.to_string_lossy().to_string();
+        let ast = if file_path.extension().and_then(|s| s.to_str()) == Some("bxm") {
+            parser::parse_bxm(&source, Some(&source_path))?
+        } else {
+            parser::parse(&source, Some(&source_path))?
+        };
+
+        let prev_source_dir = self.source_dir.clone();
+        let prev_filename = self.chunk.filename.clone();
+        let prev_line = self.current_line;
+        self.source_dir = file_path.parent().map(|p| p.to_path_buf());
+        self.chunk.filename = source_path;
+
+        let result = (|| {
+            for (i, stmt) in ast.iter().enumerate() {
+                let is_last = i == ast.len() - 1;
+                self.compile_statement(stmt, is_last)?;
+            }
+            Ok(())
+        })();
+
+        self.source_dir = prev_source_dir;
+        self.chunk.filename = prev_filename;
+        self.current_line = prev_line;
+        result
     }
 
     fn compile_range(

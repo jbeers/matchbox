@@ -12,6 +12,7 @@ mod interop_tests;
 use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxRange, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
+use chrono::{DateTime, SecondsFormat, Utc};
 use self::chunk::{Chunk, IcEntry};
 use self::opcode::op;
 use self::gc::{Heap, GcObject};
@@ -430,6 +431,15 @@ pub struct VM {
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 const JS_INTEROP_MAX_DEPTH: usize = 32;
 
+impl VM {
+    fn datetime_value(&self, val: BxValue) -> Option<DateTime<Utc>> {
+        val.as_gc_id().and_then(|id| match self.heap.get(id) {
+            GcObject::DateTime(dt) => Some(dt.clone()),
+            _ => None,
+        })
+    }
+}
+
 impl BxVM for VM {
     fn current_chunk(&self) -> Option<Rc<RefCell<crate::vm::chunk::Chunk>>> {
         if let Some(idx) = self.current_fiber_idx {
@@ -546,6 +556,7 @@ impl BxVM for VM {
                 GcObject::Class(class) => Some(class.borrow().name.clone()),
                 GcObject::Interface(interface) => Some(interface.borrow().name.clone()),
                 GcObject::Instance(inst) => Some(inst.class.borrow().name.clone()),
+                GcObject::DateTime(_) => Some("datetime".to_string()),
                 GcObject::Range(_) => Some("range".to_string()),
                 _ => None,
             }
@@ -641,6 +652,7 @@ impl BxVM for VM {
             "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
             "boolean" | "bool" => val.is_bool(),
             "array" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Array(_))).unwrap_or(false),
+            "datetime" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::DateTime(_))).unwrap_or(false),
             "range" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Range(_))).unwrap_or(false),
             "struct" | "componentstruct" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Struct(_))).unwrap_or(false),
             "function" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_))).unwrap_or(false),
@@ -1124,6 +1136,10 @@ impl BxVM for VM {
         self.instance_variables_json(receiver).map_err(|e| e.to_string())
     }
 
+    fn datetime_new(&mut self, dt: DateTime<Utc>) -> usize {
+        self.heap.alloc(GcObject::DateTime(dt))
+    }
+
     fn string_new(&mut self, s: String) -> usize {
         self.heap.alloc(GcObject::String(BoxString::new(&s)))
     }
@@ -1445,6 +1461,7 @@ impl VM {
                 GcObject::Bytes(bytes) => format!("<bytes len:{}>", bytes.len()),
                 GcObject::Array(_) => self.bx_to_json(&val).to_string(),
                 GcObject::Range(range) => format!("{}", range),
+                GcObject::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Millis, true),
                 GcObject::Struct(_) => self.bx_to_json(&val).to_string(),
                 GcObject::Instance(inst) => format!("<instance of {}>", inst.class.borrow().name),
                 GcObject::Future(_) => format!("<future id:{}>", id),
@@ -1470,6 +1487,7 @@ impl VM {
                 (GcObject::String(s1), GcObject::String(s2)) => {
                     s1.to_string().to_lowercase() == s2.to_string().to_lowercase()
                 }
+                (GcObject::DateTime(a), GcObject::DateTime(b)) => a == b,
                 (GcObject::Bytes(a), GcObject::Bytes(b)) => a == b,
                 _ => false,
             }
@@ -1803,6 +1821,8 @@ impl VM {
                 GcObject::Array(_) => match name {
                     "len" | "length" | "count" => Some("len".to_string()),
                     "append" | "add" => Some("arrayappend".to_string()),
+                    "resize" => Some("arrayresize".to_string()),
+                    "swap" => Some("arrayswap".to_string()),
                     "each" => Some("arrayeach".to_string()),
                     "map" => Some("arraymap".to_string()),
                     "reduce" => Some("arrayreduce".to_string()),
@@ -1813,12 +1833,22 @@ impl VM {
                 GcObject::Struct(_) => match name {
                     "len" | "count" => Some("len".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
+                    "find" => Some("structfind".to_string()),
+                    "isempty" => Some("structisempty".to_string()),
                     "each" => Some("structeach".to_string()),
                     _ => None,
                 },
                 GcObject::Future(_) => match name {
                     "onerror" => Some("futureonerror".to_string()),
                     "get" => Some("futureget".to_string()),
+                    _ => None,
+                },
+                GcObject::DateTime(_) => match name {
+                    "add" => Some("dateadd".to_string()),
+                    "diff" => Some("datediff".to_string()),
+                    "format" => Some("datetimeformat".to_string()),
+                    "dateformat" => Some("dateformat".to_string()),
+                    "datetimeformat" => Some("datetimeformat".to_string()),
                     _ => None,
                 },
                 #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -4494,6 +4524,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() < b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt < b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -4505,6 +4537,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() <= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt <= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -4516,6 +4550,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() > b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt > b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -4527,6 +4563,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() >= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt >= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -6154,6 +6192,7 @@ impl VM {
                     js_arr.into()
                 }
                 GcObject::Range(range) => JsValue::from_str(&format!("{}", range)),
+                GcObject::DateTime(dt) => JsValue::from_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
                 GcObject::Struct(s) => {
                     let js_obj = js_sys::Object::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];
@@ -6359,6 +6398,7 @@ impl VM {
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
                 GcObject::String(s) => serde_json::Value::String(s.to_string()),
+                GcObject::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
                 GcObject::Array(arr) => {
                     let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| self.bx_to_json(v)).collect();
                     serde_json::Value::Array(json_arr)

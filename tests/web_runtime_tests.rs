@@ -1,8 +1,10 @@
 use matchbox_compiler::{compiler::Compiler, parser};
 use matchbox_vm::types::{BxNativeFunction, BxVM, BxValue, NativeFutureValue};
 use matchbox_vm::vm::VM;
+use std::fs;
 use std::collections::HashMap;
 use std::time::Duration;
+use tempfile::tempdir;
 
 #[test]
 fn test_bxm_transpilation() {
@@ -16,6 +18,12 @@ fn test_bxm_transpilation() {
     // Verify template parser handles basic BXM
     let result = matchbox_compiler::parser::parse_bxm(bxm_source, None);
     assert!(result.is_ok(), "Template parser should handle basic BXM: {:?}", result.err());
+}
+
+fn compile_source(path: &str, source: &str) -> matchbox_vm::vm::chunk::Chunk {
+    let ast = parser::parse(source, Some(path)).unwrap();
+    let mut compiler = Compiler::new(path);
+    compiler.compile(&ast, source).unwrap()
 }
 
 #[test]
@@ -32,6 +40,42 @@ fn test_vm_output_buffering() {
 
     let output = vm.output_buffer.unwrap();
     assert_eq!(output, "Hello World!\nMatchBox");
+}
+
+#[test]
+fn test_include_executes_nested_relative_files() {
+    let temp = tempdir().unwrap();
+    let root = temp.path();
+    let deps = root.join("deps");
+    fs::create_dir_all(&deps).unwrap();
+
+    let grandchild = deps.join("grandchild.bxs");
+    let child = deps.join("child.bxs");
+    let main = root.join("main.bxs");
+
+    fs::write(&grandchild, r#"var includedValue = "included";"#).unwrap();
+    fs::write(&child, r#"include "grandchild";"#).unwrap();
+    fs::write(
+        &main,
+        r#"
+            include "deps/child";
+            writeOutput(includedValue);
+        "#,
+    )
+    .unwrap();
+
+    let mut bifs = HashMap::new();
+    bifs.insert("include".to_string(), matchbox::include_bif as BxNativeFunction);
+    let mut vm = VM::new_with_bifs(bifs, HashMap::new());
+    vm.output_buffer = Some(String::new());
+
+    let main_path = main.to_str().unwrap();
+    let source = fs::read_to_string(&main).unwrap();
+    let chunk = compile_source(main_path, &source);
+
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap().trim(), "included");
 }
 
 #[test]
@@ -71,6 +115,64 @@ fn test_rethrow_outside_catch_is_rejected() {
         err.to_string().contains("inside a catch block"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn test_access_modifier_enforcement() {
+    let cases = [
+        (
+            r#"
+                abstract class Base {
+                }
+                new Base();
+            "#,
+            "abstract class",
+        ),
+        (
+            r#"
+                final class Base {
+                }
+                class Child extends="Base" {
+                }
+            "#,
+            "final",
+        ),
+        (
+            r#"
+                class Base {
+                    final function getName() {
+                        return "base";
+                    }
+                }
+                class Child extends="Base" {
+                    function getName() {
+                        return "child";
+                    }
+                }
+            "#,
+            "final method",
+        ),
+        (
+            r#"
+                class Sample {
+                    static function getValue() {
+                        return this;
+                    }
+                }
+            "#,
+            "static function",
+        ),
+    ];
+
+    for (source, needle) in cases {
+        let ast = parser::parse(source, Some("test")).unwrap();
+        let mut compiler = Compiler::new("test");
+        let err = compiler.compile(&ast, source).unwrap_err().to_string();
+        assert!(
+            err.to_lowercase().contains(&needle.to_lowercase()),
+            "expected `{err}` to contain `{needle}`"
+        );
+    }
 }
 
 #[test]
@@ -182,6 +284,47 @@ fn test_phrase_word_operators() {
 }
 
 #[test]
+fn test_date_time_and_bifs() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        d = createDate(2024, 1, 1);
+        dt = createDateTime(2024, 1, 1, 12, 30, 45, 500, "UTC");
+        parsed = parseDateTime("2024-01-01T12:30:45.500Z");
+        base = parseDateTime("2024-01-01T12:30:45.000Z");
+        next = dateAdd("d", 1, d);
+        shifted = dateAdd("s", 0.5, base);
+
+        if (dateFormat(d) != "01-Jan-24") {
+            throw "dateFormat failed: " & dateFormat(d);
+        }
+        if (dateTimeFormat(dt, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC") != "2024-01-01T12:30:45.500Z") {
+            throw "dateTimeFormat failed";
+        }
+        if (parsed != dt) {
+            throw "parseDateTime failed";
+        }
+        if (dateDiff("d", next, d) != 1) {
+            throw "dateDiff days failed";
+        }
+        if (dateTimeFormat(shifted, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC") != "2024-01-01T12:30:45.500Z") {
+            throw "fractional dateAdd failed";
+        }
+        if (!(d < next)) {
+            throw "datetime comparison failed";
+        }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
 fn test_function_and_struct_spread() {
     let mut vm = VM::new();
     vm.output_buffer = Some(String::new());
@@ -209,6 +352,45 @@ fn test_function_and_struct_spread() {
     let mut compiler = Compiler::new("test");
     let chunk = compiler.compile(&ast, source).unwrap();
 
+    vm.interpret(chunk).unwrap();
+
+    assert_eq!(vm.output_buffer.unwrap(), "ok");
+}
+
+#[test]
+fn test_array_and_struct_helpers() {
+    let mut vm = VM::new();
+    vm.output_buffer = Some(String::new());
+
+    let source = r#"
+        nums = [1, 2, 3];
+        nums.resize(5);
+        ArraySwap(nums, 1, 3);
+        if (len(nums) != 5) {
+            throw "arrayResize failed";
+        }
+        if (nums[1] != 3 || nums[3] != 1 || nums[4] != null || nums[5] != null) {
+            throw "arraySwap or arrayResize values wrong";
+        }
+
+        data = { foo: "bar" };
+        if (structFind(data, "foo") != "bar") {
+            throw "structFind failed";
+        }
+        if (structFind(data, "FOO") != "bar") {
+            throw "structFind case-insensitive failed";
+        }
+        if (!structIsEmpty(structNew())) {
+            throw "structIsEmpty failed";
+        }
+        if (data.find("foo") != "bar") {
+            throw "struct member find failed";
+        }
+
+        writeOutput("ok");
+    "#;
+
+    let chunk = compile_source("test", source);
     vm.interpret(chunk).unwrap();
 
     assert_eq!(vm.output_buffer.unwrap(), "ok");
