@@ -14,6 +14,8 @@ use crate::datasource::traits::{
 };
 #[cfg(feature = "bif-datasource")]
 use crate::datasource::{bx_to_sql, registry, sql_to_bx, BxQuery};
+#[cfg(all(feature = "bif-datasource", feature = "qoq", not(target_arch = "wasm32")))]
+use crate::qoq;
 
 // ─── datasourceRegister ──────────────────────────────────────────────────────
 #[cfg(feature = "bif-datasource")]
@@ -84,8 +86,7 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     } else {
         vec![]
     };
-
-    let (datasource_name, return_type) = if args.len() > 2 && !args[2].is_null() {
+    let (datasource_name, return_type, db_type) = if args.len() > 2 && !args[2].is_null() {
         if let Some(opts_id) = args[2].as_gc_id() {
             let ds = {
                 let v = vm.struct_get(opts_id, "datasource");
@@ -103,13 +104,37 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
                     vm.to_string(v).to_lowercase()
                 }
             };
-            (ds, rt)
+            let dbt = {
+                let v = vm.struct_get(opts_id, "dbtype");
+                if v.is_null() {
+                    String::new()
+                } else {
+                    vm.to_string(v).to_lowercase()
+                }
+            };
+            (ds, rt, dbt)
         } else {
-            ("default".to_string(), "query".to_string())
+            ("default".to_string(), "query".to_string(), String::new())
         }
     } else {
-        ("default".to_string(), "query".to_string())
+        ("default".to_string(), "query".to_string(), String::new())
     };
+
+    if db_type == "query" {
+        #[cfg(feature = "qoq")]
+        {
+            let qoq_params = if args.len() > 1 && !args[1].is_null() {
+                parse_qoq_bind_params(vm, args[1])?
+            } else {
+                qoq::BindParams::default()
+            };
+            return query_execute_qoq(vm, &sql, &return_type, &qoq_params);
+        }
+        #[cfg(not(feature = "qoq"))]
+        {
+            return Err("QoQ support is not enabled in this build".to_string());
+        }
+    }
 
     let driver = registry::get(&datasource_name).ok_or_else(|| {
         format!(
@@ -129,6 +154,139 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
             Ok(BxValue::new_ptr(id))
         }
     }
+}
+
+#[cfg(all(feature = "bif-datasource", feature = "qoq", not(target_arch = "wasm32")))]
+fn query_execute_qoq(
+    vm: &mut dyn BxVM,
+    sql: &str,
+    return_type: &str,
+    params: &qoq::BindParams,
+) -> Result<BxValue, String> {
+    let query = qoq::parse(sql).map_err(|e| format!("QoQ parse error: {}", e))?;
+    let query = qoq::bind_params(&query, params)
+        .map_err(|e| qoq_error_to_string("QoQ bind error", e))?;
+    let result = qoq::execute_with_source_resolver(&query, |path| resolve_qoq_source(vm, path))
+        .map_err(|e| {
+            qoq_error_to_string("QoQ execution error", e)
+        })?;
+    let query = BxQuery::from_result(result);
+
+    match return_type {
+        "array" => query_result_to_array(vm, query),
+        "struct" => query_result_to_struct(vm, query),
+        _ => {
+            let id = vm.native_object_new(Rc::new(RefCell::new(query)));
+            Ok(BxValue::new_ptr(id))
+        }
+    }
+}
+
+#[cfg(all(feature = "bif-datasource", feature = "qoq", not(target_arch = "wasm32")))]
+fn resolve_qoq_source(
+    vm: &mut dyn BxVM,
+    path: &[String],
+) -> Result<Option<QueryResult>, qoq::ExecutionError> {
+    let key = path.join(".");
+    let value = vm.resolve_query_source_path(path).ok_or_else(|| qoq::ExecutionError {
+        message: format!("unknown QoQ source '{}'", key),
+        span: None,
+    })?;
+    let id = value.as_gc_id().ok_or_else(|| qoq::ExecutionError {
+        message: format!("QoQ source '{}' is not a query object", key),
+        span: None,
+    })?;
+    let result = vm.native_object_query_result(id).ok_or_else(|| qoq::ExecutionError {
+        message: format!("QoQ source '{}' is not a query object", key),
+        span: None,
+    })?;
+    Ok(Some(result))
+}
+
+#[cfg(all(feature = "bif-datasource", feature = "qoq", not(target_arch = "wasm32")))]
+fn qoq_error_to_string(prefix: &str, e: qoq::ExecutionError) -> String {
+    if let Some(span) = e.span {
+        format!(
+            "{}: {} at line {}, col {}",
+            prefix, e.message, span.line, span.col
+        )
+    } else {
+        format!("{}: {}", prefix, e.message)
+    }
+}
+
+#[cfg(all(feature = "bif-datasource", feature = "qoq", not(target_arch = "wasm32")))]
+fn parse_qoq_bind_params(vm: &mut dyn BxVM, val: BxValue) -> Result<qoq::BindParams, String> {
+    if let Some(id) = val.as_gc_id() {
+        if vm.struct_len(id) > 0 {
+            let mut named = std::collections::HashMap::new();
+            for key in vm.struct_key_array(id) {
+                let item = vm.struct_get(id, &key);
+                let sql_val = if let Some(item_id) = item.as_gc_id() {
+                    if vm.struct_key_exists(item_id, "value") {
+                        let v = vm.struct_get(item_id, "value");
+                        let sql_type_str = {
+                            let t = vm.struct_get(item_id, "cfsqltype");
+                            if t.is_null() {
+                                None
+                            } else {
+                                Some(vm.to_string(t))
+                            }
+                        };
+                        coerce_cf_sql_type(vm, v, sql_type_str.as_deref())
+                    } else {
+                        bx_to_sql(vm, item)
+                    }
+                } else {
+                    bx_to_sql(vm, item)
+                };
+                named.insert(key.to_lowercase(), sql_val);
+            }
+            Ok(qoq::BindParams {
+                positional: vec![],
+                named,
+            })
+        } else {
+            let len = vm.array_len(id);
+            let mut positional = Vec::with_capacity(len);
+            for i in 0..len {
+                let item = vm.array_get(id, i);
+                let sql_val = if let Some(item_id) = item.as_gc_id() {
+                    if vm.struct_key_exists(item_id, "value") {
+                        let v = vm.struct_get(item_id, "value");
+                        let sql_type_str = {
+                            let t = vm.struct_get(item_id, "cfsqltype");
+                            if t.is_null() {
+                                None
+                            } else {
+                                Some(vm.to_string(t))
+                            }
+                        };
+                        coerce_cf_sql_type(vm, v, sql_type_str.as_deref())
+                    } else {
+                        bx_to_sql(vm, item)
+                    }
+                } else {
+                    bx_to_sql(vm, item)
+                };
+                positional.push(sql_val);
+            }
+            Ok(qoq::BindParams {
+                positional,
+                named: std::collections::HashMap::new(),
+            })
+        }
+    } else {
+        Ok(qoq::BindParams {
+            positional: vec![bx_to_sql(vm, val)],
+            named: std::collections::HashMap::new(),
+        })
+    }
+}
+
+#[cfg(all(feature = "bif-datasource", not(feature = "qoq"), not(target_arch = "wasm32")))]
+fn query_execute_qoq(_vm: &mut dyn BxVM, _sql: &str, _return_type: &str) -> Result<BxValue, String> {
+    Err("QoQ support is not enabled in this build".to_string())
 }
 
 // ─── queryNew ────────────────────────────────────────────────────────────────

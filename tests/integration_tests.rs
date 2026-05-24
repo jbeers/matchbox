@@ -137,6 +137,10 @@ script_test!(vm_contains, "vm_contains.bxs");
 script_test!(vm_functional_bif, "vm_functional_bif.bxs");
 script_test!(vm_spread, "vm_spread.bxs");
 script_test!(vm_destructuring, "vm_destructuring.bxs");
+#[cfg(feature = "qoq")]
+script_test!(vm_qoq_query_execute, "vm_qoq_query_execute.bxs");
+#[cfg(feature = "qoq")]
+script_test!(vm_qoq_join, "vm_qoq_join.bxs");
 
 #[test]
 #[cfg(feature = "bif-tui")]
