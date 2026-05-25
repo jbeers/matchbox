@@ -25,7 +25,7 @@ materialization for aggregate scans, and cache repeated parse/planning work.
 - [x] QoQ has a `QuerySource` / `TableView` style abstraction that can read source data by row and column without first building a full row-major `QueryResult`
 - [x] `queryExecute(..., { dbType: "query" })` can execute existing QoQ tests through the source abstraction
 - [x] Repeated identical QoQ SQL strings can reuse a parsed representation
-- [ ] The planner records the source columns required by projection, WHERE, GROUP BY, HAVING, ORDER BY, and aggregate expressions
+- [x] The planner records the source columns required by projection, WHERE, GROUP BY, HAVING, ORDER BY, and aggregate expressions
 - [x] Simple single-table aggregates such as `AVG(column)`, `SUM(column)`, `COUNT(column)`, `MIN(column)`, and `MAX(column)` can stream directly over the source column without materializing QoQ rows
 - [x] The 1M-row AVG benchmark reports lower peak RSS than the current compact-row baseline
 - [x] The 10k small-query benchmark improves or remains flat versus the current release baseline
@@ -47,14 +47,18 @@ Current release benchmark numbers from the QoQ optimization checkpoint:
   native query objects for a cloned row-major `QueryResult`.
 - A bounded parse cache reuses parsed QoQ ASTs for repeated SQL strings.
 - Simple single-table aggregate plans stream directly from source columns.
-- Broad source-column dependency planning remains open.
+- Source-column dependency planning records projection, WHERE, GROUP BY, HAVING,
+  ORDER BY, aggregate, and join predicate requirements.
+- Generic materialization uses safe source-column plans to skip unused source
+  columns when identifiers are unambiguous.
+- `COUNT(*)` does not force star-style materialization of every source column.
 
 Latest release benchmark numbers:
 
 - `benchmarks/qoq_avg_1m.bxs`
-  - MatchBox release: build `564ms`, QoQ `15ms`, wall `0.62s`, max RSS `146036 KB`
+  - MatchBox release: build `627ms`, QoQ `16ms`, wall `0.69s`, max RSS `144244 KB`
 - `benchmarks/qoq_many_small_queries.bxs`
-  - MatchBox release: elapsed `28ms`, wall `0.03s`, max RSS `20236 KB`
+  - MatchBox release: elapsed `27ms`, wall `0.03s`, max RSS `20084 KB`
 
 ## Notes
 

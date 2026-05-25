@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use matchbox_compiler::qoq::{QuerySource, execute, execute_with_source_resolver, parse};
+use matchbox_compiler::qoq::{
+    QuerySource, SourceColumnUsage, execute, execute_with_source_resolver, parse,
+    source_column_dependency_plan,
+};
 use matchbox_vm::datasource::traits::{QueryColumn, QueryColumnType, QueryResult, SqlValue};
 
 fn table(columns: &[&str], rows: Vec<Vec<SqlValue>>) -> QueryResult {
@@ -38,7 +41,7 @@ fn assert_sql_value(actual: &SqlValue, expected: &SqlValue, sql: &str) {
 struct TestSource {
     columns: Vec<QueryColumn>,
     rows: Vec<Vec<SqlValue>>,
-    forbidden_col: Option<usize>,
+    forbidden_cols: Vec<usize>,
 }
 
 impl TestSource {
@@ -52,12 +55,12 @@ impl TestSource {
                 })
                 .collect(),
             rows,
-            forbidden_col: None,
+            forbidden_cols: Vec::new(),
         }
     }
 
     fn forbidding_col(mut self, col_idx: usize) -> Self {
-        self.forbidden_col = Some(col_idx);
+        self.forbidden_cols.push(col_idx);
         self
     }
 }
@@ -72,8 +75,8 @@ impl QuerySource for TestSource {
     }
 
     fn value(&self, row_idx: usize, col_idx: usize) -> SqlValue {
-        if self.forbidden_col == Some(col_idx) {
-            panic!("streaming aggregate read an unneeded column");
+        if self.forbidden_cols.contains(&col_idx) {
+            panic!("QoQ read unneeded source column {col_idx}");
         }
         self.rows
             .get(row_idx)
@@ -81,6 +84,49 @@ impl QuerySource for TestSource {
             .cloned()
             .unwrap_or(SqlValue::Null)
     }
+}
+
+#[test]
+fn source_column_dependency_plan_records_required_columns_by_usage() {
+    let query = parse(
+        "SELECT p.name, AVG(p.salary) AS avg_salary FROM people p WHERE p.age > 30 GROUP BY p.name HAVING AVG(p.salary) > 100 ORDER BY p.name",
+    )
+    .unwrap();
+
+    let plan = source_column_dependency_plan(&query);
+    let people = plan
+        .sources
+        .iter()
+        .find(|source| source.alias.eq_ignore_ascii_case("p"))
+        .expect("people source dependency");
+
+    assert_eq!(people.source_path, vec!["people".to_string()]);
+    assert!(!people.all_columns_required);
+
+    let name = people
+        .columns
+        .iter()
+        .find(|column| column.name.eq_ignore_ascii_case("name"))
+        .expect("name dependency");
+    assert!(name.usages.contains(&SourceColumnUsage::Projection));
+    assert!(name.usages.contains(&SourceColumnUsage::GroupBy));
+    assert!(name.usages.contains(&SourceColumnUsage::OrderBy));
+
+    let salary = people
+        .columns
+        .iter()
+        .find(|column| column.name.eq_ignore_ascii_case("salary"))
+        .expect("salary dependency");
+    assert!(salary.usages.contains(&SourceColumnUsage::Projection));
+    assert!(salary.usages.contains(&SourceColumnUsage::Having));
+    assert!(salary.usages.contains(&SourceColumnUsage::Aggregate));
+
+    let age = people
+        .columns
+        .iter()
+        .find(|column| column.name.eq_ignore_ascii_case("age"))
+        .expect("age dependency");
+    assert_eq!(age.usages, vec![SourceColumnUsage::Where]);
 }
 
 #[test]
@@ -305,4 +351,70 @@ fn simple_aggregate_fast_path_supports_sum_count_min_and_max() {
         .unwrap();
         assert_sql_value(&result.rows[0][0], &expected, sql);
     }
+}
+
+#[test]
+fn generic_source_materialization_skips_unused_source_columns() {
+    let query = parse("SELECT name FROM people WHERE age >= 30 ORDER BY name").unwrap();
+    let source = TestSource::new(
+        &["id", "name", "age", "unused"],
+        vec![
+            vec![
+                SqlValue::Int(1),
+                SqlValue::Text("Ada".to_string()),
+                SqlValue::Int(29),
+                SqlValue::Text("nope".to_string()),
+            ],
+            vec![
+                SqlValue::Int(2),
+                SqlValue::Text("Bea".to_string()),
+                SqlValue::Int(34),
+                SqlValue::Text("nope".to_string()),
+            ],
+        ],
+    )
+    .forbidding_col(0)
+    .forbidding_col(3);
+
+    let result = execute_with_source_resolver(&query, move |path| {
+        if path.len() == 1 && path[0].eq_ignore_ascii_case("people") {
+            Ok(Some(Box::new(source.clone()) as Box<dyn QuerySource>))
+        } else {
+            Ok(None)
+        }
+    })
+    .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_sql_value(
+        &result.rows[0][0],
+        &SqlValue::Text("Bea".to_string()),
+        "SELECT name FROM people WHERE age >= 30 ORDER BY name",
+    );
+}
+
+#[test]
+fn count_star_grouping_does_not_materialize_unused_source_columns() {
+    let query = parse("SELECT dept, COUNT(*) AS c FROM people GROUP BY dept").unwrap();
+    let source = TestSource::new(
+        &["dept", "unused"],
+        vec![
+            vec![SqlValue::Text("eng".to_string()), SqlValue::Int(10)],
+            vec![SqlValue::Text("eng".to_string()), SqlValue::Int(20)],
+        ],
+    )
+    .forbidding_col(1);
+
+    let result = execute_with_source_resolver(&query, move |path| {
+        if path.len() == 1 && path[0].eq_ignore_ascii_case("people") {
+            Ok(Some(Box::new(source.clone()) as Box<dyn QuerySource>))
+        } else {
+            Ok(None)
+        }
+    })
+    .unwrap();
+
+    assert_eq!(result.rows.len(), 1);
+    assert_sql_value(&result.rows[0][0], &SqlValue::Text("eng".to_string()), "");
+    assert_sql_value(&result.rows[0][1], &SqlValue::Int(2), "");
 }

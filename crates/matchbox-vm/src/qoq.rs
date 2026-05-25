@@ -1,6 +1,6 @@
 use crate::datasource::traits::{QueryColumn, QueryColumnType, QueryResult, SqlValue};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
@@ -1046,6 +1046,363 @@ impl Expression {
             _ => {}
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceColumnDependencyPlan {
+    pub sources: Vec<SourceColumnDependency>,
+    pub safe_for_pruning: bool,
+}
+
+impl SourceColumnDependencyPlan {
+    fn for_select(select: &SelectStatement) -> Self {
+        let mut planner = SourceColumnPlanner::default();
+        planner.collect_select(select);
+        planner.finish()
+    }
+
+    fn source_for(&self, source_path: &[String], alias: &str) -> Option<&SourceColumnDependency> {
+        self.sources.iter().find(|source| {
+            path_eq(&source.source_path, source_path) && source.alias.eq_ignore_ascii_case(alias)
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceColumnDependency {
+    pub source_path: Vec<String>,
+    pub alias: String,
+    pub all_columns_required: bool,
+    pub columns: Vec<SourceColumnRequirement>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceColumnRequirement {
+    pub name: String,
+    pub usages: Vec<SourceColumnUsage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SourceColumnUsage {
+    Projection,
+    Where,
+    GroupBy,
+    Having,
+    OrderBy,
+    Aggregate,
+    JoinOn,
+}
+
+pub fn source_column_dependency_plan(query: &Query) -> SourceColumnDependencyPlan {
+    let mut planner = SourceColumnPlanner::default();
+    planner.collect_query(query);
+    planner.finish()
+}
+
+struct SourceColumnPlanner {
+    sources: Vec<SourceColumnDependencyBuilder>,
+    safe_for_pruning: bool,
+}
+
+impl Default for SourceColumnPlanner {
+    fn default() -> Self {
+        Self {
+            sources: Vec::new(),
+            safe_for_pruning: true,
+        }
+    }
+}
+
+impl SourceColumnPlanner {
+    fn collect_query(&mut self, query: &Query) {
+        match &query.kind {
+            QueryKind::Select(select) => self.collect_select(select),
+            QueryKind::Union { left, right, .. } => {
+                self.collect_query(left);
+                self.collect_query(right);
+            }
+        }
+    }
+
+    fn collect_select(&mut self, select: &SelectStatement) {
+        let mut bindings = Vec::new();
+        for table in &select.from {
+            self.collect_table_bindings(table, &mut bindings);
+        }
+
+        for table in &select.from {
+            self.collect_join_dependencies(table, &bindings);
+        }
+        for item in &select.projection {
+            self.collect_expr(&item.expr, SourceColumnUsage::Projection, &bindings);
+        }
+        if let Some(expr) = &select.where_clause {
+            self.collect_expr(expr, SourceColumnUsage::Where, &bindings);
+        }
+        for expr in &select.group_by {
+            self.collect_expr(expr, SourceColumnUsage::GroupBy, &bindings);
+        }
+        if let Some(expr) = &select.having {
+            self.collect_expr(expr, SourceColumnUsage::Having, &bindings);
+        }
+        for item in &select.order_by {
+            self.collect_expr(&item.expr, SourceColumnUsage::OrderBy, &bindings);
+        }
+    }
+
+    fn collect_table_bindings(&mut self, table: &TableRef, bindings: &mut Vec<SourceBinding>) {
+        match &table.source {
+            TableSource::Named(path) => {
+                let alias = table
+                    .alias
+                    .clone()
+                    .or_else(|| path.last().cloned())
+                    .unwrap_or_else(|| "query".to_string());
+                let source_idx = self.ensure_source(path, &alias);
+                bindings.push(SourceBinding {
+                    source_idx,
+                    source_path: path.clone(),
+                    alias,
+                });
+            }
+            TableSource::Subquery(query) => self.collect_query(query),
+        }
+
+        for join in &table.joins {
+            self.collect_table_bindings(&join.table, bindings);
+        }
+    }
+
+    fn collect_join_dependencies(&mut self, table: &TableRef, bindings: &[SourceBinding]) {
+        for join in &table.joins {
+            if let Some(expr) = &join.on {
+                self.collect_expr(expr, SourceColumnUsage::JoinOn, bindings);
+            }
+            self.collect_join_dependencies(&join.table, bindings);
+        }
+    }
+
+    fn collect_expr(
+        &mut self,
+        expr: &Expression,
+        usage: SourceColumnUsage,
+        bindings: &[SourceBinding],
+    ) {
+        match expr {
+            Expression::Identifier(path) => self.record_identifier(path, usage, bindings),
+            Expression::Star => self.record_all_columns(bindings),
+            Expression::QualifiedStar(path) => self.record_qualified_star(path, bindings),
+            Expression::FunctionCall { name, args } => {
+                let aggregate = is_aggregate_name(name);
+                for arg in args {
+                    if aggregate && is_count_name(name) && matches!(arg, Expression::Star) {
+                        continue;
+                    }
+                    self.collect_expr(arg, usage, bindings);
+                    if aggregate {
+                        self.collect_expr(arg, SourceColumnUsage::Aggregate, bindings);
+                    }
+                }
+            }
+            Expression::Subquery(query) => self.collect_query(query),
+            Expression::Case {
+                branches,
+                else_expr,
+            } => {
+                for (cond, value) in branches {
+                    self.collect_expr(cond, usage, bindings);
+                    self.collect_expr(value, usage, bindings);
+                }
+                if let Some(expr) = else_expr {
+                    self.collect_expr(expr, usage, bindings);
+                }
+            }
+            Expression::Paren(inner)
+            | Expression::Unary { expr: inner, .. }
+            | Expression::IsNull { expr: inner, .. } => self.collect_expr(inner, usage, bindings),
+            Expression::Binary { left, right, .. } => {
+                self.collect_expr(left, usage, bindings);
+                self.collect_expr(right, usage, bindings);
+            }
+            Expression::String(_)
+            | Expression::Number(_)
+            | Expression::Boolean(_)
+            | Expression::Null
+            | Expression::OdbcDateTime(_)
+            | Expression::BindParameter(_) => {}
+        }
+    }
+
+    fn record_identifier(
+        &mut self,
+        path: &[String],
+        usage: SourceColumnUsage,
+        bindings: &[SourceBinding],
+    ) {
+        let Some((source_idx, column_name)) = resolve_identifier_binding(path, bindings) else {
+            self.safe_for_pruning = false;
+            return;
+        };
+        self.sources[source_idx].record_column(column_name, usage);
+    }
+
+    fn record_all_columns(&mut self, bindings: &[SourceBinding]) {
+        for binding in bindings {
+            self.sources[binding.source_idx].all_columns_required = true;
+        }
+    }
+
+    fn record_qualified_star(&mut self, path: &[String], bindings: &[SourceBinding]) {
+        let matches = matching_bindings(path, bindings);
+        if matches.len() != 1 {
+            self.safe_for_pruning = false;
+            self.record_all_columns(bindings);
+            return;
+        }
+        self.sources[matches[0].source_idx].all_columns_required = true;
+    }
+
+    fn ensure_source(&mut self, source_path: &[String], alias: &str) -> usize {
+        if let Some(idx) = self.sources.iter().position(|source| {
+            path_eq(&source.source_path, source_path) && source.alias.eq_ignore_ascii_case(alias)
+        }) {
+            return idx;
+        }
+
+        let idx = self.sources.len();
+        self.sources.push(SourceColumnDependencyBuilder {
+            source_path: source_path.to_vec(),
+            alias: alias.to_string(),
+            all_columns_required: false,
+            columns: HashMap::new(),
+        });
+        idx
+    }
+
+    fn finish(self) -> SourceColumnDependencyPlan {
+        SourceColumnDependencyPlan {
+            sources: self
+                .sources
+                .into_iter()
+                .map(SourceColumnDependencyBuilder::finish)
+                .collect(),
+            safe_for_pruning: self.safe_for_pruning,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SourceBinding {
+    source_idx: usize,
+    source_path: Vec<String>,
+    alias: String,
+}
+
+#[derive(Debug)]
+struct SourceColumnDependencyBuilder {
+    source_path: Vec<String>,
+    alias: String,
+    all_columns_required: bool,
+    columns: HashMap<String, SourceColumnRequirementBuilder>,
+}
+
+impl SourceColumnDependencyBuilder {
+    fn record_column(&mut self, name: &str, usage: SourceColumnUsage) {
+        self.columns
+            .entry(name.to_lowercase())
+            .or_insert_with(|| SourceColumnRequirementBuilder {
+                name: name.to_string(),
+                usages: BTreeSet::new(),
+            })
+            .usages
+            .insert(usage);
+    }
+
+    fn finish(self) -> SourceColumnDependency {
+        let mut columns: Vec<_> = self
+            .columns
+            .into_values()
+            .map(SourceColumnRequirementBuilder::finish)
+            .collect();
+        columns.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+
+        SourceColumnDependency {
+            source_path: self.source_path,
+            alias: self.alias,
+            all_columns_required: self.all_columns_required,
+            columns,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SourceColumnRequirementBuilder {
+    name: String,
+    usages: BTreeSet<SourceColumnUsage>,
+}
+
+impl SourceColumnRequirementBuilder {
+    fn finish(self) -> SourceColumnRequirement {
+        SourceColumnRequirement {
+            name: self.name,
+            usages: self.usages.into_iter().collect(),
+        }
+    }
+}
+
+fn resolve_identifier_binding<'a>(
+    path: &'a [String],
+    bindings: &'a [SourceBinding],
+) -> Option<(usize, &'a str)> {
+    match path {
+        [column] if bindings.len() == 1 => Some((bindings[0].source_idx, column.as_str())),
+        [_] => None,
+        [.., column] => {
+            let qualifier = &path[..path.len() - 1];
+            let matches = matching_bindings(qualifier, bindings);
+            if matches.len() == 1 {
+                Some((matches[0].source_idx, column.as_str()))
+            } else {
+                None
+            }
+        }
+        [] => None,
+    }
+}
+
+fn matching_bindings<'a>(
+    qualifier: &[String],
+    bindings: &'a [SourceBinding],
+) -> Vec<&'a SourceBinding> {
+    bindings
+        .iter()
+        .filter(|binding| binding.matches_qualifier(qualifier))
+        .collect()
+}
+
+impl SourceBinding {
+    fn matches_qualifier(&self, qualifier: &[String]) -> bool {
+        if qualifier.len() == 1 && self.alias.eq_ignore_ascii_case(&qualifier[0]) {
+            return true;
+        }
+        if qualifier.len() == 1
+            && self
+                .source_path
+                .last()
+                .is_some_and(|name| name.eq_ignore_ascii_case(&qualifier[0]))
+        {
+            return true;
+        }
+        path_eq(&self.source_path, qualifier)
+    }
+}
+
+fn path_eq(left: &[String], right: &[String]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2114,7 +2471,8 @@ impl<'a> QueryExecutor<'a> {
     }
 
     fn execute_select(&self, select: &SelectStatement) -> Result<QueryResult, ExecutionError> {
-        let mut rows = self.resolve_from(&select.from)?;
+        let source_column_plan = SourceColumnDependencyPlan::for_select(select);
+        let mut rows = self.resolve_from(&select.from, &source_column_plan)?;
 
         if let Some(expr) = &select.where_clause {
             rows.retain(|row| self.eval_truthy(expr, row, None).unwrap_or(false));
@@ -2328,20 +2686,28 @@ impl<'a> QueryExecutor<'a> {
         Ok(())
     }
 
-    fn resolve_from(&self, from: &[TableRef]) -> Result<Vec<ResolvedRow>, ExecutionError> {
+    fn resolve_from(
+        &self,
+        from: &[TableRef],
+        source_column_plan: &SourceColumnDependencyPlan,
+    ) -> Result<Vec<ResolvedRow>, ExecutionError> {
         if from.is_empty() {
             return Ok(vec![ResolvedRow::default()]);
         }
 
-        let mut current = self.resolve_table_ref(&from[0])?;
+        let mut current = self.resolve_table_ref(&from[0], source_column_plan)?;
         for table in &from[1..] {
-            let next = self.resolve_table_ref(table)?;
+            let next = self.resolve_table_ref(table, source_column_plan)?;
             current = cross_join(&current, &next, None)?;
         }
         Ok(current.rows)
     }
 
-    fn resolve_table_ref(&self, table: &TableRef) -> Result<ResolvedTable, ExecutionError> {
+    fn resolve_table_ref(
+        &self,
+        table: &TableRef,
+        source_column_plan: &SourceColumnDependencyPlan,
+    ) -> Result<ResolvedTable, ExecutionError> {
         let base = match &table.source {
             TableSource::Named(path) => self
                 .resolve_source(path)?
@@ -2361,9 +2727,16 @@ impl<'a> QueryExecutor<'a> {
             })
             .unwrap_or_else(|| "query".to_string());
 
-        let mut resolved = materialize_table(base.as_ref(), &alias);
+        let source_columns = match &table.source {
+            TableSource::Named(path) if source_column_plan.safe_for_pruning => {
+                source_column_plan.source_for(path, &alias)
+            }
+            _ => None,
+        };
+
+        let mut resolved = materialize_table(base.as_ref(), &alias, source_columns);
         for join in &table.joins {
-            let right = self.resolve_table_ref(&join.table)?;
+            let right = self.resolve_table_ref(&join.table, source_column_plan)?;
             resolved = apply_join(resolved, right, join, self)?;
         }
         Ok(resolved)
@@ -2581,13 +2954,23 @@ struct ResolvedTable {
     rows: Vec<ResolvedRow>,
 }
 
-fn materialize_table(source: &dyn QuerySource, alias: &str) -> ResolvedTable {
-    let columns = source.columns().to_vec();
+fn materialize_table(
+    source: &dyn QuerySource,
+    alias: &str,
+    source_columns: Option<&SourceColumnDependency>,
+) -> ResolvedTable {
+    let source_column_indices =
+        materialized_source_column_indices(source.columns(), source_columns);
+    let columns = source_column_indices
+        .iter()
+        .map(|idx| source.columns()[*idx].clone())
+        .collect::<Vec<_>>();
     let lookup = Arc::new(column_lookup(&columns, alias, 0));
     let rows = (0..source.row_count())
         .map(|row_idx| ResolvedRow {
-            values: (0..columns.len())
-                .map(|col_idx| source.value(row_idx, col_idx))
+            values: source_column_indices
+                .iter()
+                .map(|col_idx| source.value(row_idx, *col_idx))
                 .collect(),
             lookup: lookup.clone(),
         })
@@ -2598,6 +2981,34 @@ fn materialize_table(source: &dyn QuerySource, alias: &str) -> ResolvedTable {
         lookup,
         rows,
     }
+}
+
+fn materialized_source_column_indices(
+    columns: &[QueryColumn],
+    source_columns: Option<&SourceColumnDependency>,
+) -> Vec<usize> {
+    let Some(source_columns) = source_columns else {
+        return (0..columns.len()).collect();
+    };
+    if source_columns.all_columns_required {
+        return (0..columns.len()).collect();
+    }
+
+    let required: HashSet<_> = source_columns
+        .columns
+        .iter()
+        .map(|column| column.name.to_lowercase())
+        .collect();
+
+    columns
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, column)| {
+            required
+                .contains(&column.name.to_lowercase())
+                .then_some(idx)
+        })
+        .collect()
 }
 
 fn cross_join(
@@ -3074,12 +3485,7 @@ fn projection_name(expr: &Expression, idx: usize) -> String {
 
 fn contains_aggregate(expr: &Expression) -> bool {
     match expr {
-        Expression::FunctionCall { name, .. } => {
-            matches!(
-                name.last().map(|s| s.to_lowercase()).as_deref(),
-                Some("count" | "sum" | "min" | "max" | "avg")
-            )
-        }
+        Expression::FunctionCall { name, .. } => is_aggregate_name(name),
         Expression::Binary { left, right, .. } => {
             contains_aggregate(left) || contains_aggregate(right)
         }
@@ -3097,6 +3503,18 @@ fn contains_aggregate(expr: &Expression) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_aggregate_name(name: &[String]) -> bool {
+    matches!(
+        name.last().map(|s| s.to_lowercase()).as_deref(),
+        Some("count" | "sum" | "min" | "max" | "avg")
+    )
+}
+
+fn is_count_name(name: &[String]) -> bool {
+    name.last()
+        .is_some_and(|name| name.eq_ignore_ascii_case("count"))
 }
 
 fn aggregate_numeric(

@@ -26,6 +26,7 @@ The old `review-issues/` set is archived and should not be used for new work.
 18. [N024: QoQ Compact Row Storage](n024-qoq-compact-row-storage.md)
 19. [N025: QoQ Pre-Resolved Lookup Plans](n025-qoq-preresolved-lookup-plans.md)
 20. [N026: Query BIF Parity With BoxLang](n026-query-bif-parity-with-boxlang.md)
+21. [N027: QoQ Query Source And Plan Fast Paths](n027-qoq-query-source-and-plan-fast-paths.md)
 
 ## Active Queue
 
@@ -35,5 +36,4 @@ The old `review-issues/` set is archived and should not be used for new work.
 4. [N021: Web Scopes](n021-web-scopes.md)
 5. [N022: Application Lifecycle](n022-application-lifecycle.md)
 6. [N023: File Upload](n023-file-upload.md)
-7. [N027: QoQ Query Source And Plan Fast Paths](n027-qoq-query-source-and-plan-fast-paths.md)
-8. [N028: Compiler Performance Comparison Suite](n028-compiler-performance-comparison-suite.md)
+7. [N028: Compiler Performance Comparison Suite](n028-compiler-performance-comparison-suite.md)
