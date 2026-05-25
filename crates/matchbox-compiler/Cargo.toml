@@ -11,3 +11,4 @@ matchbox_vm = { path = "../matchbox-vm" }
 [features]
 default = ["bxm"]
 bxm = []
+qoq = ["matchbox_vm/qoq"]

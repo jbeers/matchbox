@@ -1161,6 +1161,80 @@ impl BxVM for VM {
         VM::insert_global(self, name, val);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue> {
+        let mut offset = 0;
+        if path.first()?.eq_ignore_ascii_case("variables") {
+            offset = 1;
+        }
+        let first = path.get(offset)?.to_lowercase();
+        let mut value = self
+            .current_variables_scope()
+            .borrow()
+            .get(&first)
+            .copied()
+            .or_else(|| self.get_global(&first))?;
+
+        for part in &path[(offset + 1)..] {
+            let id = value.as_gc_id()?;
+            value = match self.heap.get_opt(id)? {
+                GcObject::Struct(_) => {
+                    let direct = self.struct_get(id, part);
+                    if direct.is_null() {
+                        self.struct_get(id, &part.to_lowercase())
+                    } else {
+                        direct
+                    }
+                }
+                GcObject::Instance(instance) => instance
+                    .variables
+                    .borrow()
+                    .get(&part.to_lowercase())
+                    .copied()
+                    .unwrap_or_else(BxValue::new_null),
+                GcObject::NativeObject(obj) => obj.borrow().get_property(part),
+                _ => BxValue::new_null(),
+            };
+            if value.is_null() {
+                return None;
+            }
+        }
+
+        Some(value)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_result(&self, id: usize) -> Option<crate::datasource::traits::QueryResult> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_result(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_columns(&self, id: usize) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_columns(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_row_count(&self, id: usize) -> Option<usize> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_row_count(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_cell(row_idx, col_idx),
+            _ => None,
+        }
+    }
+
     fn get_cli_args(&self) -> Vec<String> {
         self.cli_args.clone()
     }

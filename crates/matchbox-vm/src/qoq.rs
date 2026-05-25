@@ -2,6 +2,7 @@ use crate::datasource::traits::{QueryColumn, QueryColumnType, QueryResult, SqlVa
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
@@ -303,7 +304,9 @@ impl<'a> Lexer<'a> {
             self.consume_string();
             return TokenKind::String;
         }
-        if ch.is_ascii_digit() || (ch == '.' && self.peek_char(1).is_some_and(|c| c.is_ascii_digit())) {
+        if ch.is_ascii_digit()
+            || (ch == '.' && self.peek_char(1).is_some_and(|c| c.is_ascii_digit()))
+        {
             self.consume_number();
             return TokenKind::Number;
         }
@@ -575,7 +578,8 @@ impl<'a> Lexer<'a> {
                 break;
             }
         }
-        if self.current_char() == Some('.') && self.peek_char(1).is_some_and(|c| c.is_ascii_digit()) {
+        if self.current_char() == Some('.') && self.peek_char(1).is_some_and(|c| c.is_ascii_digit())
+        {
             self.advance();
             while let Some(ch) = self.current_char() {
                 if ch.is_ascii_digit() {
@@ -660,7 +664,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn peek_ident_start(&self, offset: usize) -> bool {
-        self.peek_char(offset).is_some_and(|ch| self.is_ident_start(ch))
+        self.peek_char(offset)
+            .is_some_and(|ch| self.is_ident_start(ch))
     }
 
     fn is_ident_start(&self, ch: char) -> bool {
@@ -1019,7 +1024,10 @@ impl Expression {
                 }
             }
             Expression::Subquery(query) => query.walk(f),
-            Expression::Case { branches, else_expr } => {
+            Expression::Case {
+                branches,
+                else_expr,
+            } => {
                 for (cond, value) in branches {
                     cond.walk(f);
                     value.walk(f);
@@ -1095,7 +1103,11 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(source: &'a str, tokens: &'a [Token]) -> Self {
-        Self { source, tokens, pos: 0 }
+        Self {
+            source,
+            tokens,
+            pos: 0,
+        }
     }
 
     fn parse_query(&mut self) -> ParseResult<Query> {
@@ -1189,7 +1201,10 @@ impl<'a> Parser<'a> {
         let limit = if self.consume_if(TokenKind::Limit) {
             let token = self.expect_any(&[TokenKind::Number])?;
             let raw = self.token_text(token);
-            Some(raw.parse::<u64>().map_err(|_| self.error(token, "invalid LIMIT value"))?)
+            Some(
+                raw.parse::<u64>()
+                    .map_err(|_| self.error(token, "invalid LIMIT value"))?,
+            )
         } else {
             None
         };
@@ -1213,7 +1228,10 @@ impl<'a> Parser<'a> {
     fn parse_select_item(&mut self) -> ParseResult<SelectItem> {
         let expr = if self.consume_if(TokenKind::Asterisk) {
             Expression::Star
-        } else if self.peek_is(TokenKind::Identifier) && self.peek_kind_n(1) == Some(TokenKind::Dot) && self.peek_kind_n(2) == Some(TokenKind::Asterisk) {
+        } else if self.peek_is(TokenKind::Identifier)
+            && self.peek_kind_n(1) == Some(TokenKind::Dot)
+            && self.peek_kind_n(2) == Some(TokenKind::Asterisk)
+        {
             let path = self.parse_path()?;
             self.expect_kind(TokenKind::Dot)?;
             self.expect_kind(TokenKind::Asterisk)?;
@@ -1259,7 +1277,11 @@ impl<'a> Parser<'a> {
             joins.push(self.parse_join_clause()?);
         }
 
-        Ok(TableRef { source, alias, joins })
+        Ok(TableRef {
+            source,
+            alias,
+            joins,
+        })
     }
 
     fn parse_join_clause(&mut self) -> ParseResult<JoinClause> {
@@ -1363,7 +1385,9 @@ impl<'a> Parser<'a> {
                     }
                 }
                 expr = match expr {
-                    Expression::Identifier(name) | Expression::QualifiedStar(name) => Expression::FunctionCall { name, args },
+                    Expression::Identifier(name) | Expression::QualifiedStar(name) => {
+                        Expression::FunctionCall { name, args }
+                    }
                     Expression::Paren(inner) => Expression::FunctionCall {
                         name: vec![self.text_for_expr_name(&inner)?],
                         args,
@@ -1420,7 +1444,10 @@ impl<'a> Parser<'a> {
                 None
             };
             self.expect_kind(TokenKind::End)?;
-            return Ok(Expression::Case { branches, else_expr });
+            return Ok(Expression::Case {
+                branches,
+                else_expr,
+            });
         }
         if self.peek_is(TokenKind::String) {
             return Ok(Expression::String(self.consume_raw_text()?));
@@ -1439,7 +1466,9 @@ impl<'a> Parser<'a> {
         }
         if self.peek_is(TokenKind::BindParameter) {
             let text = self.consume_raw_text()?;
-            return Ok(Expression::BindParameter(text.strip_prefix(':').map(|s| s.to_string())));
+            return Ok(Expression::BindParameter(
+                text.strip_prefix(':').map(|s| s.to_string()),
+            ));
         }
         if self.peek_is(TokenKind::OdbcDateTimeLiteral) {
             return Ok(Expression::OdbcDateTime(self.consume_raw_text()?));
@@ -1450,7 +1479,9 @@ impl<'a> Parser<'a> {
         }
         if self.peek_is(TokenKind::Select) {
             let _subquery = self.parse_select_query()?;
-            return Ok(Expression::Paren(Box::new(Expression::Identifier(vec!["subquery".to_string()]))));
+            return Ok(Expression::Paren(Box::new(Expression::Identifier(vec![
+                "subquery".to_string(),
+            ]))));
         }
         if self.peek_is(TokenKind::Identifier) {
             let path = self.parse_path()?;
@@ -1660,7 +1691,9 @@ fn bind_query(
     Ok(Query {
         span: query.span,
         kind: match &query.kind {
-            QueryKind::Select(select) => QueryKind::Select(bind_select(select, params, positional)?),
+            QueryKind::Select(select) => {
+                QueryKind::Select(bind_select(select, params, positional)?)
+            }
             QueryKind::Union { left, all, right } => QueryKind::Union {
                 left: Box::new(bind_query(left, params, positional)?),
                 all: *all,
@@ -1730,7 +1763,9 @@ fn bind_table_ref(
     Ok(TableRef {
         source: match &table.source {
             TableSource::Named(path) => TableSource::Named(path.clone()),
-            TableSource::Subquery(query) => TableSource::Subquery(Box::new(bind_query(query, params, positional)?)),
+            TableSource::Subquery(query) => {
+                TableSource::Subquery(Box::new(bind_query(query, params, positional)?))
+            }
         },
         alias: table.alias.clone(),
         joins: table
@@ -1783,10 +1818,13 @@ fn bind_expression(
             sql_value_to_expression(value)
         }
         Expression::BindParameter(None) => {
-            let value = params.positional.get(*positional).ok_or_else(|| ExecutionError {
-                message: "missing positional QoQ parameter".to_string(),
-                span: None,
-            })?;
+            let value = params
+                .positional
+                .get(*positional)
+                .ok_or_else(|| ExecutionError {
+                    message: "missing positional QoQ parameter".to_string(),
+                    span: None,
+                })?;
             *positional += 1;
             sql_value_to_expression(value)
         }
@@ -1797,8 +1835,13 @@ fn bind_expression(
                 .map(|arg| bind_expression(arg, params, positional))
                 .collect::<Result<_, _>>()?,
         },
-        Expression::Subquery(query) => Expression::Subquery(Box::new(bind_query(query, params, positional)?)),
-        Expression::Case { branches, else_expr } => Expression::Case {
+        Expression::Subquery(query) => {
+            Expression::Subquery(Box::new(bind_query(query, params, positional)?))
+        }
+        Expression::Case {
+            branches,
+            else_expr,
+        } => Expression::Case {
             branches: branches
                 .iter()
                 .map(|(cond, value)| {
@@ -1813,7 +1856,9 @@ fn bind_expression(
                 .map(|expr| bind_expression(expr, params, positional).map(Box::new))
                 .transpose()?,
         },
-        Expression::Paren(inner) => Expression::Paren(Box::new(bind_expression(inner, params, positional)?)),
+        Expression::Paren(inner) => {
+            Expression::Paren(Box::new(bind_expression(inner, params, positional)?))
+        }
         Expression::Unary { op, expr } => Expression::Unary {
             op: op.clone(),
             expr: Box::new(bind_expression(expr, params, positional)?),
@@ -1864,7 +1909,11 @@ pub fn execute(
         Ok(sources
             .iter()
             .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&key))
-            .map(|(_, result)| result.clone()))
+            .map(|(_, result)| {
+                Box::new(QueryResultSource {
+                    result: result.clone(),
+                }) as Box<dyn QuerySource>
+            }))
     })
 }
 
@@ -1873,9 +1922,92 @@ pub fn execute_with_source_resolver<'a, F>(
     source_resolver: F,
 ) -> Result<QueryResult, ExecutionError>
 where
-    F: FnMut(&[String]) -> Result<Option<QueryResult>, ExecutionError> + 'a,
+    F: FnMut(&[String]) -> Result<Option<Box<dyn QuerySource + 'a>>, ExecutionError> + 'a,
 {
     QueryExecutor::new(source_resolver).execute(query)
+}
+
+pub trait QuerySource {
+    fn columns(&self) -> &[QueryColumn];
+    fn row_count(&self) -> usize;
+    fn value(&self, row_idx: usize, col_idx: usize) -> SqlValue;
+}
+
+#[derive(Clone, Debug)]
+struct QueryResultSource {
+    result: QueryResult,
+}
+
+impl QuerySource for QueryResultSource {
+    fn columns(&self) -> &[QueryColumn] {
+        &self.result.columns
+    }
+
+    fn row_count(&self) -> usize {
+        self.result.rows.len()
+    }
+
+    fn value(&self, row_idx: usize, col_idx: usize) -> SqlValue {
+        self.result
+            .rows
+            .get(row_idx)
+            .and_then(|row| row.get(col_idx))
+            .cloned()
+            .unwrap_or(SqlValue::Null)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamingAggregate {
+    Avg,
+    Sum,
+    Count,
+    Min,
+    Max,
+}
+
+#[derive(Clone, Debug)]
+enum StreamingAggregateArg {
+    Star,
+    Identifier(Vec<String>),
+}
+
+#[derive(Clone, Debug)]
+struct StreamingAggregatePlan {
+    op: StreamingAggregate,
+    arg: StreamingAggregateArg,
+    output_name: String,
+}
+
+fn simple_streaming_aggregate_plan(select: &SelectStatement) -> Option<StreamingAggregatePlan> {
+    let item = select.projection.first()?;
+    let (name, args) = match &item.expr {
+        Expression::FunctionCall { name, args } => (name, args),
+        _ => return None,
+    };
+    let op = match name.last()?.to_lowercase().as_str() {
+        "avg" => StreamingAggregate::Avg,
+        "sum" => StreamingAggregate::Sum,
+        "count" => StreamingAggregate::Count,
+        "min" => StreamingAggregate::Min,
+        "max" => StreamingAggregate::Max,
+        _ => return None,
+    };
+
+    let arg = match args.as_slice() {
+        [Expression::Star] if op == StreamingAggregate::Count => StreamingAggregateArg::Star,
+        [Expression::Identifier(path)] => StreamingAggregateArg::Identifier(path.clone()),
+        _ => return None,
+    };
+
+    Some(StreamingAggregatePlan {
+        op,
+        arg,
+        output_name: item
+            .alias
+            .clone()
+            .unwrap_or_else(|| projection_name(&item.expr, 0)),
+    })
 }
 
 pub struct QueryExecutor<'a> {
@@ -1883,12 +2015,12 @@ pub struct QueryExecutor<'a> {
 }
 
 type SourceResolver<'a> =
-    dyn FnMut(&[String]) -> Result<Option<QueryResult>, ExecutionError> + 'a;
+    dyn FnMut(&[String]) -> Result<Option<Box<dyn QuerySource + 'a>>, ExecutionError> + 'a;
 
 impl<'a> QueryExecutor<'a> {
     pub fn new<F>(source_resolver: F) -> Self
     where
-        F: FnMut(&[String]) -> Result<Option<QueryResult>, ExecutionError> + 'a,
+        F: FnMut(&[String]) -> Result<Option<Box<dyn QuerySource + 'a>>, ExecutionError> + 'a,
     {
         Self {
             source_resolver: std::cell::RefCell::new(Box::new(source_resolver)),
@@ -1907,7 +2039,8 @@ impl<'a> QueryExecutor<'a> {
                 let mut left_result = self.execute(left)?;
                 let right_result = self.execute(right)?;
                 left_result.rows.extend(right_result.rows);
-                left_result.columns = merge_union_columns(&left_result.columns, &right_result.columns);
+                left_result.columns =
+                    merge_union_columns(&left_result.columns, &right_result.columns);
                 if !all {
                     dedupe_rows(&mut left_result.rows);
                 }
@@ -1916,7 +2049,10 @@ impl<'a> QueryExecutor<'a> {
         }
     }
 
-    fn resolve_source(&self, path: &[String]) -> Result<Option<QueryResult>, ExecutionError> {
+    fn resolve_source(
+        &self,
+        path: &[String],
+    ) -> Result<Option<Box<dyn QuerySource + 'a>>, ExecutionError> {
         (self.source_resolver.borrow_mut())(path)
     }
 
@@ -1938,59 +2074,40 @@ impl<'a> QueryExecutor<'a> {
             return Ok(None);
         }
 
-        let item = &select.projection[0];
-        let (func_name, arg_expr) = match &item.expr {
-            Expression::FunctionCall { name, args } if args.len() == 1 => (name, &args[0]),
-            _ => return Ok(None),
-        };
-
-        if !matches!(func_name.last().map(|s| s.as_str()), Some(name) if name.eq_ignore_ascii_case("avg")) {
+        let Some(plan) = simple_streaming_aggregate_plan(select) else {
             return Ok(None);
-        }
+        };
 
         let source_path = match &select.from[0].source {
             TableSource::Named(path) => path,
             TableSource::Subquery(_) => return Ok(None),
         };
-        let result = self
-            .resolve_source(source_path)?
-            .ok_or_else(|| self.error(format!("unknown table '{}'", source_path.join(".")), None))?;
+        let source = self.resolve_source(source_path)?.ok_or_else(|| {
+            self.error(format!("unknown table '{}'", source_path.join(".")), None)
+        })?;
 
-        let column_name = match arg_expr {
-            Expression::Identifier(path) if path.len() == 1 => &path[0],
-            _ => return Ok(None),
-        };
-
-        let col_idx = result
-            .columns
-            .iter()
-            .position(|c| c.name.eq_ignore_ascii_case(column_name))
-            .ok_or_else(|| self.error(format!("unknown identifier '{}'", column_name), None))?;
-
-        let mut total = 0.0;
-        let mut count = 0.0;
-        for row in &result.rows {
-            if let Some(value) = row.get(col_idx).and_then(sql_as_f64_ref) {
-                total += value;
-                count += 1.0;
+        let col_idx = match &plan.arg {
+            StreamingAggregateArg::Star => None,
+            StreamingAggregateArg::Identifier(path) => {
+                let table_alias = select.from[0]
+                    .alias
+                    .as_deref()
+                    .or_else(|| source_path.last().map(String::as_str));
+                Some(resolve_source_column_index(
+                    source.columns(),
+                    source_path,
+                    table_alias,
+                    path,
+                )?)
             }
-        }
-
-        let alias = item
-            .alias
-            .clone()
-            .unwrap_or_else(|| projection_name(&item.expr, 0));
-
-        let output = if count == 0.0 {
-            SqlValue::Null
-        } else {
-            SqlValue::Float(total / count)
         };
+
+        let output = stream_simple_aggregate(source.as_ref(), plan.op, col_idx);
 
         Ok(Some(QueryResult {
             columns: vec![QueryColumn {
-                name: alias,
-                col_type: QueryColumnType::Double,
+                name: plan.output_name,
+                col_type: aggregate_output_type(plan.op, &output),
             }],
             rows: vec![vec![output]],
         }))
@@ -2040,6 +2157,10 @@ impl<'a> QueryExecutor<'a> {
         select: &SelectStatement,
         rows: &[ResolvedRow],
     ) -> Result<QueryResult, ExecutionError> {
+        if let Some(result) = self.execute_simple_identifier_projection(select, rows) {
+            return Ok(result);
+        }
+
         let mut out_rows = Vec::new();
         let mut columns = Vec::new();
         for row in rows {
@@ -2047,10 +2168,12 @@ impl<'a> QueryExecutor<'a> {
             for item in &select.projection {
                 let value = match &item.expr {
                     Expression::Star => {
-                        return Err(self.error("star projection requires query expansion", None))
+                        return Err(self.error("star projection requires query expansion", None));
                     }
                     Expression::QualifiedStar(_) => {
-                        return Err(self.error("qualified star projection requires query expansion", None))
+                        return Err(
+                            self.error("qualified star projection requires query expansion", None)
+                        );
                     }
                     expr => self.eval(expr, row, None)?,
                 };
@@ -2061,7 +2184,57 @@ impl<'a> QueryExecutor<'a> {
             }
             out_rows.push(out_row);
         }
-        Ok(QueryResult { columns, rows: out_rows })
+        Ok(QueryResult {
+            columns,
+            rows: out_rows,
+        })
+    }
+
+    fn execute_simple_identifier_projection(
+        &self,
+        select: &SelectStatement,
+        rows: &[ResolvedRow],
+    ) -> Option<QueryResult> {
+        let first = rows.first()?;
+        let mut indices = Vec::with_capacity(select.projection.len());
+        for item in &select.projection {
+            match &item.expr {
+                Expression::Identifier(path) => indices.push(first.lookup_path_index(path)?),
+                _ => return None,
+            }
+        }
+
+        let columns = select
+            .projection
+            .iter()
+            .zip(indices.iter())
+            .enumerate()
+            .map(|(idx, (item, value_idx))| {
+                let value = first.values.get(*value_idx).unwrap_or(&SqlValue::Null);
+                QueryColumn {
+                    name: item
+                        .alias
+                        .clone()
+                        .unwrap_or_else(|| projection_name(&item.expr, idx)),
+                    col_type: infer_query_type(value),
+                }
+            })
+            .collect();
+
+        let out_rows = rows
+            .iter()
+            .map(|row| {
+                indices
+                    .iter()
+                    .map(|idx| row.values.get(*idx).cloned().unwrap_or(SqlValue::Null))
+                    .collect()
+            })
+            .collect();
+
+        Some(QueryResult {
+            columns,
+            rows: out_rows,
+        })
     }
 
     fn execute_grouped(
@@ -2085,7 +2258,9 @@ impl<'a> QueryExecutor<'a> {
         let mut out_rows = Vec::new();
         let mut columns = Vec::new();
         for group_rows in groups.values() {
-            let first = *group_rows.first().ok_or_else(|| self.error("empty group", None))?;
+            let first = *group_rows
+                .first()
+                .ok_or_else(|| self.error("empty group", None))?;
             if let Some(having) = &select.having {
                 if !self.eval_truthy(having, first, Some(group_rows))? {
                     continue;
@@ -2102,7 +2277,10 @@ impl<'a> QueryExecutor<'a> {
             }
             out_rows.push(out_row);
         }
-        Ok(QueryResult { columns, rows: out_rows })
+        Ok(QueryResult {
+            columns,
+            rows: out_rows,
+        })
     }
 
     fn projection_columns(
@@ -2112,7 +2290,10 @@ impl<'a> QueryExecutor<'a> {
     ) -> Result<Vec<QueryColumn>, ExecutionError> {
         let mut columns = Vec::new();
         for (idx, item) in select.projection.iter().enumerate() {
-            let name = item.alias.clone().unwrap_or_else(|| projection_name(&item.expr, idx));
+            let name = item
+                .alias
+                .clone()
+                .unwrap_or_else(|| projection_name(&item.expr, idx));
             let value = match &item.expr {
                 Expression::Star | Expression::QualifiedStar(_) => SqlValue::Null,
                 expr => self.eval(expr, row, None).unwrap_or(SqlValue::Null),
@@ -2130,23 +2311,16 @@ impl<'a> QueryExecutor<'a> {
         select: &SelectStatement,
         result: &mut QueryResult,
     ) -> Result<(), ExecutionError> {
-        let order_specs = select.order_by.clone();
-        let columns = result.columns.clone();
+        let order_specs = resolve_result_order_specs(select, &result.columns);
         result.rows.sort_by(|a, b| {
-            for spec in &order_specs {
-                let idx = match &spec.expr {
-                    Expression::Number(n) => n.parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
-                    Expression::Identifier(path) if path.len() == 1 => {
-                        columns.iter().position(|c| c.name.eq_ignore_ascii_case(&path[0]))
-                    }
-                    _ => None,
-                };
-                let ord = idx
-                    .and_then(|i| a.get(i).zip(b.get(i)))
+            for (idx, descending) in &order_specs {
+                let ord = a
+                    .get(*idx)
+                    .zip(b.get(*idx))
                     .and_then(|(l, r)| compare_sql_values(l, r))
                     .unwrap_or(Ordering::Equal);
                 if ord != Ordering::Equal {
-                    return if spec.descending { ord.reverse() } else { ord };
+                    return if *descending { ord.reverse() } else { ord };
                 }
             }
             Ordering::Equal
@@ -2169,10 +2343,13 @@ impl<'a> QueryExecutor<'a> {
 
     fn resolve_table_ref(&self, table: &TableRef) -> Result<ResolvedTable, ExecutionError> {
         let base = match &table.source {
-            TableSource::Named(path) => self.resolve_source(path)?.ok_or_else(|| {
-                self.error(format!("unknown table '{}'", path.join(".")), None)
-            })?,
-            TableSource::Subquery(query) => self.execute(query)?,
+            TableSource::Named(path) => self
+                .resolve_source(path)?
+                .ok_or_else(|| self.error(format!("unknown table '{}'", path.join(".")), None))?,
+            TableSource::Subquery(query) => {
+                let result = self.execute(query)?;
+                Box::new(QueryResultSource { result }) as Box<dyn QuerySource>
+            }
         };
 
         let alias = table
@@ -2184,7 +2361,7 @@ impl<'a> QueryExecutor<'a> {
             })
             .unwrap_or_else(|| "query".to_string());
 
-        let mut resolved = materialize_table(&base, &alias);
+        let mut resolved = materialize_table(base.as_ref(), &alias);
         for join in &table.joins {
             let right = self.resolve_table_ref(&join.table)?;
             resolved = apply_join(resolved, right, join, self)?;
@@ -2208,17 +2385,24 @@ impl<'a> QueryExecutor<'a> {
         group_rows: Option<&[&ResolvedRow]>,
     ) -> Result<SqlValue, ExecutionError> {
         match expr {
-            Expression::Identifier(path) => row
-                .lookup(&path.join("."))
-                .cloned()
-                .ok_or_else(|| self.error(format!("unknown identifier '{}'", path.join(".")), None)),
+            Expression::Identifier(path) => row.lookup_path(path).cloned().ok_or_else(|| {
+                self.error(
+                    format!("unknown identifier '{}'", identifier_path(path)),
+                    None,
+                )
+            }),
             Expression::String(s) => Ok(SqlValue::Text(s.clone())),
             Expression::Number(n) => parse_sql_number(n),
             Expression::Boolean(b) => Ok(SqlValue::Bool(*b)),
             Expression::Null => Ok(SqlValue::Null),
             Expression::OdbcDateTime(s) => Ok(SqlValue::Text(s.clone())),
-            Expression::BindParameter(_) => Err(self.error("bind parameters are not supported in QoQ execution yet", None)),
-            Expression::Star | Expression::QualifiedStar(_) => Err(self.error("star is only valid in select projection", None)),
+            Expression::BindParameter(_) => Err(self.error(
+                "bind parameters are not supported in QoQ execution yet",
+                None,
+            )),
+            Expression::Star | Expression::QualifiedStar(_) => {
+                Err(self.error("star is only valid in select projection", None))
+            }
             Expression::Paren(inner) => self.eval(inner, row, group_rows),
             Expression::Unary { op, expr } => {
                 let value = self.eval(expr, row, group_rows)?;
@@ -2234,7 +2418,11 @@ impl<'a> QueryExecutor<'a> {
             }
             Expression::IsNull { expr, negated } => {
                 let value = self.eval(expr, row, group_rows)?;
-                Ok(SqlValue::Bool(if *negated { !matches!(value, SqlValue::Null) } else { matches!(value, SqlValue::Null) }))
+                Ok(SqlValue::Bool(if *negated {
+                    !matches!(value, SqlValue::Null)
+                } else {
+                    matches!(value, SqlValue::Null)
+                }))
             }
             Expression::FunctionCall { name, args } => {
                 self.eval_function(name, args, row, group_rows)
@@ -2244,10 +2432,16 @@ impl<'a> QueryExecutor<'a> {
                 if result.rows.len() == 1 && result.rows[0].len() == 1 {
                     Ok(result.rows[0][0].clone())
                 } else {
-                    Err(self.error("subquery expressions must return a single value", Some(query.span)))
+                    Err(self.error(
+                        "subquery expressions must return a single value",
+                        Some(query.span),
+                    ))
                 }
             }
-            Expression::Case { branches, else_expr } => {
+            Expression::Case {
+                branches,
+                else_expr,
+            } => {
                 for (cond, value) in branches {
                     if is_truthy(&self.eval(cond, row, group_rows)?) {
                         return self.eval(value, row, group_rows);
@@ -2276,6 +2470,9 @@ impl<'a> QueryExecutor<'a> {
                     if args.is_empty() || matches!(args.first(), Some(Expression::Star)) {
                         return Ok(SqlValue::Int(group_rows.len() as i64));
                     }
+                    if let Some(count) = aggregate_count_identifier(group_rows, &args[0]) {
+                        return Ok(SqlValue::Int(count));
+                    }
                     let mut count = 0i64;
                     for r in group_rows {
                         if !matches!(self.eval(&args[0], r, None)?, SqlValue::Null) {
@@ -2284,10 +2481,22 @@ impl<'a> QueryExecutor<'a> {
                     }
                     return Ok(SqlValue::Int(count));
                 }
-                "sum" => return aggregate_numeric(group_rows, |acc, v| acc + v, 0.0, &args[0], self, row),
+                "sum" => {
+                    return aggregate_numeric(
+                        group_rows,
+                        |acc, v| acc + v,
+                        0.0,
+                        &args[0],
+                        self,
+                        row,
+                    );
+                }
                 "min" => return aggregate_minmax(group_rows, true, &args[0], self, row),
                 "max" => return aggregate_minmax(group_rows, false, &args[0], self, row),
                 "avg" => {
+                    if let Some(value) = aggregate_avg_identifier(group_rows, &args[0]) {
+                        return Ok(value);
+                    }
                     let mut total = 0.0;
                     let mut count = 0.0;
                     for r in group_rows {
@@ -2297,7 +2506,11 @@ impl<'a> QueryExecutor<'a> {
                             count += 1.0;
                         }
                     }
-                    return Ok(if count == 0.0 { SqlValue::Null } else { SqlValue::Float(total / count) });
+                    return Ok(if count == 0.0 {
+                        SqlValue::Null
+                    } else {
+                        SqlValue::Float(total / count)
+                    });
                 }
                 _ => {}
             }
@@ -2329,42 +2542,62 @@ impl<'a> QueryExecutor<'a> {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct ResolvedRow {
-    values: HashMap<String, SqlValue>,
+    values: Vec<SqlValue>,
+    lookup: Arc<HashMap<String, usize>>,
 }
 
 impl ResolvedRow {
-    fn lookup(&self, name: &str) -> Option<&SqlValue> {
-        self.values.get(&name.to_lowercase())
+    fn lookup_path(&self, path: &[String]) -> Option<&SqlValue> {
+        self.lookup_path_index(path)
+            .and_then(|idx| self.values.get(idx))
     }
 
-    fn insert(&mut self, name: impl Into<String>, value: SqlValue) {
-        self.values.insert(name.into().to_lowercase(), value);
+    fn lookup_path_index(&self, path: &[String]) -> Option<usize> {
+        match path {
+            [single] => self.lookup.get(&single.to_lowercase()).copied(),
+            _ => self
+                .lookup
+                .get(&identifier_path(path).to_lowercase())
+                .copied(),
+        }
+    }
+}
+
+impl Default for ResolvedRow {
+    fn default() -> Self {
+        Self {
+            values: Vec::new(),
+            lookup: Arc::new(HashMap::new()),
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 struct ResolvedTable {
     columns: Vec<QueryColumn>,
+    lookup: Arc<HashMap<String, usize>>,
     rows: Vec<ResolvedRow>,
 }
 
-fn materialize_table(result: &QueryResult, alias: &str) -> ResolvedTable {
-    let mut rows = Vec::new();
-    for row in &result.rows {
-        let mut resolved = ResolvedRow::default();
-        for (idx, col) in result.columns.iter().enumerate() {
-            let value = row.get(idx).cloned().unwrap_or(SqlValue::Null);
-            let col_name = col.name.to_lowercase();
-            resolved.insert(col_name.clone(), value.clone());
-            resolved.insert(format!("{alias}.{}", col.name), value);
-        }
-        rows.push(resolved);
-    }
+fn materialize_table(source: &dyn QuerySource, alias: &str) -> ResolvedTable {
+    let columns = source.columns().to_vec();
+    let lookup = Arc::new(column_lookup(&columns, alias, 0));
+    let rows = (0..source.row_count())
+        .map(|row_idx| ResolvedRow {
+            values: (0..columns.len())
+                .map(|col_idx| source.value(row_idx, col_idx))
+                .collect(),
+            lookup: lookup.clone(),
+        })
+        .collect();
 
-    let columns = result.columns.clone();
-    ResolvedTable { columns, rows }
+    ResolvedTable {
+        columns,
+        lookup,
+        rows,
+    }
 }
 
 fn cross_join(
@@ -2373,12 +2606,11 @@ fn cross_join(
     on: Option<&Expression>,
 ) -> Result<ResolvedTable, ExecutionError> {
     let mut rows = Vec::new();
+    let columns = merge_columns(&left.columns, &right.columns);
+    let lookup = merge_lookups(left, right);
     for l in &left.rows {
         for r in &right.rows {
-            let mut merged = l.clone();
-            for (k, v) in &r.values {
-                merged.values.insert(k.clone(), v.clone());
-            }
+            let merged = merge_rows(l, r, lookup.clone());
             if let Some(expr) = on {
                 // `on` is evaluated by the caller once a QueryExecutor exists.
                 let _ = expr;
@@ -2387,9 +2619,11 @@ fn cross_join(
         }
     }
 
-    let mut columns = left.columns.clone();
-    columns.extend(right.columns.clone());
-    Ok(ResolvedTable { columns, rows })
+    Ok(ResolvedTable {
+        columns,
+        lookup,
+        rows,
+    })
 }
 
 fn apply_join(
@@ -2400,14 +2634,13 @@ fn apply_join(
 ) -> Result<ResolvedTable, ExecutionError> {
     let mut rows = Vec::new();
     let mut matched_right = vec![false; right.rows.len()];
+    let columns = merge_columns(&left.columns, &right.columns);
+    let lookup = merge_lookups(&left, &right);
 
     for l in &left.rows {
         let mut matched = false;
         for (idx, r) in right.rows.iter().enumerate() {
-            let mut merged = l.clone();
-            for (k, v) in &r.values {
-                merged.values.insert(k.clone(), v.clone());
-            }
+            let merged = merge_rows(l, r, lookup.clone());
             let passes = match &join.on {
                 Some(expr) => executor.eval_truthy(expr, &merged, None)?,
                 None => true,
@@ -2419,28 +2652,226 @@ fn apply_join(
             }
         }
         if !matched && matches!(join.kind, JoinKind::Left | JoinKind::Full) {
-            rows.push(l.clone());
+            rows.push(pad_right_row(l, right.columns.len(), lookup.clone()));
         }
     }
 
     if matches!(join.kind, JoinKind::Right | JoinKind::Full) {
         for (idx, r) in right.rows.iter().enumerate() {
             if !matched_right[idx] {
-                rows.push(r.clone());
+                rows.push(pad_left_row(r, left.columns.len(), lookup.clone()));
             }
         }
     }
 
     Ok(ResolvedTable {
-        columns: merge_columns(&left.columns, &right.columns),
+        columns,
+        lookup,
         rows,
     })
+}
+
+fn column_lookup(columns: &[QueryColumn], alias: &str, offset: usize) -> HashMap<String, usize> {
+    let mut lookup = HashMap::with_capacity(columns.len() * 2);
+    for (idx, col) in columns.iter().enumerate() {
+        let absolute_idx = offset + idx;
+        lookup.insert(col.name.to_lowercase(), absolute_idx);
+        lookup.insert(format!("{alias}.{}", col.name).to_lowercase(), absolute_idx);
+    }
+    lookup
+}
+
+fn merge_lookups(left: &ResolvedTable, right: &ResolvedTable) -> Arc<HashMap<String, usize>> {
+    let mut lookup = HashMap::with_capacity(left.lookup.len() + right.lookup.len());
+    for (key, idx) in left.lookup.iter() {
+        lookup.insert(key.clone(), *idx);
+    }
+    let offset = left.columns.len();
+    for (key, idx) in right.lookup.iter() {
+        lookup.insert(key.clone(), offset + *idx);
+    }
+    Arc::new(lookup)
+}
+
+fn merge_rows(
+    left: &ResolvedRow,
+    right: &ResolvedRow,
+    lookup: Arc<HashMap<String, usize>>,
+) -> ResolvedRow {
+    let mut values = Vec::with_capacity(left.values.len() + right.values.len());
+    values.extend(left.values.iter().cloned());
+    values.extend(right.values.iter().cloned());
+    ResolvedRow { values, lookup }
+}
+
+fn pad_right_row(
+    left: &ResolvedRow,
+    right_len: usize,
+    lookup: Arc<HashMap<String, usize>>,
+) -> ResolvedRow {
+    let mut values = Vec::with_capacity(left.values.len() + right_len);
+    values.extend(left.values.iter().cloned());
+    values.extend((0..right_len).map(|_| SqlValue::Null));
+    ResolvedRow { values, lookup }
+}
+
+fn pad_left_row(
+    right: &ResolvedRow,
+    left_len: usize,
+    lookup: Arc<HashMap<String, usize>>,
+) -> ResolvedRow {
+    let mut values = Vec::with_capacity(left_len + right.values.len());
+    values.extend((0..left_len).map(|_| SqlValue::Null));
+    values.extend(right.values.iter().cloned());
+    ResolvedRow { values, lookup }
 }
 
 fn merge_columns(left: &[QueryColumn], right: &[QueryColumn]) -> Vec<QueryColumn> {
     let mut columns = left.to_vec();
     columns.extend(right.iter().cloned());
     columns
+}
+
+fn resolve_source_column_index(
+    columns: &[QueryColumn],
+    source_path: &[String],
+    table_alias: Option<&str>,
+    identifier: &[String],
+) -> Result<usize, ExecutionError> {
+    let column_name = match identifier {
+        [single] => single.as_str(),
+        [qualifier, column]
+            if table_alias.is_some_and(|alias| alias.eq_ignore_ascii_case(qualifier))
+                || source_path
+                    .last()
+                    .is_some_and(|name| name.eq_ignore_ascii_case(qualifier)) =>
+        {
+            column.as_str()
+        }
+        _ => {
+            return Err(ExecutionError {
+                message: format!("unknown identifier '{}'", identifier_path(identifier)),
+                span: None,
+            });
+        }
+    };
+
+    columns
+        .iter()
+        .position(|c| c.name.eq_ignore_ascii_case(column_name))
+        .ok_or_else(|| ExecutionError {
+            message: format!("unknown identifier '{}'", identifier_path(identifier)),
+            span: None,
+        })
+}
+
+fn stream_simple_aggregate(
+    source: &dyn QuerySource,
+    op: StreamingAggregate,
+    col_idx: Option<usize>,
+) -> SqlValue {
+    match op {
+        StreamingAggregate::Count => {
+            if let Some(col_idx) = col_idx {
+                let count = (0..source.row_count())
+                    .filter(|row_idx| !matches!(source.value(*row_idx, col_idx), SqlValue::Null))
+                    .count() as i64;
+                SqlValue::Int(count)
+            } else {
+                SqlValue::Int(source.row_count() as i64)
+            }
+        }
+        StreamingAggregate::Avg => {
+            let Some(col_idx) = col_idx else {
+                return SqlValue::Null;
+            };
+            let mut total = 0.0;
+            let mut count = 0.0;
+            for row_idx in 0..source.row_count() {
+                if let Some(value) = sql_as_f64(&source.value(row_idx, col_idx)) {
+                    total += value;
+                    count += 1.0;
+                }
+            }
+            if count == 0.0 {
+                SqlValue::Null
+            } else {
+                SqlValue::Float(total / count)
+            }
+        }
+        StreamingAggregate::Sum => {
+            let Some(col_idx) = col_idx else {
+                return SqlValue::Null;
+            };
+            let mut total = 0.0;
+            let mut seen = false;
+            for row_idx in 0..source.row_count() {
+                if let Some(value) = sql_as_f64(&source.value(row_idx, col_idx)) {
+                    total += value;
+                    seen = true;
+                }
+            }
+            if seen {
+                SqlValue::Float(total)
+            } else {
+                SqlValue::Null
+            }
+        }
+        StreamingAggregate::Min | StreamingAggregate::Max => {
+            let Some(col_idx) = col_idx else {
+                return SqlValue::Null;
+            };
+            let mut best: Option<SqlValue> = None;
+            for row_idx in 0..source.row_count() {
+                let value = source.value(row_idx, col_idx);
+                best = match best {
+                    None => Some(value),
+                    Some(prev) => {
+                        if let Some(ord) = compare_sql_values(&value, &prev) {
+                            let better = (op == StreamingAggregate::Min && ord == Ordering::Less)
+                                || (op == StreamingAggregate::Max && ord == Ordering::Greater);
+                            if better { Some(value) } else { Some(prev) }
+                        } else {
+                            Some(prev)
+                        }
+                    }
+                };
+            }
+            best.unwrap_or(SqlValue::Null)
+        }
+    }
+}
+
+fn aggregate_output_type(op: StreamingAggregate, value: &SqlValue) -> QueryColumnType {
+    match op {
+        StreamingAggregate::Avg | StreamingAggregate::Sum => QueryColumnType::Double,
+        StreamingAggregate::Count => QueryColumnType::Integer,
+        StreamingAggregate::Min | StreamingAggregate::Max => infer_query_type(value),
+    }
+}
+
+fn resolve_result_order_specs(
+    select: &SelectStatement,
+    columns: &[QueryColumn],
+) -> Vec<(usize, bool)> {
+    select
+        .order_by
+        .iter()
+        .filter_map(|spec| {
+            let idx = match &spec.expr {
+                Expression::Number(n) => n.parse::<usize>().ok().and_then(|n| n.checked_sub(1)),
+                Expression::Identifier(path) if path.len() == 1 => columns
+                    .iter()
+                    .position(|c| c.name.eq_ignore_ascii_case(&path[0])),
+                _ => None,
+            }?;
+            Some((idx, spec.descending))
+        })
+        .collect()
+}
+
+fn identifier_path(path: &[String]) -> String {
+    path.join(".")
 }
 
 fn merge_union_columns(left: &[QueryColumn], right: &[QueryColumn]) -> Vec<QueryColumn> {
@@ -2491,13 +2922,23 @@ fn eval_binary(left: SqlValue, op: &BinaryOp, right: SqlValue) -> Result<SqlValu
         BinaryOp::And => SqlValue::Bool(is_truthy(&left) && is_truthy(&right)),
         BinaryOp::Eq => SqlValue::Bool(sql_equals(&left, &right)),
         BinaryOp::NotEq => SqlValue::Bool(!sql_equals(&left, &right)),
-        BinaryOp::Lt => SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o == Ordering::Less)),
-        BinaryOp::Lte => SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o != Ordering::Greater)),
-        BinaryOp::Gt => SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o == Ordering::Greater)),
-        BinaryOp::Gte => SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o != Ordering::Less)),
+        BinaryOp::Lt => {
+            SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o == Ordering::Less))
+        }
+        BinaryOp::Lte => SqlValue::Bool(
+            compare_sql_values(&left, &right).is_some_and(|o| o != Ordering::Greater),
+        ),
+        BinaryOp::Gt => SqlValue::Bool(
+            compare_sql_values(&left, &right).is_some_and(|o| o == Ordering::Greater),
+        ),
+        BinaryOp::Gte => {
+            SqlValue::Bool(compare_sql_values(&left, &right).is_some_and(|o| o != Ordering::Less))
+        }
         BinaryOp::Like => SqlValue::Bool(sql_to_string(&left).contains(&sql_to_string(&right))),
         BinaryOp::Contains => SqlValue::Bool(sql_to_string(&left).contains(&sql_to_string(&right))),
-        BinaryOp::InstanceOf => SqlValue::Bool(sql_to_string(&left).eq_ignore_ascii_case(&sql_to_string(&right))),
+        BinaryOp::InstanceOf => {
+            SqlValue::Bool(sql_to_string(&left).eq_ignore_ascii_case(&sql_to_string(&right)))
+        }
         BinaryOp::CastAs => left,
         BinaryOp::Xor => SqlValue::Bool(is_truthy(&left) ^ is_truthy(&right)),
         BinaryOp::Eqv => SqlValue::Bool(is_truthy(&left) == is_truthy(&right)),
@@ -2506,7 +2947,9 @@ fn eval_binary(left: SqlValue, op: &BinaryOp, right: SqlValue) -> Result<SqlValu
         BinaryOp::Mul => numeric_binop(left, right, |a, b| a * b)?,
         BinaryOp::Div => numeric_binop(left, right, |a, b| a / b)?,
         BinaryOp::Mod => numeric_binop(left, right, |a, b| a % b)?,
-        BinaryOp::Concat => SqlValue::Text(format!("{}{}", sql_to_string(&left), sql_to_string(&right))),
+        BinaryOp::Concat => {
+            SqlValue::Text(format!("{}{}", sql_to_string(&left), sql_to_string(&right)))
+        }
         BinaryOp::Pow => numeric_binop(left, right, |a, b| a.powf(b))?,
     })
 }
@@ -2528,9 +2971,11 @@ fn numeric_binop(
 }
 
 fn negate_sql_value(value: SqlValue) -> Result<SqlValue, ExecutionError> {
-    Ok(SqlValue::Float(-sql_as_f64(&value).ok_or_else(|| ExecutionError {
-        message: "unary - expected number".to_string(),
-        span: None,
+    Ok(SqlValue::Float(-sql_as_f64(&value).ok_or_else(|| {
+        ExecutionError {
+            message: "unary - expected number".to_string(),
+            span: None,
+        }
     })?))
 }
 
@@ -2615,8 +3060,14 @@ fn infer_query_type(value: &SqlValue) -> QueryColumnType {
 
 fn projection_name(expr: &Expression, idx: usize) -> String {
     match expr {
-        Expression::Identifier(parts) => parts.last().cloned().unwrap_or_else(|| format!("column{}", idx + 1)),
-        Expression::FunctionCall { name, .. } => name.last().cloned().unwrap_or_else(|| format!("expr{}", idx + 1)),
+        Expression::Identifier(parts) => parts
+            .last()
+            .cloned()
+            .unwrap_or_else(|| format!("column{}", idx + 1)),
+        Expression::FunctionCall { name, .. } => name
+            .last()
+            .cloned()
+            .unwrap_or_else(|| format!("expr{}", idx + 1)),
         _ => format!("expr{}", idx + 1),
     }
 }
@@ -2624,12 +3075,24 @@ fn projection_name(expr: &Expression, idx: usize) -> String {
 fn contains_aggregate(expr: &Expression) -> bool {
     match expr {
         Expression::FunctionCall { name, .. } => {
-            matches!(name.last().map(|s| s.to_lowercase()).as_deref(), Some("count" | "sum" | "min" | "max" | "avg"))
+            matches!(
+                name.last().map(|s| s.to_lowercase()).as_deref(),
+                Some("count" | "sum" | "min" | "max" | "avg")
+            )
         }
-        Expression::Binary { left, right, .. } => contains_aggregate(left) || contains_aggregate(right),
-        Expression::Unary { expr, .. } | Expression::Paren(expr) | Expression::IsNull { expr, .. } => contains_aggregate(expr),
-        Expression::Case { branches, else_expr } => {
-            branches.iter().any(|(c, v)| contains_aggregate(c) || contains_aggregate(v))
+        Expression::Binary { left, right, .. } => {
+            contains_aggregate(left) || contains_aggregate(right)
+        }
+        Expression::Unary { expr, .. }
+        | Expression::Paren(expr)
+        | Expression::IsNull { expr, .. } => contains_aggregate(expr),
+        Expression::Case {
+            branches,
+            else_expr,
+        } => {
+            branches
+                .iter()
+                .any(|(c, v)| contains_aggregate(c) || contains_aggregate(v))
                 || else_expr.as_deref().is_some_and(contains_aggregate)
         }
         _ => false,
@@ -2638,12 +3101,16 @@ fn contains_aggregate(expr: &Expression) -> bool {
 
 fn aggregate_numeric(
     group_rows: &[&ResolvedRow],
-    op: impl Fn(f64, f64) -> f64,
+    op: impl Fn(f64, f64) -> f64 + Copy,
     init: f64,
     expr: &Expression,
     executor: &QueryExecutor<'_>,
     current: &ResolvedRow,
 ) -> Result<SqlValue, ExecutionError> {
+    if let Some(value) = aggregate_numeric_identifier(group_rows, op, init, expr) {
+        return Ok(value);
+    }
+
     let mut acc = init;
     let mut first = true;
     for row in group_rows {
@@ -2667,6 +3134,10 @@ fn aggregate_minmax(
     executor: &QueryExecutor<'_>,
     current: &ResolvedRow,
 ) -> Result<SqlValue, ExecutionError> {
+    if let Some(value) = aggregate_minmax_identifier(group_rows, min, expr) {
+        return Ok(value);
+    }
+
     let mut best: Option<SqlValue> = None;
     for row in group_rows {
         let value = executor.eval(expr, row, None)?;
@@ -2687,4 +3158,87 @@ fn aggregate_minmax(
     }
     let _ = current;
     Ok(best.unwrap_or(SqlValue::Null))
+}
+
+fn aggregate_count_identifier(group_rows: &[&ResolvedRow], expr: &Expression) -> Option<i64> {
+    let idx = aggregate_identifier_index(group_rows, expr)?;
+    Some(
+        group_rows
+            .iter()
+            .filter(|row| !matches!(row.values.get(idx), Some(SqlValue::Null) | None))
+            .count() as i64,
+    )
+}
+
+fn aggregate_avg_identifier(group_rows: &[&ResolvedRow], expr: &Expression) -> Option<SqlValue> {
+    let idx = aggregate_identifier_index(group_rows, expr)?;
+    let mut total = 0.0;
+    let mut count = 0.0;
+    for row in group_rows {
+        if let Some(value) = row.values.get(idx).and_then(sql_as_f64_ref) {
+            total += value;
+            count += 1.0;
+        }
+    }
+    Some(if count == 0.0 {
+        SqlValue::Null
+    } else {
+        SqlValue::Float(total / count)
+    })
+}
+
+fn aggregate_numeric_identifier(
+    group_rows: &[&ResolvedRow],
+    op: impl Fn(f64, f64) -> f64 + Copy,
+    init: f64,
+    expr: &Expression,
+) -> Option<SqlValue> {
+    let idx = aggregate_identifier_index(group_rows, expr)?;
+    let mut acc = init;
+    let mut first = true;
+    for row in group_rows {
+        if let Some(value) = row.values.get(idx).and_then(sql_as_f64_ref) {
+            acc = if first { value } else { op(acc, value) };
+            first = false;
+        }
+    }
+    Some(if first {
+        SqlValue::Null
+    } else {
+        SqlValue::Float(acc)
+    })
+}
+
+fn aggregate_minmax_identifier(
+    group_rows: &[&ResolvedRow],
+    min: bool,
+    expr: &Expression,
+) -> Option<SqlValue> {
+    let idx = aggregate_identifier_index(group_rows, expr)?;
+    let mut best: Option<SqlValue> = None;
+    for row in group_rows {
+        let value = row.values.get(idx).cloned().unwrap_or(SqlValue::Null);
+        best = match best {
+            None => Some(value),
+            Some(prev) => {
+                if let Some(ord) = compare_sql_values(&value, &prev) {
+                    if (min && ord == Ordering::Less) || (!min && ord == Ordering::Greater) {
+                        Some(value)
+                    } else {
+                        Some(prev)
+                    }
+                } else {
+                    Some(prev)
+                }
+            }
+        };
+    }
+    Some(best.unwrap_or(SqlValue::Null))
+}
+
+fn aggregate_identifier_index(group_rows: &[&ResolvedRow], expr: &Expression) -> Option<usize> {
+    match expr {
+        Expression::Identifier(path) => group_rows.first()?.lookup_path_index(path),
+        _ => None,
+    }
 }

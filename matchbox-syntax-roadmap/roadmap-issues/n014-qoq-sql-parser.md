@@ -5,12 +5,18 @@
 
 ## What to build
 
-Parse the QoQ SELECT grammar into SQL AST nodes.
+Parse the QoQ SELECT grammar into SQL AST nodes behind the optional `qoq`
+feature flag.
+
+## Status
+
+Completed. The parser now handles select/from/join/where/group by/having/order
+by/limit, subqueries, union, case expressions, function calls, and source-aware
+parse errors behind `qoq`.
 
 ## Acceptance criteria
 
-- [ ] SELECT/FROM/JOIN/WHERE/GROUP BY/HAVING/ORDER BY/LIMIT parse
-- [ ] Subqueries and UNION parse
-- [ ] CASE and function expressions parse
-- [ ] Parse errors include source location
-
+- [x] SELECT/FROM/JOIN/WHERE/GROUP BY/HAVING/ORDER BY/LIMIT parse
+- [x] Subqueries and UNION parse
+- [x] CASE and function expressions parse
+- [x] Parse errors include source location

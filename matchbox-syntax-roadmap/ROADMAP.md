@@ -37,6 +37,9 @@ This file replaces the old planning view for active work. The review backlog
 
 ### Phase 3: Query-of-Queries
 
+QoQ is planned as an optional feature flag (`qoq`) so streamlined deployments
+can leave it out entirely.
+
 - `Q001` SQL lexer
 - `Q002` SQL parser
 - `Q003` SQL AST
@@ -61,4 +64,3 @@ i18n, validation, interceptors, LDAP, and charting.
 ## Active Backlog
 
 Use [roadmap-issues/README.md](roadmap-issues/README.md) as the working index.
-

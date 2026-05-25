@@ -173,6 +173,16 @@ pub trait BxVM {
     fn to_string(&self, val: BxValue) -> String;
     fn to_box_string(&self, val: BxValue) -> BoxString;
     fn insert_global(&mut self, name: String, val: BxValue);
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_result(&self, id: usize) -> Option<crate::datasource::traits::QueryResult>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_columns(&self, id: usize) -> Option<Vec<crate::datasource::traits::QueryColumn>>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_row_count(&self, id: usize) -> Option<usize>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue>;
     fn get_cli_args(&self) -> Vec<String>;
     fn write_output(&mut self, s: &str);
     fn begin_output_capture(&mut self);
@@ -309,6 +319,23 @@ pub trait BxNativeObject: fmt::Debug {
     fn get_property(&self, name: &str) -> BxValue;
     fn set_property(&mut self, name: &str, value: BxValue);
     fn call_method(&mut self, vm: &mut dyn BxVM, id: usize, name: &str, args: &[BxValue]) -> Result<BxValue, String>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_result(&self) -> Option<crate::datasource::traits::QueryResult> {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_columns(&self) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+        self.query_result().map(|result| result.columns)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_row_count(&self) -> Option<usize> {
+        self.query_result().map(|result| result.rows.len())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_cell(&self, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue> {
+        self.query_result()
+            .and_then(|result| result.rows.get(row_idx).and_then(|row| row.get(col_idx)).cloned())
+    }
     fn trace(&self, _tracer: &mut dyn Tracer) {}
 }
 

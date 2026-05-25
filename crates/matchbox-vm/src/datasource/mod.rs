@@ -1,6 +1,6 @@
-pub mod traits;
-pub mod registry;
 pub mod drivers;
+pub mod registry;
+pub mod traits;
 
 use std::fmt;
 
@@ -36,18 +36,29 @@ impl BxQuery {
             }
         }
         let record_count = result.rows.len();
-        BxQuery { columns: result.columns, data, record_count }
+        BxQuery {
+            columns: result.columns,
+            data,
+            record_count,
+        }
     }
 
     fn col_index(&self, name: &str) -> Option<usize> {
         let lower = name.to_lowercase();
-        self.columns.iter().position(|c| c.name.to_lowercase() == lower)
+        self.columns
+            .iter()
+            .position(|c| c.name.to_lowercase() == lower)
     }
 }
 
 impl fmt::Debug for BxQuery {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<query recordCount={} columns={}>", self.record_count, self.columns.len())
+        write!(
+            f,
+            "<query recordCount={} columns={}>",
+            self.record_count,
+            self.columns.len()
+        )
     }
 }
 
@@ -99,7 +110,10 @@ impl BxNativeObject for BxQuery {
                 }
                 let row_num = args[0].as_number() as usize;
                 if row_num == 0 || row_num > self.record_count {
-                    return Err(format!("Row {} out of range (1..{})", row_num, self.record_count));
+                    return Err(format!(
+                        "Row {} out of range (1..{})",
+                        row_num, self.record_count
+                    ));
                 }
                 let row_idx = row_num - 1;
                 let struct_id = vm.struct_new();
@@ -135,6 +149,46 @@ impl BxNativeObject for BxQuery {
             }
             _ => Err(format!("Unknown query method: {}", name)),
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_result(&self) -> Option<traits::QueryResult> {
+        let rows = (0..self.record_count)
+            .map(|row_idx| {
+                self.data
+                    .iter()
+                    .map(|col| col.get(row_idx).cloned().unwrap_or(SqlValue::Null))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        Some(traits::QueryResult {
+            columns: self.columns.clone(),
+            rows,
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_columns(&self) -> Option<Vec<QueryColumn>> {
+        Some(self.columns.clone())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_row_count(&self) -> Option<usize> {
+        Some(self.record_count)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_cell(&self, row_idx: usize, col_idx: usize) -> Option<SqlValue> {
+        if row_idx >= self.record_count || col_idx >= self.columns.len() {
+            return None;
+        }
+        Some(
+            self.data
+                .get(col_idx)
+                .and_then(|column| column.get(row_idx))
+                .cloned()
+                .unwrap_or(SqlValue::Null),
+        )
     }
 }
 

@@ -4,7 +4,7 @@
 // - print timing information for the build and execution phases
 
 rowCount = 1000000
-data = queryNew(["value"], ["integer"])
+data = queryNew("value", "integer")
 
 buildStart = getTickCount()
 for (i = 1; i <= rowCount; i = i + 1) {

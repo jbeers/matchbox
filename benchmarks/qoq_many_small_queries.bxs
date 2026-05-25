@@ -5,7 +5,7 @@
 
 rowCount = 10
 iterations = 10000
-data = queryNew(["value"], ["integer"])
+data = queryNew("value", "integer")
 
 for (i = 1; i <= rowCount; i = i + 1) {
     queryAddRow(data, { value: i })

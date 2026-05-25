@@ -60,6 +60,7 @@ bif-cli = ["matchbox_vm/bif-cli"]
 bif-jni = ["matchbox_vm/bif-jni"]
 bif-datasource = ["matchbox_vm/bif-datasource"]
 bif-tui = ["matchbox_tui"]
+qoq = ["matchbox_vm/qoq", "matchbox_compiler/qoq"]
 
 [dev-dependencies]
 tempfile = "3.10"
