@@ -1,0 +1,14 @@
+<bx:set label = "compiler-template">
+<bx:output>#label# chunk 1</bx:output>
+<bx:output>#label# chunk 2</bx:output>
+<bx:output>#label# chunk 3</bx:output>
+<bx:output>#label# chunk 4</bx:output>
+<bx:output>#label# chunk 5</bx:output>
+<bx:output>#label# chunk 6</bx:output>
+<bx:output>#label# chunk 7</bx:output>
+<bx:output>#label# chunk 8</bx:output>
+<bx:output>#label# chunk 9</bx:output>
+<bx:output>#label# chunk 10</bx:output>
+<bx:script>
+    println("compiler-template: OK");
+</bx:script>

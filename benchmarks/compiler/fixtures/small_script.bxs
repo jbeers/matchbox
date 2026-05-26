@@ -1,0 +1,3 @@
+name = "compiler"
+value = 40 + 2
+println("compiler-small: " & name & ":" & value)
