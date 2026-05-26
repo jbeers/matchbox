@@ -545,7 +545,11 @@ impl<'a> Lexer<'a> {
             }
             // Handle = value
             if self.pos < self.source.len() && self.current_char() == '=' {
+                let eq_start = self.pos;
+                let eq_line = self.line;
+                let eq_col = self.col;
                 self.advance();
+                self.push_token(TokenKind::Equal, eq_start, self.pos, eq_line, eq_col);
                 while self.pos < self.source.len() {
                     let ch = self.current_char();
                     if ch == ' ' || ch == '\t' { self.advance(); } else { break; }
@@ -562,10 +566,21 @@ impl<'a> Lexer<'a> {
                         if self.pos < self.source.len() { self.advance(); }
                     } else {
                         let val_start = self.pos;
+                        let val_start_line = self.line;
+                        let val_start_col = self.col;
                         while self.pos < self.source.len() {
                             let ch = self.current_char();
                             if ch.is_ascii_whitespace() || ch == '>' || ch == '/' { break; }
                             self.advance();
+                        }
+                        if self.pos > val_start {
+                            self.push_token(
+                                TokenKind::Identifier,
+                                val_start,
+                                self.pos,
+                                val_start_line,
+                                val_start_col,
+                            );
                         }
                     }
                 }
@@ -1375,8 +1390,9 @@ mod tests {
         assert_eq!(tokens[0].kind, TokenKind::ComponentName);
         assert_eq!(tokens[0].lexeme, "set");
         assert_eq!(tokens[1].kind, TokenKind::Identifier); // x
-        assert_eq!(tokens[2].kind, TokenKind::String); // "hello"
-        assert_eq!(tokens[3].kind, TokenKind::ComponentClose);
+        assert_eq!(tokens[2].kind, TokenKind::Equal);
+        assert_eq!(tokens[3].kind, TokenKind::String); // "hello"
+        assert_eq!(tokens[4].kind, TokenKind::ComponentClose);
     }
 
     #[test]

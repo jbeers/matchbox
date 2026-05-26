@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use matchbox_compiler::{compiler::Compiler, parser};
 use matchbox_vm::types::{BxVM, BxValue};
 use matchbox_vm::vm::VM;
@@ -131,7 +131,11 @@ impl EmbeddedAssetStore {
         for (path, bytes) in &files {
             if is_template_path(path) {
                 let source = String::from_utf8(bytes.clone())?;
-                compiled_templates.insert(path.clone(), compile_template(path, &source)?);
+                compiled_templates.insert(
+                    path.clone(),
+                    compile_template(path, &source)
+                        .with_context(|| format!("Failed to compile embedded template {path}"))?,
+                );
             }
         }
 

@@ -1974,7 +1974,7 @@ impl VM {
                 #[cfg(all(target_arch = "wasm32", feature = "js"))]
                 GcObject::JsValue(js) => {
                     if js.is_instance_of::<js_sys::Promise>() {
-                        match name {
+                        match name.as_str() {
                             "get" => Some("futureget".to_string()),
                             _ => None,
                         }

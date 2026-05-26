@@ -189,7 +189,16 @@ fn main() {
             }
 
             if !success {
-                println!("Runner stub was not built: {}.", dest_name);
+                if target.is_some() && dest_path.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+                    println!(
+                        "cargo:warning=Failed to rebuild {}; using pre-existing stub at {}",
+                        dest_name,
+                        dest_path.display()
+                    );
+                    use_stub = true;
+                } else {
+                    println!("Runner stub was not built: {}.", dest_name);
+                }
             }
         } else {
             println!("Using pre-existing stub for {}", dest_name);

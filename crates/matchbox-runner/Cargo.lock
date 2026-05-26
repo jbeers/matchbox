@@ -1016,16 +1016,20 @@ dependencies = [
  "chrono",
  "crossterm",
  "ctrlc",
+ "digest",
  "fs_extra",
  "getrandom 0.4.2",
+ "hmac",
  "js-sys",
  "matchbox-macros",
+ "md-5",
  "postcard",
  "rand 0.10.0",
  "regex",
  "reqwest",
  "serde",
  "serde_json",
+ "sha1",
  "sha2",
  "uuid",
  "walkdir",
@@ -1034,6 +1038,16 @@ dependencies = [
  "web-sys",
  "web-time",
  "zip",
+]
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
 ]
 
 [[package]]

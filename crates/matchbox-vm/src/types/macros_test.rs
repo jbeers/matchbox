@@ -113,6 +113,49 @@ mod tests {
         fn is_bytes(&self, _: BxValue) -> bool {
             false
         }
+        fn type_name_from_value(&self, val: BxValue) -> Option<String> {
+            if val.is_int() {
+                Some("integer".to_string())
+            } else if val.is_number() {
+                Some("numeric".to_string())
+            } else if val.is_bool() {
+                Some("boolean".to_string())
+            } else if val.is_null() {
+                Some("null".to_string())
+            } else if self.is_string_value(val) {
+                Some("string".to_string())
+            } else {
+                None
+            }
+        }
+        fn find_global_class_by_name(&self, _: &str) -> Option<Rc<RefCell<BxClass>>> {
+            None
+        }
+        fn find_global_interface_by_name(&self, _: &str) -> Option<Rc<RefCell<BxInterface>>> {
+            None
+        }
+        fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool {
+            class.borrow().name.eq_ignore_ascii_case(type_name)
+        }
+        fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool {
+            match type_name.trim().to_ascii_lowercase().as_str() {
+                "any" | "object" => !val.is_null(),
+                "null" | "void" => val.is_null(),
+                "numeric" | "number" | "double" | "float" | "bigdecimal" => val.is_number(),
+                "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
+                "boolean" | "bool" => val.is_bool(),
+                "string" => self.is_string_value(val),
+                _ => false,
+            }
+        }
+        fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String> {
+            if self.value_matches_type_name(val, type_name) || type_name.eq_ignore_ascii_case("any")
+            {
+                Ok(val)
+            } else {
+                Err(format!("Could not cast object to type [{}]", type_name))
+            }
+        }
         fn bytes_new(&mut self, _: Vec<u8>) -> usize {
             0
         }
@@ -216,7 +259,10 @@ mod tests {
         fn instance_variables_json(&self, _: BxValue) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({}))
         }
-        fn string_new(&mut self, s: String) -> usize {
+        fn datetime_new(&mut self, _: chrono::DateTime<chrono::Utc>) -> usize {
+            0
+        }
+        fn string_new(&mut self, _: String) -> usize {
             1234
         } // Mock string ID
         fn to_string(&self, _: BxValue) -> String {

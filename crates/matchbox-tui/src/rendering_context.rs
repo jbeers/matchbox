@@ -251,6 +251,49 @@ mod tests {
         fn is_bytes(&self, _: BxValue) -> bool {
             false
         }
+        fn type_name_from_value(&self, val: BxValue) -> Option<String> {
+            if val.is_int() {
+                Some("integer".to_string())
+            } else if val.is_number() {
+                Some("numeric".to_string())
+            } else if val.is_bool() {
+                Some("boolean".to_string())
+            } else if val.is_null() {
+                Some("null".to_string())
+            } else if self.is_string_value(val) {
+                Some("string".to_string())
+            } else {
+                None
+            }
+        }
+        fn find_global_class_by_name(&self, _: &str) -> Option<Rc<RefCell<BxClass>>> {
+            None
+        }
+        fn find_global_interface_by_name(&self, _: &str) -> Option<Rc<RefCell<BxInterface>>> {
+            None
+        }
+        fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool {
+            class.borrow().name.eq_ignore_ascii_case(type_name)
+        }
+        fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool {
+            match type_name.trim().to_ascii_lowercase().as_str() {
+                "any" | "object" => !val.is_null(),
+                "null" | "void" => val.is_null(),
+                "numeric" | "number" | "double" | "float" | "bigdecimal" => val.is_number(),
+                "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
+                "boolean" | "bool" => val.is_bool(),
+                "string" => self.is_string_value(val),
+                _ => false,
+            }
+        }
+        fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String> {
+            if self.value_matches_type_name(val, type_name) || type_name.eq_ignore_ascii_case("any")
+            {
+                Ok(val)
+            } else {
+                Err(format!("Could not cast object to type [{}]", type_name))
+            }
+        }
         fn bytes_new(&mut self, _: Vec<u8>) -> usize {
             0
         }
@@ -354,6 +397,9 @@ mod tests {
         fn instance_variables_json(&self, _: BxValue) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({}))
         }
+        fn datetime_new(&mut self, _: chrono::DateTime<chrono::Utc>) -> usize {
+            0
+        }
         fn string_new(&mut self, _: String) -> usize {
             0
         }
@@ -364,6 +410,37 @@ mod tests {
             box_string::BoxString::new("")
         }
         fn insert_global(&mut self, _: String, _: BxValue) {}
+        #[cfg(not(target_arch = "wasm32"))]
+        fn resolve_query_source_path(&self, _: &[String]) -> Option<BxValue> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_result(
+            &self,
+            _: usize,
+        ) -> Option<matchbox_vm::datasource::traits::QueryResult> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_columns(
+            &self,
+            _: usize,
+        ) -> Option<Vec<matchbox_vm::datasource::traits::QueryColumn>> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_row_count(&self, _: usize) -> Option<usize> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_cell(
+            &self,
+            _: usize,
+            _: usize,
+            _: usize,
+        ) -> Option<matchbox_vm::datasource::traits::SqlValue> {
+            None
+        }
         fn get_cli_args(&self) -> Vec<String> {
             vec![]
         }

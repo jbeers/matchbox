@@ -89,7 +89,17 @@ impl<'a> TemplateParser<'a> {
                 self.pos += 1;
                 Ok(None)
             }
-            Some(TokenKind::Less) | Some(TokenKind::ComponentClose)
+            Some(TokenKind::Less) => {
+                self.pos += 1;
+                let expr = Expression::new(
+                    ExpressionKind::Literal(Literal::String(vec![StringPart::Text(
+                        "<".to_string(),
+                    )])),
+                    0,
+                );
+                Ok(Some(Statement::new(StatementKind::BufferOutput(expr), 0)))
+            }
+            Some(TokenKind::ComponentClose)
             | Some(TokenKind::ComponentSelfClose)
             | Some(TokenKind::InterpEnd)
             | Some(TokenKind::ScriptEnd) => {
@@ -164,8 +174,11 @@ impl<'a> TemplateParser<'a> {
                 Some(TokenKind::InterpEnd) => {
                     self.pos += 1;
                 }
-                Some(TokenKind::Less) | Some(TokenKind::ComponentClose)
-                | Some(TokenKind::ComponentSelfClose) => {
+                Some(TokenKind::Less) => {
+                    self.pos += 1;
+                    text.push('<');
+                }
+                Some(TokenKind::ComponentClose) | Some(TokenKind::ComponentSelfClose) => {
                     self.pos += 1;
                 }
                 _ => {
