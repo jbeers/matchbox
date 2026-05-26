@@ -894,6 +894,132 @@ fn datasource_query_new() {
     run_ds_script("datasource_query_new.bxs");
 }
 
+/// queryClear — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_clear() {
+    run_ds_script("datasource_query_clear.bxs");
+}
+
+/// queryColumnArray — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_array() {
+    run_ds_script("datasource_query_column_array.bxs");
+}
+
+/// queryColumnCount — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_count() {
+    run_ds_script("datasource_query_column_count.bxs");
+}
+
+/// queryColumnExists / queryKeyExists — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_exists() {
+    run_ds_script("datasource_query_column_exists.bxs");
+}
+
+/// queryRecordCount — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_record_count() {
+    run_ds_script("datasource_query_record_count.bxs");
+}
+
+/// queryRowData — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_row_data() {
+    run_ds_script("datasource_query_row_data.bxs");
+}
+
+/// queryReverse — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_reverse() {
+    run_ds_script("datasource_query_reverse.bxs");
+}
+
+/// queryRowSwap — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_row_swap() {
+    run_ds_script("datasource_query_row_swap.bxs");
+}
+
+/// querySlice — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_slice() {
+    run_ds_script("datasource_query_slice.bxs");
+}
+
+/// queryDeleteColumn — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_delete_column() {
+    run_ds_script("datasource_query_delete_column.bxs");
+}
+
+/// queryDeleteRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_delete_row() {
+    run_ds_script("datasource_query_delete_row.bxs");
+}
+
+/// queryAddColumn — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_add_column() {
+    run_ds_script("datasource_query_add_column.bxs");
+}
+
+/// queryAppend / queryPrepend — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_append_prepend() {
+    run_ds_script("datasource_query_append_prepend.bxs");
+}
+
+/// queryGetCell / querySetCell — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_get_set_cell() {
+    run_ds_script("datasource_query_get_set_cell.bxs");
+}
+
+/// queryInsertAt — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_insert_at() {
+    run_ds_script("datasource_query_insert_at.bxs");
+}
+
+/// querySetRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_set_row() {
+    run_ds_script("datasource_query_set_row.bxs");
+}
+
+/// queryCurrentRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_current_row() {
+    run_ds_script("datasource_query_current_row.bxs");
+}
+
+/// queryGetResult — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_get_result() {
+    run_ds_script("datasource_query_get_result.bxs");
+}
+
 // --- Database tests --------------------------------------------------------
 
 /// Basic SELECT 1: verifies round-trip connectivity and recordCount.

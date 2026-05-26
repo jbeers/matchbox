@@ -1,0 +1,50 @@
+// Test queryDeleteColumn / query.deleteColumn()
+// No database connection required.
+
+q = queryNew("id,name,age", "integer,varchar,integer")
+queryAddRow(q, {id: 1, name: "Alice", age: 30})
+queryAddRow(q, {id: 2, name: "Bob", age: 25})
+
+// Delete column 'name'
+q.deleteColumn("name")
+
+if (queryColumnCount(q) != 2) {
+    throw "Expected 2 columns after delete, got: " & queryColumnCount(q)
+}
+if (!queryColumnExists(q, "id")) {
+    throw "Expected 'id' column to still exist"
+}
+if (!queryColumnExists(q, "age")) {
+    throw "Expected 'age' column to still exist"
+}
+if (queryColumnExists(q, "name")) {
+    throw "Expected 'name' column to be deleted"
+}
+
+// Row data should still be intact for remaining columns
+if (q.recordCount != 2) {
+    throw "Expected recordCount 2 after column delete, got: " & q.recordCount
+}
+gr1 = q.getRow(1)
+if (gr1.id != 1) {
+    throw "Expected gr1.id == 1"
+}
+if (gr1.age != 30) {
+    throw "Expected gr1.age == 30"
+}
+
+// Standalone BIF: delete 'age'
+queryDeleteColumn(q, "age")
+if (queryColumnCount(q) != 1) {
+    throw "Expected 1 column after second delete"
+}
+if (queryColumnList(q) != "id") {
+    throw "Expected only 'id' column, got: " & queryColumnList(q)
+}
+
+// Case insensitive delete
+q2 = queryNew("Col1,Col2")
+queryDeleteColumn(q2, "COL1")
+if (queryColumnCount(q2) != 1) {
+    throw "Expected case-insensitive delete"
+}

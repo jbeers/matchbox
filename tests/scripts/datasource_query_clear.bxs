@@ -1,0 +1,57 @@
+// Test queryClear / query.clear()
+// No database connection required.
+
+cols = arrayNew()
+arrayAppend(cols, "id")
+arrayAppend(cols, "name")
+
+q = queryNew(cols)
+
+// Add a couple rows
+row1 = {}
+row1.id = 1
+row1.name = "Alice"
+queryAddRow(q, row1)
+
+row2 = {}
+row2.id = 2
+row2.name = "Bob"
+queryAddRow(q, row2)
+
+if (q.recordCount != 2) {
+    throw "Expected recordCount 2 before clear, got: " & q.recordCount
+}
+
+// Test member method: query.clear()
+q.clear()
+
+if (q.recordCount != 0) {
+    throw "Expected recordCount 0 after clear(), got: " & q.recordCount
+}
+
+// Columns should still exist
+colList = queryColumnList(q)
+if (indexof(colList, "id") < 1) {
+    throw "Expected 'id' column to exist after clear, got columnList: " & colList
+}
+if (indexof(colList, "name") < 1) {
+    throw "Expected 'name' column to exist after clear, got columnList: " & colList
+}
+
+// Test standalone BIF
+// Re-add a row first
+queryAddRow(q, row1)
+if (q.recordCount != 1) {
+    throw "Expected recordCount 1 after re-add, got: " & q.recordCount
+}
+
+queryClear(q)
+if (q.recordCount != 0) {
+    throw "Expected recordCount 0 after queryClear(), got: " & q.recordCount
+}
+
+// Verify columns still preserved
+colList2 = queryColumnList(q)
+if (indexof(colList2, "id") < 1) {
+    throw "Expected 'id' column after queryClear(), got columnList: " & colList2
+}

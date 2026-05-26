@@ -1,8 +1,10 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc};
-use rand::{rngs::StdRng, RngExt, SeedableRng};
-use std::collections::HashMap;
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
+};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -118,7 +120,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "structclear".to_string(),
         struct_clear_bif as BxNativeFunction,
     );
-    bifs.insert("structfind".to_string(), struct_find_bif as BxNativeFunction);
+    bifs.insert(
+        "structfind".to_string(),
+        struct_find_bif as BxNativeFunction,
+    );
     bifs.insert(
         "structisempty".to_string(),
         struct_is_empty_bif as BxNativeFunction,
@@ -156,7 +161,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "findnocase".to_string(),
         find_no_case_bif as BxNativeFunction,
     );
-    bifs.insert("stringfind".to_string(), string_find_bif as BxNativeFunction);
+    bifs.insert(
+        "stringfind".to_string(),
+        string_find_bif as BxNativeFunction,
+    );
     bifs.insert(
         "stringfindnocase".to_string(),
         string_find_no_case_bif as BxNativeFunction,
@@ -181,7 +189,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     );
     bifs.insert("dateadd".to_string(), date_add as BxNativeFunction);
     bifs.insert("datediff".to_string(), date_diff as BxNativeFunction);
-    bifs.insert("dateformat".to_string(), date_format_bif as BxNativeFunction);
+    bifs.insert(
+        "dateformat".to_string(),
+        date_format_bif as BxNativeFunction,
+    );
     bifs.insert(
         "datetimeformat".to_string(),
         date_time_format_bif as BxNativeFunction,
@@ -197,7 +208,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("listfirst".to_string(), list_first as BxNativeFunction);
     bifs.insert("listlast".to_string(), list_last as BxNativeFunction);
     bifs.insert("listrest".to_string(), list_rest as BxNativeFunction);
-    bifs.insert("listdeleteat".to_string(), list_delete_at as BxNativeFunction);
+    bifs.insert(
+        "listdeleteat".to_string(),
+        list_delete_at as BxNativeFunction,
+    );
     bifs.insert("listfind".to_string(), list_find as BxNativeFunction);
     bifs.insert(
         "listfindnocase".to_string(),
@@ -214,9 +228,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         future_on_error as BxNativeFunction,
     );
     bifs.insert("rematch".to_string(), re_match as BxNativeFunction);
-    bifs.insert("rematchnocase".to_string(), re_match_no_case as BxNativeFunction);
+    bifs.insert(
+        "rematchnocase".to_string(),
+        re_match_no_case as BxNativeFunction,
+    );
     bifs.insert("refind".to_string(), re_find as BxNativeFunction);
-    bifs.insert("refindnocase".to_string(), re_find_no_case as BxNativeFunction);
+    bifs.insert(
+        "refindnocase".to_string(),
+        re_find_no_case as BxNativeFunction,
+    );
     bifs.insert("rereplace".to_string(), re_replace as BxNativeFunction);
     bifs.insert(
         "rereplacenocase".to_string(),
@@ -374,6 +394,90 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             datasource::query_column_list as BxNativeFunction,
         );
         bifs.insert(
+            "queryclear".to_string(),
+            datasource::query_clear as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumnarray".to_string(),
+            datasource::query_column_array as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumncount".to_string(),
+            datasource::query_column_count as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumnexists".to_string(),
+            datasource::query_column_exists as BxNativeFunction,
+        );
+        bifs.insert(
+            "querykeyexists".to_string(),
+            datasource::query_key_exists as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrecordcount".to_string(),
+            datasource::query_record_count as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrowdata".to_string(),
+            datasource::query_row_data as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryreverse".to_string(),
+            datasource::query_reverse as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrowswap".to_string(),
+            datasource::query_row_swap as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryslice".to_string(),
+            datasource::query_slice as BxNativeFunction,
+        );
+        bifs.insert(
+            "querydeletecolumn".to_string(),
+            datasource::query_delete_column as BxNativeFunction,
+        );
+        bifs.insert(
+            "querydeleterow".to_string(),
+            datasource::query_delete_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryaddcolumn".to_string(),
+            datasource::query_add_column as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryappend".to_string(),
+            datasource::query_append as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryprepend".to_string(),
+            datasource::query_prepend as BxNativeFunction,
+        );
+        bifs.insert(
+            "querygetcell".to_string(),
+            datasource::query_get_cell as BxNativeFunction,
+        );
+        bifs.insert(
+            "querysetcell".to_string(),
+            datasource::query_set_cell as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryinsertat".to_string(),
+            datasource::query_insert_at as BxNativeFunction,
+        );
+        bifs.insert(
+            "querysetrow".to_string(),
+            datasource::query_set_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycurrentrow".to_string(),
+            datasource::query_current_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "querygetresult".to_string(),
+            datasource::query_get_result as BxNativeFunction,
+        );
+        bifs.insert(
             "transactionbegin".to_string(),
             datasource::transaction_begin as BxNativeFunction,
         );
@@ -481,8 +585,7 @@ fn find_bif_internal(
     let position = if ignore_case {
         let needle = substring.to_lowercase();
         let hay = haystack.to_lowercase();
-        hay.find(&needle)
-            .map(|idx| idx + start_idx + 1)
+        hay.find(&needle).map(|idx| idx + start_idx + 1)
     } else {
         haystack.find(&substring).map(|idx| idx + start_idx + 1)
     };
@@ -512,7 +615,9 @@ fn left_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         (len + count).max(0)
     } as usize;
 
-    Ok(BxValue::new_ptr(vm.string_new(chars[..end].iter().collect())))
+    Ok(BxValue::new_ptr(
+        vm.string_new(chars[..end].iter().collect()),
+    ))
 }
 
 fn right_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -537,7 +642,9 @@ fn right_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         (-count).min(len)
     } as usize;
 
-    Ok(BxValue::new_ptr(vm.string_new(chars[start..].iter().collect())))
+    Ok(BxValue::new_ptr(
+        vm.string_new(chars[start..].iter().collect()),
+    ))
 }
 
 fn reverse_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -564,7 +671,9 @@ fn span_excluding_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         .chars()
         .position(|ch| set.chars().any(|needle| needle == ch))
         .unwrap_or_else(|| input.chars().count());
-    Ok(BxValue::new_ptr(vm.string_new(input.chars().take(end).collect())))
+    Ok(BxValue::new_ptr(
+        vm.string_new(input.chars().take(end).collect()),
+    ))
 }
 
 fn span_including_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -582,7 +691,9 @@ fn span_including_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         .chars()
         .position(|ch| !set.chars().any(|needle| needle == ch))
         .unwrap_or_else(|| input.chars().count());
-    Ok(BxValue::new_ptr(vm.string_new(input.chars().take(end).collect())))
+    Ok(BxValue::new_ptr(
+        vm.string_new(input.chars().take(end).collect()),
+    ))
 }
 
 fn to_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -599,9 +710,21 @@ fn list_to_array(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     }
     let parts = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
-        if args.len() > 2 { args[2].as_bool() } else { false },
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
     );
     let array_id = vm.array_new();
     for part in parts {
@@ -617,9 +740,21 @@ fn list_len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let items = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
-        if args.len() > 2 { args[2].as_bool() } else { false },
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
     );
     Ok(BxValue::new_number(items.len() as f64))
 }
@@ -630,31 +765,59 @@ fn list_get_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let items = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() },
-        if args.len() > 3 { args[3].as_bool() } else { false },
-        if args.len() > 4 { args[4].as_bool() } else { false },
+        if args.len() > 2 {
+            vm.to_string(args[2])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
     );
     let pos = args[1].as_number() as isize;
     if pos < 1 || pos as usize > items.len() {
         return Err(format!("listGetAt() position {} out of range", pos));
     }
-    Ok(BxValue::new_ptr(vm.string_new(items[(pos - 1) as usize].clone())))
+    Ok(BxValue::new_ptr(
+        vm.string_new(items[(pos - 1) as usize].clone()),
+    ))
 }
 
 fn list_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("listAppend() expects at least 2 arguments: (list, value)".to_string());
     }
-    let delimiter = if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() };
-    let multi = if args.len() > 4 { args[4].as_bool() } else { false };
+    let delimiter = if args.len() > 2 {
+        vm.to_string(args[2])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 4 {
+        args[4].as_bool()
+    } else {
+        false
+    };
     let mut items = parse_list_items(
         &vm.to_string(args[0]),
         delimiter.clone(),
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
         multi,
     );
     items.push(vm.to_string(args[1]));
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
 }
 
 fn list_first(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -663,9 +826,21 @@ fn list_first(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let items = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
-        if args.len() > 2 { args[2].as_bool() } else { false },
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
     );
     let first = items.first().cloned().unwrap_or_default();
     Ok(BxValue::new_ptr(vm.string_new(first)))
@@ -677,9 +852,21 @@ fn list_last(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let items = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() },
-        if args.len() > 2 { args[2].as_bool() } else { false },
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
     );
     let last = items.last().cloned().unwrap_or_default();
     Ok(BxValue::new_ptr(vm.string_new(last)))
@@ -689,30 +876,60 @@ fn list_rest(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("listRest() expects at least 1 argument".to_string());
     }
-    let delimiter = if args.len() > 1 { vm.to_string(args[1]) } else { ",".to_string() };
-    let multi = if args.len() > 3 { args[3].as_bool() } else { false };
-    let offset = if args.len() > 4 { args[4].as_number() as usize } else { 1 };
+    let delimiter = if args.len() > 1 {
+        vm.to_string(args[1])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 3 {
+        args[3].as_bool()
+    } else {
+        false
+    };
+    let offset = if args.len() > 4 {
+        args[4].as_number() as usize
+    } else {
+        1
+    };
     let mut items = parse_list_items(
         &vm.to_string(args[0]),
         delimiter.clone(),
-        if args.len() > 2 { args[2].as_bool() } else { false },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
         multi,
     );
     let cutoff = offset.min(items.len());
     items.drain(0..cutoff);
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
 }
 
 fn list_delete_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("listDeleteAt() expects at least 2 arguments: (list, position)".to_string());
     }
-    let delimiter = if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() };
-    let multi = if args.len() > 4 { args[4].as_bool() } else { false };
+    let delimiter = if args.len() > 2 {
+        vm.to_string(args[2])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 4 {
+        args[4].as_bool()
+    } else {
+        false
+    };
     let mut items = parse_list_items(
         &vm.to_string(args[0]),
         delimiter.clone(),
-        if args.len() > 3 { args[3].as_bool() } else { false },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
         multi,
     );
     let pos = args[1].as_number() as isize;
@@ -720,7 +937,9 @@ fn list_delete_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
         return Err(format!("listDeleteAt() position {} out of range", pos));
     }
     items.remove((pos - 1) as usize);
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
 }
 
 fn list_find(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -731,7 +950,11 @@ fn list_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     list_find_internal(vm, args, true)
 }
 
-fn list_find_internal(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+fn list_find_internal(
+    vm: &mut dyn BxVM,
+    args: &[BxValue],
+    no_case: bool,
+) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("listFind() expects at least 2 arguments: (list, value)".to_string());
     }
@@ -743,9 +966,21 @@ fn list_find_internal(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Res
     };
     let items = parse_list_items(
         &vm.to_string(args[0]),
-        if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() },
-        if args.len() > 3 { args[3].as_bool() } else { false },
-        if args.len() > 4 { args[4].as_bool() } else { false },
+        if args.len() > 2 {
+            vm.to_string(args[2])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
     );
 
     for (idx, part) in items.iter().enumerate() {
@@ -765,16 +1000,36 @@ fn list_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("listSort() expects at least 1 argument".to_string());
     }
-    let delimiter = if args.len() > 3 { vm.to_string(args[3]) } else { ",".to_string() };
-    let multi = if args.len() > 5 { args[5].as_bool() } else { false };
+    let delimiter = if args.len() > 3 {
+        vm.to_string(args[3])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 5 {
+        args[5].as_bool()
+    } else {
+        false
+    };
     let mut items = parse_list_items(
         &vm.to_string(args[0]),
         delimiter.clone(),
-        if args.len() > 4 { args[4].as_bool() } else { false },
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
         multi,
     );
-    let sort_type = if args.len() > 1 { vm.to_string(args[1]).to_lowercase() } else { "text".to_string() };
-    let sort_order = if args.len() > 2 { vm.to_string(args[2]).to_lowercase() } else { "asc".to_string() };
+    let sort_type = if args.len() > 1 {
+        vm.to_string(args[1]).to_lowercase()
+    } else {
+        "text".to_string()
+    };
+    let sort_order = if args.len() > 2 {
+        vm.to_string(args[2]).to_lowercase()
+    } else {
+        "asc".to_string()
+    };
 
     items.sort_by(|a, b| {
         let ord = match sort_type.as_str() {
@@ -786,13 +1041,24 @@ fn list_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
             "textnocase" => a.to_lowercase().cmp(&b.to_lowercase()),
             _ => a.cmp(b),
         };
-        if sort_order == "desc" { ord.reverse() } else { ord }
+        if sort_order == "desc" {
+            ord.reverse()
+        } else {
+            ord
+        }
     });
 
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &delimiter, multi))))
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
 }
 
-fn parse_list_items(list: &str, delimiter: String, include_empty: bool, multi: bool) -> Vec<String> {
+fn parse_list_items(
+    list: &str,
+    delimiter: String,
+    include_empty: bool,
+    multi: bool,
+) -> Vec<String> {
     if list.is_empty() {
         return Vec::new();
     }
@@ -917,8 +1183,16 @@ fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxVa
 
     let pattern = regex_prepare(&vm.to_string(args[0]), no_case);
     let text = vm.to_string(args[1]);
-    let mut start = if args.len() > 2 { args[2].as_number() as isize } else { 1 };
-    let return_subs = if args.len() > 3 { args[3].as_bool() } else { false };
+    let mut start = if args.len() > 2 {
+        args[2].as_number() as isize
+    } else {
+        1
+    };
+    let return_subs = if args.len() > 3 {
+        args[3].as_bool()
+    } else {
+        false
+    };
     let scope = if args.len() > 4 {
         vm.to_string(args[4]).to_lowercase()
     } else {
@@ -940,13 +1214,17 @@ fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxVa
         let Some(m) = cap.get(0) else { continue };
         let mut len_array = vec![BxValue::new_number(m.as_str().chars().count() as f64)];
         let mut match_array = vec![BxValue::new_ptr(vm.string_new(m.as_str().to_string()))];
-        let mut pos_array = vec![BxValue::new_number(char_count_to_pos(region, m.start()) as f64 + start_idx as f64)];
+        let mut pos_array = vec![BxValue::new_number(
+            char_count_to_pos(region, m.start()) as f64 + start_idx as f64,
+        )];
         for idx in 1..=cap.len().saturating_sub(1) {
             match cap.get(idx) {
                 Some(group) => {
                     len_array.push(BxValue::new_number(group.as_str().chars().count() as f64));
                     match_array.push(BxValue::new_ptr(vm.string_new(group.as_str().to_string())));
-                    pos_array.push(BxValue::new_number(char_count_to_pos(region, group.start()) as f64 + start_idx as f64));
+                    pos_array.push(BxValue::new_number(
+                        char_count_to_pos(region, group.start()) as f64 + start_idx as f64,
+                    ));
                 }
                 None => {
                     len_array.push(BxValue::new_number(0.0));
@@ -956,11 +1234,17 @@ fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxVa
             }
         }
         let len_id = vm.array_new();
-        for item in len_array { vm.array_push(len_id, item); }
+        for item in len_array {
+            vm.array_push(len_id, item);
+        }
         let match_id = vm.array_new();
-        for item in match_array { vm.array_push(match_id, item); }
+        for item in match_array {
+            vm.array_push(match_id, item);
+        }
         let pos_id = vm.array_new();
-        for item in pos_array { vm.array_push(pos_id, item); }
+        for item in pos_array {
+            vm.array_push(pos_id, item);
+        }
         let struct_id = vm.struct_new();
         vm.struct_set(struct_id, "len", BxValue::new_ptr(len_id));
         vm.struct_set(struct_id, "match", BxValue::new_ptr(match_id));
@@ -992,7 +1276,9 @@ fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxVa
             }
         } else if scope == "all" {
             let arr_id = vm.array_new();
-            for m in matches { vm.array_push(arr_id, m); }
+            for m in matches {
+                vm.array_push(arr_id, m);
+            }
             Ok(BxValue::new_ptr(arr_id))
         } else {
             Ok(matches.remove(0))
@@ -1029,12 +1315,18 @@ fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxVa
 
 fn regex_replace(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
     if args.len() < 3 {
-        return Err("reReplace() expects at least 3 arguments: (string, regex, replacement)".to_string());
+        return Err(
+            "reReplace() expects at least 3 arguments: (string, regex, replacement)".to_string(),
+        );
     }
-            let string = vm.to_string(args[0]);
+    let string = vm.to_string(args[0]);
     let pattern = regex_prepare(&vm.to_string(args[1]), no_case);
     let substring = vm.to_string(args[2]);
-    let scope = if args.len() > 3 { vm.to_string(args[3]).to_lowercase() } else { "one".to_string() };
+    let scope = if args.len() > 3 {
+        vm.to_string(args[3]).to_lowercase()
+    } else {
+        "one".to_string()
+    };
 
     let regex = regex::RegexBuilder::new(&pattern)
         .case_insensitive(no_case)
@@ -1082,7 +1374,8 @@ fn regex_posix_replace(expression: &str, no_case: bool) -> String {
     ];
     for (needle, replacement) in replacements {
         return_expression = return_expression.replace(needle, replacement);
-        return_expression = return_expression.replace(&format!("[{}]", needle), &format!("[{}]", replacement));
+        return_expression =
+            return_expression.replace(&format!("[{}]", needle), &format!("[{}]", replacement));
     }
     return_expression
 }
@@ -1251,7 +1544,9 @@ fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("randRange() expects exactly 2 arguments".to_string());
     }
     if args[0].is_number() && args[1].is_number() {
-        let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
+        let mut rng = math_rng()
+            .lock()
+            .map_err(|_| "random generator is unavailable".to_string())?;
         let val = rng.random_range((args[0].as_number() as i64)..=(args[1].as_number() as i64));
         Ok(BxValue::new_number(val as f64))
     } else {
@@ -1263,7 +1558,9 @@ fn rand(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if !args.is_empty() {
         return Err("rand() expects no arguments".to_string());
     }
-    let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
+    let mut rng = math_rng()
+        .lock()
+        .map_err(|_| "random generator is unavailable".to_string())?;
     Ok(BxValue::new_number(rng.random::<f64>()))
 }
 
@@ -1278,7 +1575,9 @@ fn randomize(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("randomize() expects a number".to_string());
     }
     let seed = args[0].as_number() as u64;
-    let mut rng = math_rng().lock().map_err(|_| "random generator is unavailable".to_string())?;
+    let mut rng = math_rng()
+        .lock()
+        .map_err(|_| "random generator is unavailable".to_string())?;
     *rng = StdRng::seed_from_u64(seed);
     Ok(BxValue::new_null())
 }
@@ -1367,7 +1666,9 @@ fn atan2_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 || !args[0].is_number() || !args[1].is_number() {
         return Err("atan2() expects exactly 2 numeric arguments".to_string());
     }
-    Ok(BxValue::new_number(args[0].as_number().atan2(args[1].as_number())))
+    Ok(BxValue::new_number(
+        args[0].as_number().atan2(args[1].as_number()),
+    ))
 }
 
 fn len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -1834,11 +2135,18 @@ fn struct_is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
 
 fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
     let tz = tz?.trim();
-    if tz.is_empty() || tz.eq_ignore_ascii_case("utc") || tz.eq_ignore_ascii_case("gmt") || tz == "z" {
+    if tz.is_empty()
+        || tz.eq_ignore_ascii_case("utc")
+        || tz.eq_ignore_ascii_case("gmt")
+        || tz == "z"
+    {
         return FixedOffset::east_opt(0);
     }
 
-    let raw = tz.strip_prefix("UTC").or_else(|| tz.strip_prefix("utc")).unwrap_or(tz);
+    let raw = tz
+        .strip_prefix("UTC")
+        .or_else(|| tz.strip_prefix("utc"))
+        .unwrap_or(tz);
     let raw = raw.trim();
     if raw.is_empty() {
         return FixedOffset::east_opt(0);
@@ -1855,7 +2163,11 @@ fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
         return None;
     }
     let hours: i32 = digits[0..2].parse().ok()?;
-    let mins: i32 = if digits.len() == 4 { digits[2..4].parse().ok()? } else { 0 };
+    let mins: i32 = if digits.len() == 4 {
+        digits[2..4].parse().ok()?
+    } else {
+        0
+    };
     let total = sign * (hours * 3600 + mins * 60);
     FixedOffset::east_opt(total)
 }
@@ -1920,11 +2232,18 @@ fn translate_datetime_format(fmt: &str) -> String {
     out
 }
 
-fn format_datetime(dt: DateTime<Utc>, format: Option<&str>, default_format: &str, tz: Option<&str>) -> Result<String, String> {
+fn format_datetime(
+    dt: DateTime<Utc>,
+    format: Option<&str>,
+    default_format: &str,
+    tz: Option<&str>,
+) -> Result<String, String> {
     let format = format.unwrap_or(default_format).trim();
     if format.eq_ignore_ascii_case("yyyy-MM-dd'T'HH:mm:ss.SSSX") {
         let formatted = if let Some(offset) = parse_timezone_offset(tz) {
-            dt.with_timezone(&offset).format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
+            dt.with_timezone(&offset)
+                .format("%Y-%m-%dT%H:%M:%S%.3f%:z")
+                .to_string()
         } else {
             dt.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
         };
@@ -1968,7 +2287,11 @@ fn format_datetime(dt: DateTime<Utc>, format: Option<&str>, default_format: &str
     }
 }
 
-fn parse_datetime_with_format(input: &str, format: &str, tz: Option<&str>) -> Result<DateTime<Utc>, String> {
+fn parse_datetime_with_format(
+    input: &str,
+    format: &str,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
     let chrono_format = translate_datetime_format(format);
     let has_offset = chrono_format.contains("%:z") || chrono_format.contains("%z");
     if has_offset {
@@ -1976,8 +2299,15 @@ fn parse_datetime_with_format(input: &str, format: &str, tz: Option<&str>) -> Re
             format!("{}+00:00", &input[..input.len().saturating_sub(1)])
         } else if input.len() >= 5 {
             let suffix = &input[input.len() - 5..];
-            if (suffix.starts_with('+') || suffix.starts_with('-')) && suffix[1..].chars().all(|c| c.is_ascii_digit()) {
-                format!("{}{}:{}", &input[..input.len() - 5], &suffix[..3], &suffix[3..5])
+            if (suffix.starts_with('+') || suffix.starts_with('-'))
+                && suffix[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                format!(
+                    "{}{}:{}",
+                    &input[..input.len() - 5],
+                    &suffix[..3],
+                    &suffix[3..5]
+                )
             } else {
                 input.to_string()
             }
@@ -1988,14 +2318,27 @@ fn parse_datetime_with_format(input: &str, format: &str, tz: Option<&str>) -> Re
             .or_else(|_| DateTime::parse_from_str(input, &chrono_format))
             .map_err(|e| e.to_string())?;
         Ok(parsed.with_timezone(&Utc))
-    } else if chrono_format.contains("%Y") || chrono_format.contains("%m") || chrono_format.contains("%d") {
+    } else if chrono_format.contains("%Y")
+        || chrono_format.contains("%m")
+        || chrono_format.contains("%d")
+    {
         if let Ok(parsed) = NaiveDateTime::parse_from_str(input, &chrono_format) {
-            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-            Ok(offset.from_local_datetime(&parsed).single().unwrap().with_timezone(&Utc))
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset
+                .from_local_datetime(&parsed)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc))
         } else if let Ok(parsed) = NaiveDate::parse_from_str(input, &chrono_format) {
             let naive = parsed.and_hms_opt(0, 0, 0).unwrap();
-            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-            Ok(offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc))
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset
+                .from_local_datetime(&naive)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc))
         } else {
             Err(format!("Unable to parse date '{}'", input))
         }
@@ -2004,7 +2347,11 @@ fn parse_datetime_with_format(input: &str, format: &str, tz: Option<&str>) -> Re
     }
 }
 
-fn parse_datetime_input(input: &str, format: Option<&str>, tz: Option<&str>) -> Result<DateTime<Utc>, String> {
+fn parse_datetime_input(
+    input: &str,
+    format: Option<&str>,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
     if let Some(format) = format {
         return parse_datetime_with_format(input, format, tz);
     }
@@ -2017,8 +2364,15 @@ fn parse_datetime_input(input: &str, format: Option<&str>, tz: Option<&str>) -> 
         format!("{}+00:00", &input[..input.len().saturating_sub(1)])
     } else if input.len() >= 5 {
         let suffix = &input[input.len() - 5..];
-        if (suffix.starts_with('+') || suffix.starts_with('-')) && suffix[1..].chars().all(|c| c.is_ascii_digit()) {
-            format!("{}{}:{}", &input[..input.len() - 5], &suffix[..3], &suffix[3..5])
+        if (suffix.starts_with('+') || suffix.starts_with('-'))
+            && suffix[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            format!(
+                "{}{}:{}",
+                &input[..input.len() - 5],
+                &suffix[..3],
+                &suffix[3..5]
+            )
         } else {
             input.to_string()
         }
@@ -2039,12 +2393,22 @@ fn parse_datetime_input(input: &str, format: Option<&str>, tz: Option<&str>) -> 
     ];
     for pattern in naive_patterns {
         if let Ok(parsed) = NaiveDateTime::parse_from_str(input, pattern) {
-            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-            return Ok(offset.from_local_datetime(&parsed).single().unwrap().with_timezone(&Utc));
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset
+                .from_local_datetime(&parsed)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc));
         }
         if let Ok(parsed) = NaiveDate::parse_from_str(input, pattern) {
-            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
-            return Ok(offset.from_local_datetime(&parsed.and_hms_opt(0, 0, 0).unwrap()).single().unwrap().with_timezone(&Utc));
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset
+                .from_local_datetime(&parsed.and_hms_opt(0, 0, 0).unwrap())
+                .single()
+                .unwrap()
+                .with_timezone(&Utc));
         }
     }
 
@@ -2090,7 +2454,12 @@ fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
     let day = dt.day().min(last_day);
     let naive = NaiveDate::from_ymd_opt(new_year, new_month as u32, day)
         .unwrap()
-        .and_hms_milli_opt(dt.hour(), dt.minute(), dt.second(), dt.timestamp_subsec_millis())
+        .and_hms_milli_opt(
+            dt.hour(),
+            dt.minute(),
+            dt.second(),
+            dt.timestamp_subsec_millis(),
+        )
         .unwrap();
     Utc.from_utc_datetime(&naive)
 }
@@ -2188,7 +2557,9 @@ fn date_diff(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let diff = match datepart.trim().to_ascii_lowercase().as_str() {
         "yyyy" | "yy" | "year" | "years" => (date_diff_months(left_dt, right_dt) / 12) as f64,
         "m" | "month" | "months" => date_diff_months(left_dt, right_dt) as f64,
-        "ww" | "w" | "week" | "weeks" => (left_dt.signed_duration_since(right_dt).num_days() / 7) as f64,
+        "ww" | "w" | "week" | "weeks" => {
+            (left_dt.signed_duration_since(right_dt).num_days() / 7) as f64
+        }
         "d" | "day" | "days" => left_dt.signed_duration_since(right_dt).num_days() as f64,
         "h" | "hour" | "hours" => left_dt.signed_duration_since(right_dt).num_hours() as f64,
         "n" | "minute" | "minutes" => left_dt.signed_duration_since(right_dt).num_minutes() as f64,
@@ -2358,7 +2729,10 @@ fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     {
         false
     } else if let Some(type_name) = vm.type_name_from_value(value) {
-        !matches!(type_name.to_ascii_lowercase().as_str(), "datetime" | "range")
+        !matches!(
+            type_name.to_ascii_lowercase().as_str(),
+            "datetime" | "range"
+        )
     } else {
         value.as_gc_id().is_some()
     };
@@ -2389,6 +2763,9 @@ fn is_simple_value_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
     let is_simple = val.is_number()
         || val.is_bool()
         || vm.is_string_value(*val)
-        || vm.type_name_from_value(*val).map(|name| name.eq_ignore_ascii_case("datetime")).unwrap_or(false);
+        || vm
+            .type_name_from_value(*val)
+            .map(|name| name.eq_ignore_ascii_case("datetime"))
+            .unwrap_or(false);
     Ok(BxValue::new_bool(is_simple))
 }

@@ -1,0 +1,20 @@
+// Test queryGetResult / query.getResult()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+
+// Member method
+result = q.getResult()
+if (result.recordCount != 1) {
+    throw "Expected result.recordCount == 1, got: " & result.recordCount
+}
+if (result.columnList != "id,name") {
+    throw "Expected result.columnList == 'id,name', got: " & result.columnList
+}
+
+// Standalone BIF
+result2 = queryGetResult(q)
+if (result2.recordCount != 1) {
+    throw "Expected BIF result.recordCount == 1"
+}

@@ -1,0 +1,40 @@
+// Test querySlice / query.slice()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 2, name: "Bob"})
+queryAddRow(q, {id: 3, name: "Charlie"})
+queryAddRow(q, {id: 4, name: "Diana"})
+queryAddRow(q, {id: 5, name: "Eve"})
+
+// Slice from row 2, take 3 rows (Bob, Charlie, Diana)
+s1 = q.slice(2, 3)
+if (s1.recordCount != 3) {
+    throw "Expected slice recordCount 3, got: " & s1.recordCount
+}
+if (s1.getRow(1).name != "Bob") {
+    throw "Expected slice row 1 = 'Bob', got: " & s1.getRow(1).name
+}
+if (s1.getRow(3).name != "Diana") {
+    throw "Expected slice row 3 = 'Diana', got: " & s1.getRow(3).name
+}
+
+// Slice from row 3 to end (Charlie, Diana, Eve)
+s2 = querySlice(q, 3)
+if (s2.recordCount != 3) {
+    throw "Expected slice2 recordCount 3, got: " & s2.recordCount
+}
+if (s2.getRow(1).name != "Charlie") {
+    throw "Expected slice2 row1 = 'Charlie', got: " & s2.getRow(1).name
+}
+
+// Original query should be unchanged
+if (q.recordCount != 5) {
+    throw "Original query should still have 5 rows"
+}
+
+// Columns preserved
+if (queryColumnList(s1) != "id,name") {
+    throw "Expected slice columns 'id,name', got: " & queryColumnList(s1)
+}

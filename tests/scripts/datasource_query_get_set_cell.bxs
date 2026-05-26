@@ -1,0 +1,41 @@
+// Test queryGetCell / query.getCell() and querySetCell / query.setCell()
+// No database connection required.
+
+q = queryNew("id,name,age", "integer,varchar,integer")
+queryAddRow(q, {id: 1, name: "Alice", age: 30})
+queryAddRow(q, {id: 2, name: "Bob", age: 25})
+
+// getCell with row argument
+val = q.getCell("name", 2)
+if (val != "Bob") {
+    throw "Expected getCell('name', 2) == 'Bob', got: " & val
+}
+
+val2 = q.getCell("id", 1)
+if (val2 != 1) {
+    throw "Expected getCell('id', 1) == 1, got: " & val2
+}
+
+// Standalone BIF
+val3 = queryGetCell(q, "age", 2)
+if (val3 != 25) {
+    throw "Expected queryGetCell('age', 2) == 25, got: " & val3
+}
+
+// Case insensitive
+val4 = q.getCell("NAME", 1)
+if (val4 != "Alice") {
+    throw "Expected case-insensitive getCell, got: " & val4
+}
+
+// setCell
+q.setCell("name", "Robert", 2)
+if (q.getCell("name", 2) != "Robert") {
+    throw "Expected setCell to change row 2 name to 'Robert', got: " & q.getCell("name", 2)
+}
+
+// Standalone BIF setCell
+querySetCell(q, "age", 99, 1)
+if (q.getCell("age", 1) != 99) {
+    throw "Expected querySetCell to change row 1 age to 99"
+}

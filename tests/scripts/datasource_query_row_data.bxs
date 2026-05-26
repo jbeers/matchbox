@@ -1,0 +1,28 @@
+// Test queryRowData / query.rowData() / query.getRow()
+// No database connection required.
+
+q = queryNew("id,name,age", "integer,varchar,integer")
+
+row = {}
+row.id = 1
+row.name = "Alice"
+row.age = 30
+queryAddRow(q, row)
+
+// Standalone BIF: queryRowData
+rd = queryRowData(q, 1)
+if (rd.id != 1) {
+    throw "Expected rd.id == 1, got: " & rd.id
+}
+if (rd.name != "Alice") {
+    throw "Expected rd.name == 'Alice', got: " & rd.name
+}
+if (rd.age != 30) {
+    throw "Expected rd.age == 30, got: " & rd.age
+}
+
+// Member method: getRow (already existed, but verify queryRowData delegates)
+gr = q.getRow(1)
+if (gr.id != 1) {
+    throw "Expected gr.id == 1, got: " & gr.id
+}

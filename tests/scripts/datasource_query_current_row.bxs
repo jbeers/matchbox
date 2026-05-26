@@ -1,0 +1,16 @@
+// Test queryCurrentRow / query.currentRow
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 2, name: "Bob"})
+
+// Initial currentRow should be 0 (before any row)
+if (q.currentRow != 0) {
+    throw "Expected currentRow 0 initially, got: " & q.currentRow
+}
+
+// Standalone BIF
+if (queryCurrentRow(q) != 0) {
+    throw "Expected queryCurrentRow 0 initially, got: " & queryCurrentRow(q)
+}

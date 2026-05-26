@@ -1,0 +1,25 @@
+// Test queryColumnCount / query.columnCount
+// No database connection required.
+
+cols = arrayNew()
+arrayAppend(cols, "id")
+arrayAppend(cols, "name")
+arrayAppend(cols, "age")
+
+q = queryNew(cols)
+
+// Property access
+if (q.columnCount != 3) {
+    throw "Expected columnCount 3, got: " & q.columnCount
+}
+
+// Standalone BIF
+if (queryColumnCount(q) != 3) {
+    throw "Expected queryColumnCount() == 3, got: " & queryColumnCount(q)
+}
+
+// Empty columns
+q2 = queryNew("")
+if (queryColumnCount(q2) != 0) {
+    throw "Expected 0 columns for empty query"
+}

@@ -1,0 +1,35 @@
+// Test queryInsertAt / query.insertAt()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 3, name: "Charlie"})
+
+// Insert a row at position 2
+ins = queryNew("id,name", "integer,varchar")
+queryAddRow(ins, {id: 2, name: "Bob"})
+q.insertAt(ins, 2)
+
+if (q.recordCount != 3) {
+    throw "Expected recordCount 3, got: " & q.recordCount
+}
+if (q.getRow(1).name != "Alice") {
+    throw "Expected row 1 = 'Alice'"
+}
+if (q.getRow(2).name != "Bob") {
+    throw "Expected row 2 = 'Bob', got: " & q.getRow(2).name
+}
+if (q.getRow(3).name != "Charlie") {
+    throw "Expected row 3 = 'Charlie'"
+}
+
+// Standalone BIF
+ins2 = queryNew("id,name", "integer,varchar")
+queryAddRow(ins2, {id: 0, name: "Zero"})
+queryInsertAt(q, ins2, 1)
+if (q.getRow(1).name != "Zero") {
+    throw "Expected row 1 = 'Zero' after insertAt 1, got: " & q.getRow(1).name
+}
+if (q.recordCount != 4) {
+    throw "Expected recordCount 4, got: " & q.recordCount
+}
