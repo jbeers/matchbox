@@ -1,0 +1,40 @@
+// Test queryColumnArray / query.columnArray()
+// No database connection required.
+
+cols = arrayNew()
+arrayAppend(cols, "id")
+arrayAppend(cols, "name")
+arrayAppend(cols, "age")
+
+q = queryNew(cols)
+
+// Member method
+arr = q.columnArray()
+if (len(arr) != 3) {
+    throw "Expected 3 columns, got: " & len(arr)
+}
+if (arr[1] != "id") {
+    throw "Expected arr[1] == 'id', got: " & arr[1]
+}
+if (arr[2] != "name") {
+    throw "Expected arr[2] == 'name', got: " & arr[2]
+}
+if (arr[3] != "age") {
+    throw "Expected arr[3] == 'age', got: " & arr[3]
+}
+
+// Standalone BIF
+arr2 = queryColumnArray(q)
+if (len(arr2) != 3) {
+    throw "Expected 3 columns from BIF, got: " & len(arr2)
+}
+if (arr2[1] != "id") {
+    throw "Expected arr2[1] == 'id', got: " & arr2[1]
+}
+
+// Empty query (no columns)
+q2 = queryNew("")
+arr3 = queryColumnArray(q2)
+if (len(arr3) != 0) {
+    throw "Expected 0 columns for empty query, got: " & len(arr3)
+}

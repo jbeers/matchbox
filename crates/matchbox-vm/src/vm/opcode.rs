@@ -6,7 +6,7 @@
 /// Instruction widths:
 ///   1-word: most instructions
 ///   2-word: COMPARE_JUMP, CALL_NAMED, INVOKE
-///   3-word: LOCAL_COMPARE_JUMP, GLOBAL_COMPARE_JUMP, INVOKE_NAMED, ITER_NEXT, LOCAL_JUMP_IF_NE_CONST, FOR_LOOP_STEP
+///   3-word: LOCAL_COMPARE_JUMP, GLOBAL_COMPARE_JUMP, INVOKE_NAMED, INVOKE_NAMED_SPREAD, ITER_NEXT, LOCAL_JUMP_IF_NE_CONST, FOR_LOOP_STEP
 pub mod op {
     pub const INC_LOCAL: u8 = 0;
     pub const LOCAL_COMPARE_JUMP: u8 = 1;   // 3-word: op0=slot, w1=const_idx, w2=offset
@@ -54,26 +54,47 @@ pub mod op {
     pub const STRING_CONCAT: u8 = 43;
     pub const CALL: u8 = 44;
     pub const CALL_NAMED: u8 = 45;              // 2-word: op0=total_count, w1=names_idx
-    pub const INVOKE: u8 = 46;                  // 2-word: op0=name_idx, w1=arg_count
-    pub const INVOKE_NAMED: u8 = 47;            // 3-word: op0=name_idx, w1=total_count, w2=names_idx
-    pub const NEW: u8 = 48;
-    pub const EQUAL: u8 = 49;
-    pub const NOT_EQUAL: u8 = 50;
-    pub const LESS: u8 = 51;
-    pub const LESS_EQUAL: u8 = 52;
-    pub const GREATER: u8 = 53;
-    pub const GREATER_EQUAL: u8 = 54;
-    pub const NOT: u8 = 55;
-    pub const ITER_NEXT: u8 = 56;               // 3-word: op0=collection_slot, w1=cursor_slot|(has_index<<31), w2=exit_offset
-    pub const LOCAL_JUMP_IF_NE_CONST: u8 = 57;  // 3-word: op0=slot, w1=const_idx, w2=offset
-    pub const PUSH_HANDLER: u8 = 58;
-    pub const POP_HANDLER: u8 = 59;
-    pub const THROW: u8 = 60;
-    pub const PRINT: u8 = 61;
-    pub const PRINTLN: u8 = 62;
-    pub const FOR_LOOP_STEP: u8 = 63;  // 3-word: op0=slot, w1=const_idx, w2=offset — increment local, compare < const, jump back if true
-    pub const JUMP_IF_NULL: u8 = 64;
-    pub const MODULO: u8 = 65;
+    pub const CALL_SPREAD: u8 = 46;             // 1-word: op0=arg_entry_count
+    pub const INVOKE: u8 = 47;                  // 2-word: op0=name_idx, w1=arg_count
+    pub const INVOKE_NAMED: u8 = 48;            // 3-word: op0=name_idx, w1=total_count, w2=names_idx
+    pub const NEW: u8 = 49;
+    pub const EQUAL: u8 = 50;
+    pub const NOT_EQUAL: u8 = 51;
+    pub const LESS: u8 = 52;
+    pub const LESS_EQUAL: u8 = 53;
+    pub const GREATER: u8 = 54;
+    pub const GREATER_EQUAL: u8 = 55;
+    pub const NOT: u8 = 56;
+    pub const ITER_NEXT: u8 = 57;               // 3-word: op0=collection_slot, w1=cursor_slot|(has_index<<31), w2=exit_offset
+    pub const LOCAL_JUMP_IF_NE_CONST: u8 = 58;  // 3-word: op0=slot, w1=const_idx, w2=offset
+    pub const PUSH_HANDLER: u8 = 59;
+    pub const POP_HANDLER: u8 = 60;
+    pub const THROW: u8 = 61;
+    pub const PRINT: u8 = 62;
+    pub const PRINTLN: u8 = 63;
+    pub const FOR_LOOP_STEP: u8 = 64;  // 3-word: op0=slot, w1=const_idx, w2=offset — increment local, compare < const, jump back if true
+    pub const JUMP_IF_NULL: u8 = 65;
+    pub const MODULO: u8 = 66;
+    // Bitwise operators
+    pub const BIT_OR: u8 = 67;
+    pub const BIT_AND: u8 = 68;
+    pub const BIT_XOR: u8 = 69;
+    pub const BIT_NOT: u8 = 70;
+    pub const BIT_SHL: u8 = 71;
+    pub const BIT_SHR: u8 = 72;
+    pub const BIT_USHR: u8 = 73;
+    pub const POW: u8 = 74;
+    pub const XOR_OP: u8 = 75;
+    pub const EQV_OP: u8 = 76;
+    pub const RANGE: u8 = 77;
+    pub const BUFFER_WRITE: u8 = 78;
+    pub const CONTAINS: u8 = 79;
+    pub const ARRAY_SPREAD: u8 = 80;
+    pub const STRUCT_SPREAD: u8 = 81;
+    pub const INSTANCEOF: u8 = 82;
+    pub const CASTAS: u8 = 83;
+    pub const CALL_NAMED_SPREAD: u8 = 84;      // 1-word: op0=arg_entry_count
+    pub const INVOKE_NAMED_SPREAD: u8 = 85;    // 3-word: op0=name_idx, w1=arg_entry_count, w2=unused
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -124,6 +145,7 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::STRING_CONCAT           => "STRING_CONCAT",
         op::CALL                    => "CALL",
         op::CALL_NAMED              => "CALL_NAMED",
+        op::CALL_SPREAD             => "CALL_SPREAD",
         op::INVOKE                  => "INVOKE",
         op::INVOKE_NAMED            => "INVOKE_NAMED",
         op::NEW                     => "NEW",
@@ -144,6 +166,25 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::FOR_LOOP_STEP           => "FOR_LOOP_STEP",
         op::JUMP_IF_NULL            => "JUMP_IF_NULL",
         op::MODULO                  => "MODULO",
+        op::BIT_OR                  => "BIT_OR",
+        op::BIT_AND                 => "BIT_AND",
+        op::BIT_XOR                 => "BIT_XOR",
+        op::BIT_NOT                 => "BIT_NOT",
+        op::BIT_SHL                 => "BIT_SHL",
+        op::BIT_SHR                 => "BIT_SHR",
+        op::BIT_USHR                => "BIT_USHR",
+        op::POW                     => "POW",
+        op::XOR_OP                  => "XOR_OP",
+        op::EQV_OP                  => "EQV_OP",
+        op::RANGE                   => "RANGE",
+        op::BUFFER_WRITE            => "BUFFER_WRITE",
+        op::CONTAINS                => "CONTAINS",
+        op::ARRAY_SPREAD            => "ARRAY_SPREAD",
+        op::STRUCT_SPREAD           => "STRUCT_SPREAD",
+        op::INSTANCEOF              => "INSTANCEOF",
+        op::CASTAS                  => "CASTAS",
+        op::CALL_NAMED_SPREAD       => "CALL_NAMED_SPREAD",
+        op::INVOKE_NAMED_SPREAD     => "INVOKE_NAMED_SPREAD",
         _                           => "UNKNOWN",
     }
 }

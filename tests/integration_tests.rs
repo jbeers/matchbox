@@ -122,6 +122,27 @@ script_test!(bvm_features, "bvm_features.bxs");
 script_test!(vm_safe_nav_elvis, "vm_safe_nav_elvis.bxs");
 script_test!(vm_switch, "vm_switch.bxs");
 script_test!(vm_while, "vm_while.bxs");
+script_test!(vm_do_while, "vm_do_while.bxs");
+script_test!(vm_assert, "vm_assert.bxs");
+script_test!(vm_param, "vm_param.bxs");
+script_test!(vm_rethrow, "vm_rethrow.bxs");
+script_test!(vm_labeled_break_continue, "vm_labeled_break_continue.bxs");
+script_test!(vm_include, "vm_include.bxs");
+script_test!(vm_not_statement, "vm_not_statement.bxs");
+script_test!(vm_access_modifiers, "vm_access_modifiers.bxs");
+script_test!(vm_bitwise, "vm_bitwise.bxs");
+script_test!(vm_power_xor_eqv, "vm_power_xor_eqv.bxs");
+script_test!(vm_ranges, "vm_ranges.bxs");
+script_test!(vm_instanceof_castas, "vm_instanceof_castas.bxs");
+script_test!(vm_assert_param_rethrow, "vm_assert_param_rethrow.bxs");
+script_test!(vm_contains, "vm_contains.bxs");
+script_test!(vm_functional_bif, "vm_functional_bif.bxs");
+script_test!(vm_spread, "vm_spread.bxs");
+script_test!(vm_destructuring, "vm_destructuring.bxs");
+#[cfg(feature = "qoq")]
+script_test!(vm_qoq_query_execute, "vm_qoq_query_execute.bxs");
+#[cfg(feature = "qoq")]
+script_test!(vm_qoq_join, "vm_qoq_join.bxs");
 
 #[test]
 #[cfg(feature = "bif-tui")]
@@ -873,6 +894,132 @@ fn run_ds_script(file: &str) {
 #[cfg(feature = "bif-datasource")]
 fn datasource_query_new() {
     run_ds_script("datasource_query_new.bxs");
+}
+
+/// queryClear — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_clear() {
+    run_ds_script("datasource_query_clear.bxs");
+}
+
+/// queryColumnArray — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_array() {
+    run_ds_script("datasource_query_column_array.bxs");
+}
+
+/// queryColumnCount — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_count() {
+    run_ds_script("datasource_query_column_count.bxs");
+}
+
+/// queryColumnExists / queryKeyExists — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_column_exists() {
+    run_ds_script("datasource_query_column_exists.bxs");
+}
+
+/// queryRecordCount — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_record_count() {
+    run_ds_script("datasource_query_record_count.bxs");
+}
+
+/// queryRowData — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_row_data() {
+    run_ds_script("datasource_query_row_data.bxs");
+}
+
+/// queryReverse — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_reverse() {
+    run_ds_script("datasource_query_reverse.bxs");
+}
+
+/// queryRowSwap — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_row_swap() {
+    run_ds_script("datasource_query_row_swap.bxs");
+}
+
+/// querySlice — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_slice() {
+    run_ds_script("datasource_query_slice.bxs");
+}
+
+/// queryDeleteColumn — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_delete_column() {
+    run_ds_script("datasource_query_delete_column.bxs");
+}
+
+/// queryDeleteRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_delete_row() {
+    run_ds_script("datasource_query_delete_row.bxs");
+}
+
+/// queryAddColumn — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_add_column() {
+    run_ds_script("datasource_query_add_column.bxs");
+}
+
+/// queryAppend / queryPrepend — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_append_prepend() {
+    run_ds_script("datasource_query_append_prepend.bxs");
+}
+
+/// queryGetCell / querySetCell — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_get_set_cell() {
+    run_ds_script("datasource_query_get_set_cell.bxs");
+}
+
+/// queryInsertAt — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_insert_at() {
+    run_ds_script("datasource_query_insert_at.bxs");
+}
+
+/// querySetRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_set_row() {
+    run_ds_script("datasource_query_set_row.bxs");
+}
+
+/// queryCurrentRow — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_current_row() {
+    run_ds_script("datasource_query_current_row.bxs");
+}
+
+/// queryGetResult — no database needed.
+#[test]
+#[cfg(feature = "bif-datasource")]
+fn datasource_query_get_result() {
+    run_ds_script("datasource_query_get_result.bxs");
 }
 
 // --- Database tests --------------------------------------------------------

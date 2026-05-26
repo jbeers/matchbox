@@ -79,4 +79,35 @@ if (ids[2] != 2) {
     throw "Expected ids[2] == 2, got: " & ids[2]
 }
 
+q2 = queryNew("score,label", "integer,varchar", [[10, "A"], [20, "B"]])
+if (q2.recordCount != 2) {
+    throw "Expected string queryNew rowData to create 2 rows, got: " & q2.recordCount
+}
+
+scores = queryColumnData(q2, "score")
+if (scores[1] != 10) {
+    throw "Expected scores[1] == 10, got: " & scores[1]
+}
+if (scores[2] != 20) {
+    throw "Expected scores[2] == 20, got: " & scores[2]
+}
+
+labels = queryColumnData(q2, "label")
+if (labels[1] != "A") {
+    throw "Expected labels[1] == 'A', got: " & labels[1]
+}
+if (labels[2] != "B") {
+    throw "Expected labels[2] == 'B', got: " & labels[2]
+}
+
+q3 = queryNew("value", "integer", [1, 2, 3])
+if (q3.recordCount != 3) {
+    throw "Expected one-column scalar rowData to create 3 rows, got: " & q3.recordCount
+}
+
+values = queryColumnData(q3, "value")
+if (values[3] != 3) {
+    throw "Expected values[3] == 3, got: " & values[3]
+}
+
 println("datasource_query_new: OK")

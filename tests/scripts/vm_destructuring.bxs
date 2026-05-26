@@ -1,0 +1,38 @@
+// Test destructuring assignment
+var calls = 0;
+
+function makeObj() {
+    calls = calls + 1;
+    return { a: 1, b: 2, c: 3 };
+}
+
+function makeArr() {
+    calls = calls + 1;
+    return [10, 20];
+}
+
+// Simple member access
+println(makeObj().a); // expect 1
+
+// Object destructuring with single binding
+var a = 0;
+{ a } = makeObj();
+println(a); // expect 1
+
+// Object destructuring with multiple bindings
+var b = 0;
+var c = 0;
+{ b, c } = makeObj();
+println(b); // expect 2
+println(c); // expect 3
+
+// Array destructuring
+var left = 0;
+var right = 0;
+[left, right] = makeArr();
+println(left); // expect 10
+println(right); // expect 20
+
+if (calls != 4) {
+    throw "destructuring source evaluated wrong number of times: " & calls;
+}

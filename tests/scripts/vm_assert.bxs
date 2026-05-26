@@ -1,0 +1,29 @@
+// Test assert statement
+var calls = 0;
+
+function bump() {
+    calls = calls + 1;
+    return "custom failure";
+}
+
+assert true : bump();
+
+try {
+    assert false : bump();
+} catch (e) {
+    if (e.message != "custom failure") {
+        throw "custom assert message lost: " & e.message;
+    }
+}
+
+if (calls != 1) {
+    throw "assert message evaluated wrong number of times: " & calls;
+}
+
+try {
+    assert false;
+} catch (e) {
+    if (e.message != "Assertion failed") {
+        throw "default assert message lost: " & e.message;
+    }
+}

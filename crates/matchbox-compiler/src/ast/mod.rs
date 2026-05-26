@@ -24,6 +24,20 @@ pub struct Attribute {
     pub args: Vec<Argument>,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FunctionModifiers {
+    pub access: Option<String>,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ClassModifiers {
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
     Import {
@@ -32,6 +46,7 @@ pub enum StatementKind {
     },
     ClassDecl {
         name: String,
+        modifiers: ClassModifiers,
         extends: Option<String>,
         accessors: bool,
         implements: Vec<String>,
@@ -44,7 +59,7 @@ pub enum StatementKind {
     FunctionDecl {
         name: String,
         attributes: Vec<Attribute>,
-        access_modifier: Option<String>,
+        modifiers: FunctionModifiers,
         return_type: Option<String>,
         params: Vec<FunctionParam>,
         body: FunctionBody,
@@ -65,6 +80,10 @@ pub enum StatementKind {
         condition: Expression,
         body: Vec<Statement>,
     },
+    DoWhile {
+        body: Vec<Statement>,
+        condition: Expression,
+    },
     If {
         condition: Expression,
         then_branch: Vec<Statement>,
@@ -79,6 +98,23 @@ pub enum StatementKind {
     Throw(Option<Expression>),
     Continue,
     Break,
+    Rethrow,
+    Assert {
+        condition: Expression,
+        message: Option<Expression>,
+    },
+    Param {
+        name: String,
+        default: Option<Expression>,
+    },
+    Not(Expression),
+    Include(Expression),
+    Destructure {
+        kind: DestructureKind,
+        source: Expression,
+        bindings: Vec<(String, Option<String>)>, // (source_name, local_name?)
+    },
+    BufferOutput(Expression), // Write expression to output buffer (templates)
     TryCatch {
         try_branch: Vec<Statement>,
         catches: Vec<CatchBlock>,
@@ -101,6 +137,12 @@ pub struct SwitchCase {
 pub struct CatchBlock {
     pub exception_var: String,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DestructureKind {
+    Object,
+    Array,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,6 +218,7 @@ pub enum ExpressionKind {
         base: Box<Expression>,
         operator: String,
     },
+    Spread(Box<Expression>),
     Identifier(String),
     Literal(Literal),
 }

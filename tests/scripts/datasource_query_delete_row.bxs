@@ -1,0 +1,32 @@
+// Test queryDeleteRow / query.deleteRow()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 2, name: "Bob"})
+queryAddRow(q, {id: 3, name: "Charlie"})
+
+// Delete row 2 (Bob)
+q.deleteRow(2)
+
+if (q.recordCount != 2) {
+    throw "Expected recordCount 2 after delete, got: " & q.recordCount
+}
+gr1 = q.getRow(1)
+if (gr1.name != "Alice") {
+    throw "Expected row 1 = 'Alice', got: " & gr1.name
+}
+gr2 = q.getRow(2)
+if (gr2.name != "Charlie") {
+    throw "Expected row 2 = 'Charlie', got: " & gr2.name
+}
+
+// Standalone BIF: delete row 1
+queryDeleteRow(q, 1)
+if (q.recordCount != 1) {
+    throw "Expected recordCount 1 after second delete, got: " & q.recordCount
+}
+gr1c = q.getRow(1)
+if (gr1c.name != "Charlie") {
+    throw "Expected row 1 = 'Charlie', got: " & gr1c.name
+}

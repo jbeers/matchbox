@@ -1,0 +1,55 @@
+// QoQ join integration test through queryExecute.
+
+employees = queryNew(["id", "name", "dept_id"])
+
+row = {}
+row.id = 1
+row.name = "Alice"
+row.dept_id = 10
+queryAddRow(employees, row)
+
+row = {}
+row.id = 2
+row.name = "Bob"
+row.dept_id = 20
+queryAddRow(employees, row)
+
+departments = queryNew(["dept_id", "dept_name"])
+
+row = {}
+row.dept_id = 10
+row.dept_name = "Sales"
+queryAddRow(departments, row)
+
+row = {}
+row.dept_id = 20
+row.dept_name = "Engineering"
+queryAddRow(departments, row)
+
+joined = queryExecute(
+    "SELECT e.name, d.dept_name FROM employees e INNER JOIN departments d ON e.dept_id = d.dept_id ORDER BY e.id",
+    null,
+    {dbType: "query"}
+)
+
+if (joined.recordCount != 2) {
+    throw "Expected QoQ join to return 2 rows, got: " & joined.recordCount
+}
+
+names = queryColumnData(joined, "name")
+if (names[1] != "Alice") {
+    throw "Expected join row 1 name to be Alice, got: " & names[1]
+}
+if (names[2] != "Bob") {
+    throw "Expected join row 2 name to be Bob, got: " & names[2]
+}
+
+deptNames = queryColumnData(joined, "dept_name")
+if (deptNames[1] != "Sales") {
+    throw "Expected join row 1 dept_name to be Sales, got: " & deptNames[1]
+}
+if (deptNames[2] != "Engineering") {
+    throw "Expected join row 2 dept_name to be Engineering, got: " & deptNames[2]
+}
+
+println("vm_qoq_join: OK")

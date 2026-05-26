@@ -1,0 +1,3 @@
+// Test include statement parsing.
+include "some/file.bxs";
+println("include parsed ok");

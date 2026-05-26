@@ -127,6 +127,12 @@ pub trait BxVM {
     fn is_struct_value(&self, val: BxValue) -> bool;
     fn is_string_value(&self, val: BxValue) -> bool;
     fn is_bytes(&self, val: BxValue) -> bool;
+    fn type_name_from_value(&self, val: BxValue) -> Option<String>;
+    fn find_global_class_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxClass>>>;
+    fn find_global_interface_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxInterface>>>;
+    fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool;
+    fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool;
+    fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String>;
     fn bytes_new(&mut self, data: Vec<u8>) -> usize;
     fn bytes_len(&self, id: usize) -> usize;
     fn bytes_get(&self, id: usize, idx: usize) -> Result<u8, String>;
@@ -162,10 +168,21 @@ pub trait BxVM {
     fn construct_native_class(&mut self, class_name: &str, args: &[BxValue]) -> Result<BxValue, String>;
     fn instance_class_name(&self, receiver: BxValue) -> Result<String, String>;
     fn instance_variables_json(&self, receiver: BxValue) -> Result<serde_json::Value, String>;
+    fn datetime_new(&mut self, dt: chrono::DateTime<chrono::Utc>) -> usize;
     fn string_new(&mut self, s: String) -> usize;
     fn to_string(&self, val: BxValue) -> String;
     fn to_box_string(&self, val: BxValue) -> BoxString;
     fn insert_global(&mut self, name: String, val: BxValue);
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_result(&self, id: usize) -> Option<crate::datasource::traits::QueryResult>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_columns(&self, id: usize) -> Option<Vec<crate::datasource::traits::QueryColumn>>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_row_count(&self, id: usize) -> Option<usize>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue>;
     fn get_cli_args(&self) -> Vec<String>;
     fn write_output(&mut self, s: &str);
     fn begin_output_capture(&mut self);
@@ -302,6 +319,23 @@ pub trait BxNativeObject: fmt::Debug {
     fn get_property(&self, name: &str) -> BxValue;
     fn set_property(&mut self, name: &str, value: BxValue);
     fn call_method(&mut self, vm: &mut dyn BxVM, id: usize, name: &str, args: &[BxValue]) -> Result<BxValue, String>;
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_result(&self) -> Option<crate::datasource::traits::QueryResult> {
+        None
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_columns(&self) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+        self.query_result().map(|result| result.columns)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_row_count(&self) -> Option<usize> {
+        self.query_result().map(|result| result.rows.len())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn query_cell(&self, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue> {
+        self.query_result()
+            .and_then(|result| result.rows.get(row_idx).and_then(|row| row.get(col_idx)).cloned())
+    }
     fn trace(&self, _tracer: &mut dyn Tracer) {}
 }
 
@@ -352,12 +386,27 @@ pub enum Constant {
     StringArray(Vec<String>),
 }
 
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct FunctionModifiers {
+    pub access: Option<String>,
+    pub is_static: bool,
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ClassModifiers {
+    pub is_abstract: bool,
+    pub is_final: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxCompiledFunction {
     pub name: String,
     pub arity: u32,     // Total parameters
     pub min_arity: u32, // Required parameters
     pub params: Vec<String>, // Parameter names
+    pub modifiers: FunctionModifiers,
     /// Captured `this` for closures created inside class contexts.
     #[serde(skip)]
     pub captured_receiver: Option<BxValue>,
@@ -368,6 +417,7 @@ pub struct BxCompiledFunction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxClass {
     pub name: String,
+    pub modifiers: ClassModifiers,
     pub extends: Option<String>,
     pub implements: Vec<String>,
     pub constructor: BxCompiledFunction,
@@ -378,6 +428,79 @@ pub struct BxClass {
 pub struct BxInterface {
     pub name: String,
     pub methods: Vec<(String, Option<BxCompiledFunction>)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BxRange {
+    pub start: i64,
+    pub end: i64,
+    pub from_exclusive: bool,
+    pub to_exclusive: bool,
+}
+
+impl BxRange {
+    pub fn from_bounds(start: i64, end: i64, from_exclusive: bool, to_exclusive: bool) -> Self {
+        Self {
+            start,
+            end,
+            from_exclusive,
+            to_exclusive,
+        }
+    }
+
+    pub fn iter_bounds(&self) -> (i64, i64) {
+        if self.start <= self.end {
+            let start = self.start + i64::from(self.from_exclusive);
+            let end = self.end - i64::from(self.to_exclusive);
+            (start, end)
+        } else {
+            let start = self.start - i64::from(self.from_exclusive);
+            let end = self.end + i64::from(self.to_exclusive);
+            (start, end)
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        let (start, end) = self.iter_bounds();
+        if self.start <= self.end {
+            if start > end {
+                0
+            } else {
+                (end - start + 1) as usize
+            }
+        } else if start < end {
+            0
+        } else {
+            (start - end + 1) as usize
+        }
+    }
+
+    pub fn contains_number(&self, value: f64) -> bool {
+        if value.fract() != 0.0 {
+            return false;
+        }
+        let value = value as i64;
+        let (start, end) = self.iter_bounds();
+        if self.start <= self.end {
+            value >= start && value <= end
+        } else {
+            value <= start && value >= end
+        }
+    }
+}
+
+impl std::fmt::Display for BxRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.from_exclusive && self.to_exclusive {
+            write!(f, "{}.<.{}", self.start, self.end)
+        } else if self.from_exclusive {
+            write!(f, "{}.<{}", self.start, self.end)
+        } else if self.to_exclusive {
+            write!(f, "{}..<{}", self.start, self.end)
+        } else {
+            write!(f, "{}..{}", self.start, self.end)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

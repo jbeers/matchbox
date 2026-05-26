@@ -1,0 +1,5 @@
+import benchmarks.compiler.fixtures.BenchPoint;
+
+point = new BenchPoint()
+point.init(20, 22)
+println("compiler-class: " & point.sum())

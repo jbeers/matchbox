@@ -3,9 +3,9 @@ use serde_json::Value as JsonValue;
 
 pub fn json_deserialize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
-        return Err("JSONdeserialize() expects 1 argument".to_string());
+        return Err("deserializeJSON() expects 1 argument".to_string());
     }
-    let json_str = vm.to_string(args[0]);
+    let json_str = normalize_json_input(vm.to_string(args[0]));
 
     let json_val: JsonValue =
         serde_json::from_str(&json_str).map_err(|e| format!("Failed to parse JSON: {}", e))?;
@@ -15,7 +15,7 @@ pub fn json_deserialize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
 
 pub fn json_serialize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
-        return Err("JSONserialize() expects 1 argument".to_string());
+        return Err("serializeJSON() expects 1 argument".to_string());
     }
     let json_val = bx_to_json(vm, args[0]);
 
@@ -24,6 +24,14 @@ pub fn json_serialize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 
     let s_id = vm.string_new(json_str);
     Ok(BxValue::new_ptr(s_id))
+}
+
+pub fn is_json(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("isJSON() expects 1 argument".to_string());
+    }
+    let json_str = normalize_json_input(vm.to_string(args[0]));
+    Ok(BxValue::new_bool(serde_json::from_str::<JsonValue>(&json_str).is_ok()))
 }
 
 pub fn load_properties(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -82,38 +90,35 @@ fn bx_to_json(vm: &dyn BxVM, val: BxValue) -> JsonValue {
         JsonValue::Bool(val.as_bool())
     } else if val.is_number() {
         JsonValue::Number(serde_json::Number::from_f64(val.as_number()).unwrap())
-    } else if let Some(id) = val.as_gc_id() {
-        // This is a bit tricky as BxVM doesn't expose a way to check object type easily
-        // We assume to_string() works for strings, and we might need to handle arrays/structs
-        // For now, let's use a heuristic or just to_string for non-containers
-
-        let s = vm.to_string(val);
-        // If it looks like a container, we might have a problem here without better VM introspection
-        // But BxVM trait has array_len/struct_len
-
-        // Let's try to detect if it's a struct or array
-        let struct_len = vm.struct_len(id);
-        if struct_len > 0 || vm.struct_get_shape(id) != vm.get_root_shape() {
+    } else if vm.is_struct_value(val) {
+        if let Some(id) = val.as_gc_id() {
             let mut map = serde_json::Map::new();
             for key in vm.struct_key_array(id) {
                 let item = vm.struct_get(id, &key);
                 map.insert(key, bx_to_json(vm, item));
             }
-            return JsonValue::Object(map);
+            JsonValue::Object(map)
+        } else {
+            JsonValue::Null
         }
-
-        let array_len = vm.array_len(id);
-        if array_len > 0 {
+    } else if vm.is_array_value(val) {
+        if let Some(id) = val.as_gc_id() {
             let mut vec = Vec::new();
-            for i in 0..array_len {
+            for i in 0..vm.array_len(id) {
                 let item = vm.array_get(id, i);
                 vec.push(bx_to_json(vm, item));
             }
-            return JsonValue::Array(vec);
+            JsonValue::Array(vec)
+        } else {
+            JsonValue::Null
         }
-
-        JsonValue::String(s)
+    } else if let Some(id) = val.as_gc_id() {
+        JsonValue::String(vm.to_string(BxValue::new_ptr(id)))
     } else {
         JsonValue::Null
     }
+}
+
+fn normalize_json_input(input: String) -> String {
+    input.trim_start_matches('\u{feff}').to_string()
 }

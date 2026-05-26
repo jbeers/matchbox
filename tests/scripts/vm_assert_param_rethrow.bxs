@@ -1,0 +1,14 @@
+// Test assert
+try { assert false; } catch (e) { }
+println("assert OK");
+
+// Test param with default
+param x = 42;
+if (x != 42) { throw "param failed"; }
+println("param default OK");
+
+// Test rethrow
+var caught = false;
+try { try { throw "inner"; } catch (e) { rethrow; } } catch (e) { caught = true; }
+if (!caught) { throw "rethrow failed"; }
+println("rethrow OK");

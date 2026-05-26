@@ -1,0 +1,46 @@
+// Test queryAppend / query.append() and queryPrepend / query.prepend()
+// No database connection required.
+
+q1 = queryNew("id,name", "integer,varchar")
+queryAddRow(q1, {id: 1, name: "Alice"})
+queryAddRow(q1, {id: 2, name: "Bob"})
+
+q2 = queryNew("id,name", "integer,varchar")
+queryAddRow(q2, {id: 3, name: "Charlie"})
+queryAddRow(q2, {id: 4, name: "Diana"})
+
+// Append
+q1.append(q2)
+if (q1.recordCount != 4) {
+    throw "Expected recordCount 4 after append, got: " & q1.recordCount
+}
+if (q1.getRow(3).name != "Charlie") {
+    throw "Expected row 3 = 'Charlie', got: " & q1.getRow(3).name
+}
+if (q1.getRow(4).name != "Diana") {
+    throw "Expected row 4 = 'Diana', got: " & q1.getRow(4).name
+}
+
+// Standalone BIF: queryAppend
+q3 = queryNew("name", "varchar")
+queryAddRow(q3, {name: "Eve"})
+queryAppend(q1, q3)
+if (q1.recordCount != 5) {
+    throw "Expected recordCount 5 after BIF append, got: " & q1.recordCount
+}
+
+// Prepend
+q4 = queryNew("id,name", "integer,varchar")
+queryAddRow(q4, {id: 0, name: "Zero"})
+q1.prepend(q4)
+if (q1.getRow(1).name != "Zero") {
+    throw "Expected row 1 = 'Zero' after prepend, got: " & q1.getRow(1).name
+}
+
+// Standalone BIF: queryPrepend
+q5 = queryNew("id,name", "integer,varchar")
+queryAddRow(q5, {id: -1, name: "Minus"})
+queryPrepend(q1, q5)
+if (q1.getRow(1).name != "Minus") {
+    throw "Expected row 1 = 'Minus' after BIF prepend, got: " & q1.getRow(1).name
+}

@@ -1,0 +1,36 @@
+// Test querySetRow / query.setRow()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 2, name: "Bob"})
+
+// Update row 2 with struct
+q.setRow(2, {id: 22, name: "Bobby"})
+if (q.getRow(2).name != "Bobby") {
+    throw "Expected row 2 name = 'Bobby', got: " & q.getRow(2).name
+}
+if (q.getRow(2).id != 22) {
+    throw "Expected row 2 id = 22, got: " & q.getRow(2).id
+}
+
+// Append new row (no row number)
+q.setRow({id: 3, name: "Charlie"})
+if (q.recordCount != 3) {
+    throw "Expected recordCount 3, got: " & q.recordCount
+}
+if (q.getRow(3).name != "Charlie") {
+    throw "Expected row 3 name = 'Charlie', got: " & q.getRow(3).name
+}
+
+// Standalone BIF: append
+querySetRow(q, {id: 4, name: "Diana"})
+if (q.recordCount != 4) {
+    throw "Expected recordCount 4, got: " & q.recordCount
+}
+
+// Standalone BIF: update row 1
+querySetRow(q, 1, {id: 11, name: "Alicia"})
+if (q.getRow(1).name != "Alicia") {
+    throw "Expected row 1 name = 'Alicia', got: " & q.getRow(1).name
+}

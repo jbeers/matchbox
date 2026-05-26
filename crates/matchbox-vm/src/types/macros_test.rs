@@ -226,6 +226,37 @@ mod tests {
             box_string::BoxString::new("")
         }
         fn insert_global(&mut self, _: String, _: BxValue) {}
+        #[cfg(not(target_arch = "wasm32"))]
+        fn resolve_query_source_path(&self, _: &[String]) -> Option<BxValue> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_result(
+            &self,
+            _: usize,
+        ) -> Option<crate::datasource::traits::QueryResult> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_columns(
+            &self,
+            _: usize,
+        ) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_row_count(&self, _: usize) -> Option<usize> {
+            None
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        fn native_object_query_cell(
+            &self,
+            _: usize,
+            _: usize,
+            _: usize,
+        ) -> Option<crate::datasource::traits::SqlValue> {
+            None
+        }
         fn get_cli_args(&self) -> Vec<String> {
             vec![]
         }

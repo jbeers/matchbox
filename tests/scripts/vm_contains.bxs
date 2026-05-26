@@ -1,0 +1,11 @@
+// Test contains operator
+var str = "hello world";
+if (!(str contains "world")) { throw "contains failed"; }
+
+var arr = [1, 2, 3];
+if (!(arr contains 2)) { throw "arr contains 2 failed"; }
+
+var obj = { a: 1, b: 2 };
+if (!(obj contains "a")) { throw "obj contains key failed"; }
+
+println("contains OK");

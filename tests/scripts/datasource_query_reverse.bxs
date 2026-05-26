@@ -1,0 +1,36 @@
+// Test queryReverse / query.reverse()
+// No database connection required.
+
+q = queryNew("id,name", "integer,varchar")
+
+// Add rows in order
+queryAddRow(q, {id: 1, name: "Alice"})
+queryAddRow(q, {id: 2, name: "Bob"})
+queryAddRow(q, {id: 3, name: "Charlie"})
+
+// Member method
+q.reverse()
+
+// Now order should be reversed: Charlie, Bob, Alice
+if (q.recordCount != 3) {
+    throw "Expected recordCount 3 after reverse"
+}
+gr1 = q.getRow(1)
+if (gr1.name != "Charlie") {
+    throw "Expected row 1 = 'Charlie', got: " & gr1.name
+}
+gr2 = q.getRow(2)
+if (gr2.name != "Bob") {
+    throw "Expected row 2 = 'Bob', got: " & gr2.name
+}
+gr3 = q.getRow(3)
+if (gr3.name != "Alice") {
+    throw "Expected row 3 = 'Alice', got: " & gr3.name
+}
+
+// Standalone BIF: reverse again back to original
+queryReverse(q)
+gr1b = q.getRow(1)
+if (gr1b.name != "Alice") {
+    throw "Expected row 1 = 'Alice' after second reverse, got: " & gr1b.name
+}

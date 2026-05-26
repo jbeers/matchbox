@@ -2,18 +2,35 @@
 use crate::types::{BxVM, BxValue};
 
 #[cfg(feature = "bif-datasource")]
-use std::cell::RefCell;
-#[cfg(feature = "bif-datasource")]
-use std::rc::Rc;
-#[cfg(feature = "bif-datasource")]
-use std::sync::Arc;
-
-#[cfg(feature = "bif-datasource")]
 use crate::datasource::traits::{
     DatasourceConfig, QueryColumn, QueryColumnType, QueryParam, SqlValue,
 };
 #[cfg(feature = "bif-datasource")]
-use crate::datasource::{bx_to_sql, registry, sql_to_bx, BxQuery};
+use crate::datasource::{BxQuery, bx_to_sql, registry, sql_to_bx};
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+use crate::qoq;
+#[cfg(feature = "bif-datasource")]
+use std::cell::RefCell;
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+use std::collections::HashMap;
+#[cfg(feature = "bif-datasource")]
+use std::rc::Rc;
+#[cfg(feature = "bif-datasource")]
+use std::sync::Arc;
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+use std::sync::{Mutex, OnceLock};
 
 // ─── datasourceRegister ──────────────────────────────────────────────────────
 #[cfg(feature = "bif-datasource")]
@@ -84,8 +101,7 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     } else {
         vec![]
     };
-
-    let (datasource_name, return_type) = if args.len() > 2 && !args[2].is_null() {
+    let (datasource_name, return_type, db_type) = if args.len() > 2 && !args[2].is_null() {
         if let Some(opts_id) = args[2].as_gc_id() {
             let ds = {
                 let v = vm.struct_get(opts_id, "datasource");
@@ -103,13 +119,37 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
                     vm.to_string(v).to_lowercase()
                 }
             };
-            (ds, rt)
+            let dbt = {
+                let v = vm.struct_get(opts_id, "dbtype");
+                if v.is_null() {
+                    String::new()
+                } else {
+                    vm.to_string(v).to_lowercase()
+                }
+            };
+            (ds, rt, dbt)
         } else {
-            ("default".to_string(), "query".to_string())
+            ("default".to_string(), "query".to_string(), String::new())
         }
     } else {
-        ("default".to_string(), "query".to_string())
+        ("default".to_string(), "query".to_string(), String::new())
     };
+
+    if db_type == "query" {
+        #[cfg(feature = "qoq")]
+        {
+            let qoq_params = if args.len() > 1 && !args[1].is_null() {
+                parse_qoq_bind_params(vm, args[1])?
+            } else {
+                qoq::BindParams::default()
+            };
+            return query_execute_qoq(vm, &sql, &return_type, &qoq_params);
+        }
+        #[cfg(not(feature = "qoq"))]
+        {
+            return Err("QoQ support is not enabled in this build".to_string());
+        }
+    }
 
     let driver = registry::get(&datasource_name).ok_or_else(|| {
         format!(
@@ -131,27 +171,264 @@ pub fn query_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     }
 }
 
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+fn query_execute_qoq(
+    vm: &mut dyn BxVM,
+    sql: &str,
+    return_type: &str,
+    params: &qoq::BindParams,
+) -> Result<BxValue, String> {
+    let query = parse_cached_qoq(sql)?;
+    let query =
+        qoq::bind_params(&query, params).map_err(|e| qoq_error_to_string("QoQ bind error", e))?;
+    let result = {
+        let vm_ref: &dyn BxVM = &*vm;
+        qoq::execute_with_source_resolver(&query, move |path| resolve_qoq_source(vm_ref, path))
+            .map_err(|e| qoq_error_to_string("QoQ execution error", e))?
+    };
+    let query = BxQuery::from_result(result);
+
+    match return_type {
+        "array" => query_result_to_array(vm, query),
+        "struct" => query_result_to_struct(vm, query),
+        _ => {
+            let id = vm.native_object_new(Rc::new(RefCell::new(query)));
+            Ok(BxValue::new_ptr(id))
+        }
+    }
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+static QOQ_PARSE_CACHE: OnceLock<Mutex<HashMap<String, qoq::Query>>> = OnceLock::new();
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+const QOQ_PARSE_CACHE_LIMIT: usize = 128;
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+fn parse_cached_qoq(sql: &str) -> Result<qoq::Query, String> {
+    let cache = QOQ_PARSE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    if let Some(query) = cache
+        .lock()
+        .map_err(|_| "QoQ parse cache is poisoned".to_string())?
+        .get(sql)
+        .cloned()
+    {
+        return Ok(query);
+    }
+
+    let query = qoq::parse(sql).map_err(|e| format!("QoQ parse error: {}", e))?;
+    let mut cache = cache
+        .lock()
+        .map_err(|_| "QoQ parse cache is poisoned".to_string())?;
+    if cache.len() >= QOQ_PARSE_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(sql.to_string(), query.clone());
+    Ok(query)
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+struct VmQuerySource<'a> {
+    vm: &'a dyn BxVM,
+    id: usize,
+    columns: Vec<QueryColumn>,
+    row_count: usize,
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+impl<'a> qoq::QuerySource for VmQuerySource<'a> {
+    fn columns(&self) -> &[QueryColumn] {
+        &self.columns
+    }
+
+    fn row_count(&self) -> usize {
+        self.row_count
+    }
+
+    fn value(&self, row_idx: usize, col_idx: usize) -> SqlValue {
+        self.vm
+            .native_object_query_cell(self.id, row_idx, col_idx)
+            .unwrap_or(SqlValue::Null)
+    }
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+fn resolve_qoq_source<'a>(
+    vm: &'a dyn BxVM,
+    path: &[String],
+) -> Result<Option<Box<dyn qoq::QuerySource + 'a>>, qoq::ExecutionError> {
+    let key = path.join(".");
+    let value = vm
+        .resolve_query_source_path(path)
+        .ok_or_else(|| qoq::ExecutionError {
+            message: format!("unknown QoQ source '{}'", key),
+            span: None,
+        })?;
+    let id = value.as_gc_id().ok_or_else(|| qoq::ExecutionError {
+        message: format!("QoQ source '{}' is not a query object", key),
+        span: None,
+    })?;
+    let columns = vm
+        .native_object_query_columns(id)
+        .ok_or_else(|| qoq::ExecutionError {
+            message: format!("QoQ source '{}' is not a query object", key),
+            span: None,
+        })?;
+    let row_count = vm
+        .native_object_query_row_count(id)
+        .ok_or_else(|| qoq::ExecutionError {
+            message: format!("QoQ source '{}' is not a query object", key),
+            span: None,
+        })?;
+    Ok(Some(Box::new(VmQuerySource {
+        vm,
+        id,
+        columns,
+        row_count,
+    })))
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+fn qoq_error_to_string(prefix: &str, e: qoq::ExecutionError) -> String {
+    if let Some(span) = e.span {
+        format!(
+            "{}: {} at line {}, col {}",
+            prefix, e.message, span.line, span.col
+        )
+    } else {
+        format!("{}: {}", prefix, e.message)
+    }
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    feature = "qoq",
+    not(target_arch = "wasm32")
+))]
+fn parse_qoq_bind_params(vm: &mut dyn BxVM, val: BxValue) -> Result<qoq::BindParams, String> {
+    if let Some(id) = val.as_gc_id() {
+        if vm.struct_len(id) > 0 {
+            let mut named = std::collections::HashMap::new();
+            for key in vm.struct_key_array(id) {
+                let item = vm.struct_get(id, &key);
+                let sql_val = if let Some(item_id) = item.as_gc_id() {
+                    if vm.struct_key_exists(item_id, "value") {
+                        let v = vm.struct_get(item_id, "value");
+                        let sql_type_str = {
+                            let t = vm.struct_get(item_id, "cfsqltype");
+                            if t.is_null() {
+                                None
+                            } else {
+                                Some(vm.to_string(t))
+                            }
+                        };
+                        coerce_cf_sql_type(vm, v, sql_type_str.as_deref())
+                    } else {
+                        bx_to_sql(vm, item)
+                    }
+                } else {
+                    bx_to_sql(vm, item)
+                };
+                named.insert(key.to_lowercase(), sql_val);
+            }
+            Ok(qoq::BindParams {
+                positional: vec![],
+                named,
+            })
+        } else {
+            let len = vm.array_len(id);
+            let mut positional = Vec::with_capacity(len);
+            for i in 0..len {
+                let item = vm.array_get(id, i);
+                let sql_val = if let Some(item_id) = item.as_gc_id() {
+                    if vm.struct_key_exists(item_id, "value") {
+                        let v = vm.struct_get(item_id, "value");
+                        let sql_type_str = {
+                            let t = vm.struct_get(item_id, "cfsqltype");
+                            if t.is_null() {
+                                None
+                            } else {
+                                Some(vm.to_string(t))
+                            }
+                        };
+                        coerce_cf_sql_type(vm, v, sql_type_str.as_deref())
+                    } else {
+                        bx_to_sql(vm, item)
+                    }
+                } else {
+                    bx_to_sql(vm, item)
+                };
+                positional.push(sql_val);
+            }
+            Ok(qoq::BindParams {
+                positional,
+                named: std::collections::HashMap::new(),
+            })
+        }
+    } else {
+        Ok(qoq::BindParams {
+            positional: vec![bx_to_sql(vm, val)],
+            named: std::collections::HashMap::new(),
+        })
+    }
+}
+
+#[cfg(all(
+    feature = "bif-datasource",
+    not(feature = "qoq"),
+    not(target_arch = "wasm32")
+))]
+fn query_execute_qoq(
+    _vm: &mut dyn BxVM,
+    _sql: &str,
+    _return_type: &str,
+) -> Result<BxValue, String> {
+    Err("QoQ support is not enabled in this build".to_string())
+}
+
 // ─── queryNew ────────────────────────────────────────────────────────────────
 #[cfg(feature = "bif-datasource")]
 pub fn query_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    let col_names: Vec<String> = if let Some(arr_id) = args.first().and_then(|v| v.as_gc_id()) {
-        let len = vm.array_len(arr_id);
-        (0..len)
-            .map(|i| vm.to_string(vm.array_get(arr_id, i)))
-            .collect()
-    } else {
-        return Err("queryNew() requires an array of column names".to_string());
-    };
+    let column_arg = args
+        .first()
+        .ok_or_else(|| "queryNew() requires a column list".to_string())?;
+    let col_names = query_list_arg(vm, *column_arg, "columnList")?;
 
-    let col_types: Vec<String> = if args.len() > 1 {
-        if let Some(arr_id) = args[1].as_gc_id() {
-            let len = vm.array_len(arr_id);
-            (0..len)
-                .map(|i| vm.to_string(vm.array_get(arr_id, i)))
-                .collect()
-        } else {
-            vec![]
-        }
+    let col_types = if args.len() > 1 {
+        query_list_arg(vm, args[1], "columnTypeList")?
     } else {
         vec![]
     };
@@ -168,9 +445,109 @@ pub fn query_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         })
         .collect();
 
-    let query = BxQuery::new(columns);
+    let mut query = BxQuery::new(columns);
+    if args.len() > 2 && !args[2].is_null() {
+        populate_query_rows(vm, &mut query, args[2])?;
+    }
+
     let id = vm.native_object_new(Rc::new(RefCell::new(query)));
     Ok(BxValue::new_ptr(id))
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_list_arg(vm: &dyn BxVM, value: BxValue, name: &str) -> Result<Vec<String>, String> {
+    if value.is_null() {
+        return Ok(vec![]);
+    }
+
+    if vm.is_array_value(value) {
+        let arr_id = value
+            .as_gc_id()
+            .ok_or_else(|| format!("queryNew() {name} array is invalid"))?;
+        return Ok((0..vm.array_len(arr_id))
+            .map(|i| vm.to_string(vm.array_get(arr_id, i)).trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect());
+    }
+
+    if vm.is_string_value(value) {
+        return Ok(vm
+            .to_string(value)
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect());
+    }
+
+    Err(format!(
+        "queryNew() {name} must be a comma-delimited string or array"
+    ))
+}
+
+#[cfg(feature = "bif-datasource")]
+fn populate_query_rows(
+    vm: &mut dyn BxVM,
+    query: &mut BxQuery,
+    row_data: BxValue,
+) -> Result<(), String> {
+    let row_data_id = row_data
+        .as_gc_id()
+        .filter(|_| vm.is_array_value(row_data))
+        .ok_or_else(|| "queryNew() rowData must be an array".to_string())?;
+
+    for row_idx in 0..vm.array_len(row_data_id) {
+        let row = vm.array_get(row_data_id, row_idx);
+        if vm.is_struct_value(row) {
+            add_query_struct_row(vm, query, row)?;
+        } else if vm.is_array_value(row) {
+            add_query_array_row(vm, query, row)?;
+        } else if query.columns.len() == 1 {
+            add_query_scalar_row(query, row, vm);
+        } else {
+            return Err("queryNew() rowData entries must be structs or arrays".to_string());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "bif-datasource")]
+fn add_query_struct_row(
+    vm: &mut dyn BxVM,
+    query: &mut BxQuery,
+    row: BxValue,
+) -> Result<(), String> {
+    let struct_id = row
+        .as_gc_id()
+        .ok_or_else(|| "queryNew() row struct is invalid".to_string())?;
+    for (col_idx, col) in query.columns.iter().enumerate() {
+        let bx_val = vm.struct_get(struct_id, &col.name);
+        query.data[col_idx].push(bx_to_sql(vm, bx_val));
+    }
+    query.record_count += 1;
+    Ok(())
+}
+
+#[cfg(feature = "bif-datasource")]
+fn add_query_array_row(vm: &mut dyn BxVM, query: &mut BxQuery, row: BxValue) -> Result<(), String> {
+    let row_id = row
+        .as_gc_id()
+        .ok_or_else(|| "queryNew() row array is invalid".to_string())?;
+    for col_idx in 0..query.columns.len() {
+        let bx_val = if col_idx < vm.array_len(row_id) {
+            vm.array_get(row_id, col_idx)
+        } else {
+            BxValue::new_null()
+        };
+        query.data[col_idx].push(bx_to_sql(vm, bx_val));
+    }
+    query.record_count += 1;
+    Ok(())
+}
+
+#[cfg(feature = "bif-datasource")]
+fn add_query_scalar_row(query: &mut BxQuery, row: BxValue, vm: &dyn BxVM) {
+    query.data[0].push(bx_to_sql(vm, row));
+    query.record_count += 1;
 }
 
 // ─── queryAddRow ─────────────────────────────────────────────────────────────
@@ -207,6 +584,276 @@ pub fn query_column_list(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
         .as_gc_id()
         .ok_or_else(|| "queryColumnList() first argument must be a query object".to_string())?;
     vm.native_object_call_method(query_id, "columnlist", &[])
+}
+
+// ─── queryClear ──────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_clear(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryClear() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryClear() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "clear", &[])
+}
+
+// ─── queryColumnArray ────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_column_array(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryColumnArray() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryColumnArray() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "columnarray", &[])
+}
+
+// ─── queryColumnCount ────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_column_count(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryColumnCount() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryColumnCount() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "columncount", &[])
+}
+
+// ─── queryColumnExists ───────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_column_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryColumnExists() expects 2 arguments: (query, columnName)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryColumnExists() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "columnexists", &args[1..])
+}
+
+// ─── queryKeyExists ──────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_key_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryKeyExists() expects 2 arguments: (query, key)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryKeyExists() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "keyexists", &args[1..])
+}
+
+// ─── queryRecordCount ────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_record_count(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryRecordCount() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryRecordCount() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "recordcount", &[])
+}
+
+// ─── queryRowData ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_row_data(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryRowData() expects 2 arguments: (query, rowNumber)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryRowData() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "getrow", &args[1..])
+}
+
+// ─── queryReverse ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_reverse(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryReverse() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryReverse() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "reverse", &[])
+}
+
+// ─── queryRowSwap ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_row_swap(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("queryRowSwap() expects 3 arguments: (query, source, destination)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryRowSwap() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "rowswap", &args[1..])
+}
+
+// ─── querySlice ──────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_slice(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err(
+            "querySlice() expects at least 2 arguments: (query, offset [, length])".to_string(),
+        );
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "querySlice() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "slice", &args[1..])
+}
+
+// ─── queryDeleteColumn ───────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_delete_column(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryDeleteColumn() expects 2 arguments: (query, columnName)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryDeleteColumn() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "deletecolumn", &args[1..])
+}
+
+// ─── queryDeleteRow ──────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_delete_row(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryDeleteRow() expects 2 arguments: (query, row)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryDeleteRow() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "deleterow", &args[1..])
+}
+
+// ─── queryAddColumn ──────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_add_column(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryAddColumn() expects at least 2 arguments: (query, columnName [, datatype, arrayData])".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryAddColumn() first argument must be a query object".to_string())?;
+    // Build args for native method: columnName, datatype, arrayData
+    let col_name = args.get(1).copied().unwrap_or(BxValue::new_null());
+    let datatype = args
+        .get(2)
+        .copied()
+        .unwrap_or_else(|| BxValue::new_ptr(vm.string_new("object".to_string())));
+    let array_data = args.get(3).copied().unwrap_or(BxValue::new_null());
+    vm.native_object_call_method(query_id, "addcolumn", &[col_name, datatype, array_data])
+}
+
+// ─── queryAppend ─────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryAppend() expects 2 arguments: (query1, query2)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryAppend() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "append", &args[1..])
+}
+
+// ─── queryPrepend ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_prepend(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("queryPrepend() expects 2 arguments: (query1, query2)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryPrepend() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "prepend", &args[1..])
+}
+
+// ─── queryGetCell ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_get_cell(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err(
+            "queryGetCell() expects at least 2 arguments: (query, columnName [, rowNumber])"
+                .to_string(),
+        );
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryGetCell() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "getcell", &args[1..])
+}
+
+// ─── querySetCell ────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_set_cell(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err(
+            "querySetCell() expects at least 3 arguments: (query, columnName, value [, rowNumber])"
+                .to_string(),
+        );
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "querySetCell() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "setcell", &args[1..])
+}
+
+// ─── queryInsertAt ───────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_insert_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("queryInsertAt() expects 3 arguments: (query, value, position)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryInsertAt() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "insertat", &args[1..])
+}
+
+// ─── querySetRow ─────────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_set_row(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err(
+            "querySetRow() expects at least 2 arguments: (query, rowData [, rowNumber])"
+                .to_string(),
+        );
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "querySetRow() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "setrow", &args[1..])
+}
+
+// ─── queryCurrentRow ─────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_current_row(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryCurrentRow() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryCurrentRow() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "currentrow", &[])
+}
+
+// ─── queryGetResult ──────────────────────────────────────────────────────────
+#[cfg(feature = "bif-datasource")]
+pub fn query_get_result(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryGetResult() expects 1 argument: (query)".to_string());
+    }
+    let query_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "queryGetResult() first argument must be a query object".to_string())?;
+    vm.native_object_call_method(query_id, "getresult", &[])
 }
 
 // ─── Transaction stubs ───────────────────────────────────────────────────────

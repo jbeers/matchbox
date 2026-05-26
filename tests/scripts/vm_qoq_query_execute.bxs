@@ -1,0 +1,103 @@
+// QoQ queryExecute integration smoke test.
+
+employees = queryNew(["id", "name", "dept"])
+
+row = {}
+row.id = 1
+row.name = "Alice"
+row.dept = "Sales"
+queryAddRow(employees, row)
+
+row = {}
+row.id = 2
+row.name = "Bob"
+row.dept = "Engineering"
+queryAddRow(employees, row)
+
+result = queryExecute(
+    "SELECT name, dept FROM employees ORDER BY id",
+    null,
+    {dbType: "query"}
+)
+
+if (result.recordCount != 2) {
+    throw "Expected QoQ result to return 2 rows, got: " & result.recordCount
+}
+
+names = queryColumnData(result, "name")
+if (names[1] != "Alice") {
+    throw "Expected first QoQ row name to be Alice, got: " & names[1]
+}
+if (names[2] != "Bob") {
+    throw "Expected second QoQ row name to be Bob, got: " & names[2]
+}
+
+depts = queryColumnData(result, "dept")
+if (depts[1] != "Sales") {
+    throw "Expected first QoQ row dept to be Sales, got: " & depts[1]
+}
+if (depts[2] != "Engineering") {
+    throw "Expected second QoQ row dept to be Engineering, got: " & depts[2]
+}
+
+company = {}
+company.catalog = {}
+company.catalog.people = employees
+
+nested = queryExecute(
+    "SELECT name FROM variables.company.catalog.people ORDER BY id",
+    null,
+    {dbType: "query", returnType: "array"}
+)
+
+if (len(nested) != 2) {
+    throw "Expected nested QoQ array return to have 2 rows, got: " & len(nested)
+}
+
+if (nested[1].name != "Alice") {
+    throw "Expected nested QoQ row 1 name to be Alice, got: " & nested[1].name
+}
+
+if (nested[2].name != "Bob") {
+    throw "Expected nested QoQ row 2 name to be Bob, got: " & nested[2].name
+}
+
+positional = arrayNew()
+arrayAppend(positional, 2)
+
+positionalResult = queryExecute(
+    "SELECT name FROM employees WHERE id = ?",
+    positional,
+    {dbType: "query"}
+)
+
+if (positionalResult.recordCount != 1) {
+    throw "Expected positional QoQ query to return 1 row, got: " & positionalResult.recordCount
+}
+
+positionalNames = queryColumnData(positionalResult, "name")
+if (positionalNames[1] != "Bob") {
+    throw "Expected positional QoQ query to match Bob, got: " & positionalNames[1]
+}
+
+named = {}
+named.id = {}
+named.id.value = 1
+named.id.cfsqltype = "CF_SQL_INTEGER"
+
+namedResult = queryExecute(
+    "SELECT name FROM employees WHERE id = :id",
+    named,
+    {dbType: "query"}
+)
+
+if (namedResult.recordCount != 1) {
+    throw "Expected named QoQ query to return 1 row, got: " & namedResult.recordCount
+}
+
+namedNames = queryColumnData(namedResult, "name")
+if (namedNames[1] != "Alice") {
+    throw "Expected named QoQ query to match Alice, got: " & namedNames[1]
+}
+
+println("vm_qoq_query_execute: OK")

@@ -1,0 +1,22 @@
+// Test queryRecordCount standalone BIF
+// No database connection required.
+
+q = queryNew("id,name")
+
+if (queryRecordCount(q) != 0) {
+    throw "Expected queryRecordCount 0, got: " & queryRecordCount(q)
+}
+
+row = {}
+row.id = 1
+row.name = "Alice"
+queryAddRow(q, row)
+
+if (queryRecordCount(q) != 1) {
+    throw "Expected queryRecordCount 1, got: " & queryRecordCount(q)
+}
+
+queryAddRow(q, {id: 2, name: "Bob"})
+if (queryRecordCount(q) != 2) {
+    throw "Expected queryRecordCount 2, got: " & queryRecordCount(q)
+}

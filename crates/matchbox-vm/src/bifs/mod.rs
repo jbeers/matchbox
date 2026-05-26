@@ -1,9 +1,19 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
-use chrono::Local;
-use rand::RngExt;
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
+};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
+use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+static MATH_RNG: OnceLock<Mutex<StdRng>> = OnceLock::new();
+
+fn math_rng() -> &'static Mutex<StdRng> {
+    MATH_RNG.get_or_init(|| Mutex::new(StdRng::seed_from_u64(0)))
+}
 
 #[cfg(feature = "bif-jni")]
 mod jni;
@@ -32,12 +42,27 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Math BIFs
     bifs.insert("round".to_string(), round as BxNativeFunction);
+    bifs.insert("floor".to_string(), floor_bif as BxNativeFunction);
     bifs.insert("int".to_string(), int_bif as BxNativeFunction);
     bifs.insert("ceiling".to_string(), ceiling_bif as BxNativeFunction);
     bifs.insert("abs".to_string(), abs_bif as BxNativeFunction);
     bifs.insert("min".to_string(), min_bif as BxNativeFunction);
     bifs.insert("max".to_string(), max_bif as BxNativeFunction);
     bifs.insert("randrange".to_string(), rand_range as BxNativeFunction);
+    bifs.insert("rand".to_string(), rand as BxNativeFunction);
+    bifs.insert("randomize".to_string(), randomize as BxNativeFunction);
+    bifs.insert("pi".to_string(), pi as BxNativeFunction);
+    bifs.insert("log".to_string(), log_bif as BxNativeFunction);
+    bifs.insert("log10".to_string(), log10_bif as BxNativeFunction);
+    bifs.insert("exp".to_string(), exp_bif as BxNativeFunction);
+    bifs.insert("sin".to_string(), sin_bif as BxNativeFunction);
+    bifs.insert("cos".to_string(), cos_bif as BxNativeFunction);
+    bifs.insert("tan".to_string(), tan_bif as BxNativeFunction);
+    bifs.insert("asin".to_string(), asin_bif as BxNativeFunction);
+    bifs.insert("acos".to_string(), acos_bif as BxNativeFunction);
+    bifs.insert("atan".to_string(), atan_bif as BxNativeFunction);
+    bifs.insert("atn".to_string(), atan_bif as BxNativeFunction);
+    bifs.insert("atan2".to_string(), atan2_bif as BxNativeFunction);
 
     // Array BIFs
     bifs.insert("arrayappend".to_string(), array_append as BxNativeFunction);
@@ -57,6 +82,11 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         array_clear_bif as BxNativeFunction,
     );
     bifs.insert("arrayset".to_string(), array_set_bif as BxNativeFunction);
+    bifs.insert("arrayswap".to_string(), array_swap_bif as BxNativeFunction);
+    bifs.insert(
+        "arrayresize".to_string(),
+        array_resize_bif as BxNativeFunction,
+    );
     bifs.insert("bytesnew".to_string(), bytes_new as BxNativeFunction);
     bifs.insert("byteslen".to_string(), bytes_len_bif as BxNativeFunction);
     bifs.insert("bytesget".to_string(), bytes_get_bif as BxNativeFunction);
@@ -90,6 +120,14 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "structclear".to_string(),
         struct_clear_bif as BxNativeFunction,
     );
+    bifs.insert(
+        "structfind".to_string(),
+        struct_find_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structisempty".to_string(),
+        struct_is_empty_bif as BxNativeFunction,
+    );
     bifs.insert("structcount".to_string(), len as BxNativeFunction);
 
     // Core BIFs
@@ -98,25 +136,88 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "writeoutput".to_string(),
         write_output_bif as BxNativeFunction,
     );
+    bifs.insert("duplicate".to_string(), duplicate_bif as BxNativeFunction);
     bifs.insert(
         "createobject".to_string(),
         create_object as BxNativeFunction,
     );
     bifs.insert("isnull".to_string(), is_null_bif as BxNativeFunction);
     bifs.insert("isnumeric".to_string(), is_numeric_bif as BxNativeFunction);
+    bifs.insert("isarray".to_string(), is_array_bif as BxNativeFunction);
+    bifs.insert("isstruct".to_string(), is_struct_bif as BxNativeFunction);
+    bifs.insert("isboolean".to_string(), is_boolean_bif as BxNativeFunction);
+    bifs.insert("isstring".to_string(), is_string_bif as BxNativeFunction);
+    bifs.insert("isdate".to_string(), is_date_bif as BxNativeFunction);
     bifs.insert(
         "issimplevalue".to_string(),
         is_simple_value_bif as BxNativeFunction,
     );
+    bifs.insert("isobject".to_string(), is_object_bif as BxNativeFunction);
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
+    bifs.insert("find".to_string(), find_bif as BxNativeFunction);
+    bifs.insert(
+        "findnocase".to_string(),
+        find_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "stringfind".to_string(),
+        string_find_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "stringfindnocase".to_string(),
+        string_find_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert("left".to_string(), left_bif as BxNativeFunction);
+    bifs.insert("right".to_string(), right_bif as BxNativeFunction);
+    bifs.insert("reverse".to_string(), reverse_bif as BxNativeFunction);
+    bifs.insert(
+        "spanexcluding".to_string(),
+        span_excluding_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "spanincluding".to_string(),
+        span_including_bif as BxNativeFunction,
+    );
     bifs.insert("tostring".to_string(), to_string_bif as BxNativeFunction);
+    bifs.insert("now".to_string(), now as BxNativeFunction);
+    bifs.insert("createdate".to_string(), create_date as BxNativeFunction);
+    bifs.insert(
+        "createdatetime".to_string(),
+        create_date_time as BxNativeFunction,
+    );
+    bifs.insert("dateadd".to_string(), date_add as BxNativeFunction);
+    bifs.insert("datediff".to_string(), date_diff as BxNativeFunction);
+    bifs.insert(
+        "dateformat".to_string(),
+        date_format_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "datetimeformat".to_string(),
+        date_time_format_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "parsedatetime".to_string(),
+        parse_date_time_bif as BxNativeFunction,
+    );
     bifs.insert("listtoarray".to_string(), list_to_array as BxNativeFunction);
+    bifs.insert("listlen".to_string(), list_len as BxNativeFunction);
+    bifs.insert("listgetat".to_string(), list_get_at as BxNativeFunction);
+    bifs.insert("listappend".to_string(), list_append as BxNativeFunction);
+    bifs.insert("listfirst".to_string(), list_first as BxNativeFunction);
+    bifs.insert("listlast".to_string(), list_last as BxNativeFunction);
+    bifs.insert("listrest".to_string(), list_rest as BxNativeFunction);
+    bifs.insert(
+        "listdeleteat".to_string(),
+        list_delete_at as BxNativeFunction,
+    );
+    bifs.insert("listfind".to_string(), list_find as BxNativeFunction);
     bifs.insert(
         "listfindnocase".to_string(),
         list_find_no_case as BxNativeFunction,
     );
+    bifs.insert("listsort".to_string(), list_sort as BxNativeFunction);
     bifs.insert("indexof".to_string(), index_of as BxNativeFunction);
     bifs.insert("rematch".to_string(), re_match as BxNativeFunction);
     bifs.insert("mid".to_string(), mid_bif as BxNativeFunction);
@@ -126,6 +227,28 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "futureonerror".to_string(),
         future_on_error as BxNativeFunction,
     );
+    bifs.insert("rematch".to_string(), re_match as BxNativeFunction);
+    bifs.insert(
+        "rematchnocase".to_string(),
+        re_match_no_case as BxNativeFunction,
+    );
+    bifs.insert("refind".to_string(), re_find as BxNativeFunction);
+    bifs.insert(
+        "refindnocase".to_string(),
+        re_find_no_case as BxNativeFunction,
+    );
+    bifs.insert("rereplace".to_string(), re_replace as BxNativeFunction);
+    bifs.insert(
+        "rereplacenocase".to_string(),
+        re_replace_no_case as BxNativeFunction,
+    );
+
+    // Crypto BIFs
+    #[cfg(feature = "bif-crypto")]
+    {
+        bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
+        bifs.insert("hmac".to_string(), crypto::hmac_bif as BxNativeFunction);
+    }
 
     // System BIFs
     bifs.insert("createuuid".to_string(), create_uuid as BxNativeFunction);
@@ -222,21 +345,26 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // JSON BIFs
     bifs.insert(
+        "deserializejson".to_string(),
+        json::json_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
         "jsondeserialize".to_string(),
         json::json_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
+        "serializejson".to_string(),
+        json::json_serialize as BxNativeFunction,
     );
     bifs.insert(
         "jsonserialize".to_string(),
         json::json_serialize as BxNativeFunction,
     );
+    bifs.insert("isjson".to_string(), json::is_json as BxNativeFunction);
     bifs.insert(
         "loadproperties".to_string(),
         json::load_properties as BxNativeFunction,
     );
-
-    // Crypto BIFs
-    #[cfg(feature = "bif-crypto")]
-    bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
 
     // Datasource BIFs
     #[cfg(feature = "bif-datasource")]
@@ -264,6 +392,90 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         bifs.insert(
             "querycolumnlist".to_string(),
             datasource::query_column_list as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryclear".to_string(),
+            datasource::query_clear as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumnarray".to_string(),
+            datasource::query_column_array as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumncount".to_string(),
+            datasource::query_column_count as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycolumnexists".to_string(),
+            datasource::query_column_exists as BxNativeFunction,
+        );
+        bifs.insert(
+            "querykeyexists".to_string(),
+            datasource::query_key_exists as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrecordcount".to_string(),
+            datasource::query_record_count as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrowdata".to_string(),
+            datasource::query_row_data as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryreverse".to_string(),
+            datasource::query_reverse as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryrowswap".to_string(),
+            datasource::query_row_swap as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryslice".to_string(),
+            datasource::query_slice as BxNativeFunction,
+        );
+        bifs.insert(
+            "querydeletecolumn".to_string(),
+            datasource::query_delete_column as BxNativeFunction,
+        );
+        bifs.insert(
+            "querydeleterow".to_string(),
+            datasource::query_delete_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryaddcolumn".to_string(),
+            datasource::query_add_column as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryappend".to_string(),
+            datasource::query_append as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryprepend".to_string(),
+            datasource::query_prepend as BxNativeFunction,
+        );
+        bifs.insert(
+            "querygetcell".to_string(),
+            datasource::query_get_cell as BxNativeFunction,
+        );
+        bifs.insert(
+            "querysetcell".to_string(),
+            datasource::query_set_cell as BxNativeFunction,
+        );
+        bifs.insert(
+            "queryinsertat".to_string(),
+            datasource::query_insert_at as BxNativeFunction,
+        );
+        bifs.insert(
+            "querysetrow".to_string(),
+            datasource::query_set_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "querycurrentrow".to_string(),
+            datasource::query_current_row as BxNativeFunction,
+        );
+        bifs.insert(
+            "querygetresult".to_string(),
+            datasource::query_get_result as BxNativeFunction,
         );
         bifs.insert(
             "transactionbegin".to_string(),
@@ -320,6 +532,170 @@ fn trim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_ptr(vm.string_new(s)))
 }
 
+fn find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, false, true)
+}
+
+fn find_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, true, true)
+}
+
+fn string_find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, false, false)
+}
+
+fn string_find_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    find_bif_internal(vm, args, true, false)
+}
+
+fn find_bif_internal(
+    vm: &mut dyn BxVM,
+    args: &[BxValue],
+    ignore_case: bool,
+    substring_first: bool,
+) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("find() expects at least 2 arguments: (substring, string)".to_string());
+    }
+
+    let (substring, input) = if substring_first {
+        (vm.to_string(args[0]), vm.to_string(args[1]))
+    } else {
+        (vm.to_string(args[1]), vm.to_string(args[0]))
+    };
+    let start = if args.len() > 2 {
+        args[2].as_number() as isize
+    } else {
+        1
+    };
+    let start = start.max(1) as usize;
+    let start_idx = start.saturating_sub(1);
+    let input_chars = input.chars().count();
+    let start_byte_idx = if start_idx >= input_chars {
+        input.len()
+    } else {
+        input
+            .char_indices()
+            .nth(start_idx)
+            .map(|(idx, _)| idx)
+            .unwrap_or(input.len())
+    };
+    let haystack = &input[start_byte_idx..];
+
+    let position = if ignore_case {
+        let needle = substring.to_lowercase();
+        let hay = haystack.to_lowercase();
+        hay.find(&needle).map(|idx| idx + start_idx + 1)
+    } else {
+        haystack.find(&substring).map(|idx| idx + start_idx + 1)
+    };
+
+    Ok(BxValue::new_number(position.unwrap_or(0) as f64))
+}
+
+fn left_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("left() expects 2 arguments: (string, count)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+
+    let count = args[1].as_number() as isize;
+    if count == 0 {
+        return Err("Count cannot be zero".to_string());
+    }
+
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len() as isize;
+    let end = if count > 0 {
+        count.min(len)
+    } else {
+        (len + count).max(0)
+    } as usize;
+
+    Ok(BxValue::new_ptr(
+        vm.string_new(chars[..end].iter().collect()),
+    ))
+}
+
+fn right_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("right() expects 2 arguments: (string, count)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+
+    let count = args[1].as_number() as isize;
+    if count == 0 {
+        return Err("Count cannot be zero.".to_string());
+    }
+
+    let chars: Vec<char> = input.chars().collect();
+    let len = chars.len() as isize;
+    let start = if count > 0 {
+        (len - count.max(0)).max(0)
+    } else {
+        (-count).min(len)
+    } as usize;
+
+    Ok(BxValue::new_ptr(
+        vm.string_new(chars[start..].iter().collect()),
+    ))
+}
+
+fn reverse_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("reverse() expects exactly 1 argument".to_string());
+    }
+
+    let reversed = vm.to_string(args[0]).chars().rev().collect::<String>();
+    Ok(BxValue::new_ptr(vm.string_new(reversed)))
+}
+
+fn span_excluding_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("spanExcluding() expects 2 arguments: (string, set)".to_string());
+    }
+
+    let input = vm.to_string(args[0]);
+    let set = vm.to_string(args[1]);
+    if input.is_empty() {
+        return Err("spanExcluding() expects a non-empty string".to_string());
+    }
+
+    let end = input
+        .chars()
+        .position(|ch| set.chars().any(|needle| needle == ch))
+        .unwrap_or_else(|| input.chars().count());
+    Ok(BxValue::new_ptr(
+        vm.string_new(input.chars().take(end).collect()),
+    ))
+}
+
+fn span_including_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("spanIncluding() expects 2 arguments: (string, set)".to_string());
+    }
+
+    let input = vm.to_string(args[0]);
+    let set = vm.to_string(args[1]);
+    if input.is_empty() {
+        return Err("spanIncluding() expects a non-empty string".to_string());
+    }
+
+    let end = input
+        .chars()
+        .position(|ch| !set.chars().any(|needle| needle == ch))
+        .unwrap_or_else(|| input.chars().count());
+    Ok(BxValue::new_ptr(
+        vm.string_new(input.chars().take(end).collect()),
+    ))
+}
+
 fn to_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 {
         return Err("toString() expects exactly 1 argument".to_string());
@@ -332,40 +708,401 @@ fn list_to_array(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     if args.is_empty() {
         return Err("listToArray() expects at least 1 argument".to_string());
     }
-    let s = vm.to_string(args[0]);
-    let del = if args.len() > 1 {
-        vm.to_string(args[1])
-    } else {
-        ",".to_string()
-    };
-
+    let parts = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+    );
     let array_id = vm.array_new();
-    for part in s.split(&del) {
-        let s_id = vm.string_new(part.to_string());
+    for part in parts {
+        let s_id = vm.string_new(part);
         vm.array_push(array_id, BxValue::new_ptr(s_id));
     }
-
     Ok(BxValue::new_ptr(array_id))
 }
 
-fn list_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    if args.len() < 2 {
-        return Err("listFindNoCase() expects at least 2 arguments: (list, value)".to_string());
+fn list_len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listLen() expects at least 1 argument".to_string());
     }
-    let list = vm.to_string(args[0]);
-    let value = vm.to_string(args[1]).to_lowercase();
-    let del = if args.len() > 2 {
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+    );
+    Ok(BxValue::new_number(items.len() as f64))
+}
+
+fn list_get_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listGetAt() expects at least 2 arguments: (list, position)".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 2 {
+            vm.to_string(args[2])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
+    );
+    let pos = args[1].as_number() as isize;
+    if pos < 1 || pos as usize > items.len() {
+        return Err(format!("listGetAt() position {} out of range", pos));
+    }
+    Ok(BxValue::new_ptr(
+        vm.string_new(items[(pos - 1) as usize].clone()),
+    ))
+}
+
+fn list_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listAppend() expects at least 2 arguments: (list, value)".to_string());
+    }
+    let delimiter = if args.len() > 2 {
         vm.to_string(args[2])
     } else {
         ",".to_string()
     };
+    let multi = if args.len() > 4 {
+        args[4].as_bool()
+    } else {
+        false
+    };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        multi,
+    );
+    items.push(vm.to_string(args[1]));
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
+}
 
-    for (idx, part) in list.split(&del).enumerate() {
-        if part.trim().to_lowercase() == value {
+fn list_first(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listFirst() expects at least 1 argument".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+    );
+    let first = items.first().cloned().unwrap_or_default();
+    Ok(BxValue::new_ptr(vm.string_new(first)))
+}
+
+fn list_last(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listLast() expects at least 1 argument".to_string());
+    }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 1 {
+            vm.to_string(args[1])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+    );
+    let last = items.last().cloned().unwrap_or_default();
+    Ok(BxValue::new_ptr(vm.string_new(last)))
+}
+
+fn list_rest(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listRest() expects at least 1 argument".to_string());
+    }
+    let delimiter = if args.len() > 1 {
+        vm.to_string(args[1])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 3 {
+        args[3].as_bool()
+    } else {
+        false
+    };
+    let offset = if args.len() > 4 {
+        args[4].as_number() as usize
+    } else {
+        1
+    };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 2 {
+            args[2].as_bool()
+        } else {
+            false
+        },
+        multi,
+    );
+    let cutoff = offset.min(items.len());
+    items.drain(0..cutoff);
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
+}
+
+fn list_delete_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listDeleteAt() expects at least 2 arguments: (list, position)".to_string());
+    }
+    let delimiter = if args.len() > 2 {
+        vm.to_string(args[2])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 4 {
+        args[4].as_bool()
+    } else {
+        false
+    };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        multi,
+    );
+    let pos = args[1].as_number() as isize;
+    if pos < 1 || pos as usize > items.len() {
+        return Err(format!("listDeleteAt() position {} out of range", pos));
+    }
+    items.remove((pos - 1) as usize);
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
+}
+
+fn list_find(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    list_find_internal(vm, args, false)
+}
+
+fn list_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    list_find_internal(vm, args, true)
+}
+
+fn list_find_internal(
+    vm: &mut dyn BxVM,
+    args: &[BxValue],
+    no_case: bool,
+) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("listFind() expects at least 2 arguments: (list, value)".to_string());
+    }
+
+    let value = if no_case {
+        vm.to_string(args[1]).to_lowercase()
+    } else {
+        vm.to_string(args[1])
+    };
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        if args.len() > 2 {
+            vm.to_string(args[2])
+        } else {
+            ",".to_string()
+        },
+        if args.len() > 3 {
+            args[3].as_bool()
+        } else {
+            false
+        },
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
+    );
+
+    for (idx, part) in items.iter().enumerate() {
+        let candidate = if no_case {
+            part.to_lowercase()
+        } else {
+            part.clone()
+        };
+        if candidate == value {
             return Ok(BxValue::new_number((idx + 1) as f64));
         }
     }
     Ok(BxValue::new_number(0.0))
+}
+
+fn list_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("listSort() expects at least 1 argument".to_string());
+    }
+    let delimiter = if args.len() > 3 {
+        vm.to_string(args[3])
+    } else {
+        ",".to_string()
+    };
+    let multi = if args.len() > 5 {
+        args[5].as_bool()
+    } else {
+        false
+    };
+    let mut items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        if args.len() > 4 {
+            args[4].as_bool()
+        } else {
+            false
+        },
+        multi,
+    );
+    let sort_type = if args.len() > 1 {
+        vm.to_string(args[1]).to_lowercase()
+    } else {
+        "text".to_string()
+    };
+    let sort_order = if args.len() > 2 {
+        vm.to_string(args[2]).to_lowercase()
+    } else {
+        "asc".to_string()
+    };
+
+    items.sort_by(|a, b| {
+        let ord = match sort_type.as_str() {
+            "numeric" => {
+                let na = a.trim().parse::<f64>().unwrap_or(0.0);
+                let nb = b.trim().parse::<f64>().unwrap_or(0.0);
+                na.partial_cmp(&nb).unwrap_or(Ordering::Equal)
+            }
+            "textnocase" => a.to_lowercase().cmp(&b.to_lowercase()),
+            _ => a.cmp(b),
+        };
+        if sort_order == "desc" {
+            ord.reverse()
+        } else {
+            ord
+        }
+    });
+
+    Ok(BxValue::new_ptr(
+        vm.string_new(join_list(&items, &delimiter, multi)),
+    ))
+}
+
+fn parse_list_items(
+    list: &str,
+    delimiter: String,
+    include_empty: bool,
+    multi: bool,
+) -> Vec<String> {
+    if list.is_empty() {
+        return Vec::new();
+    }
+    if delimiter.is_empty() {
+        return vec![list.to_string()];
+    }
+
+    let mut items = Vec::new();
+    if multi {
+        for part in list.split(&delimiter) {
+            if include_empty || !part.is_empty() {
+                items.push(part.to_string());
+            }
+        }
+    } else {
+        let delims: Vec<char> = delimiter.chars().collect();
+        let mut current = String::new();
+        for ch in list.chars() {
+            if delims.contains(&ch) {
+                if include_empty || !current.is_empty() {
+                    items.push(current.clone());
+                }
+                current.clear();
+            } else {
+                current.push(ch);
+            }
+        }
+        if include_empty || !current.is_empty() {
+            items.push(current);
+        }
+    }
+    items
+}
+
+fn join_list(items: &[String], delimiter: &str, multi: bool) -> String {
+    if items.is_empty() {
+        return String::new();
+    }
+    if multi {
+        items.join(delimiter)
+    } else {
+        let join_delimiter = delimiter.chars().next().unwrap_or(',');
+        items.join(&join_delimiter.to_string())
+    }
 }
 
 fn index_of(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -392,18 +1129,292 @@ fn chr_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 }
 
 fn re_match(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_match(vm, args, false)
+}
+
+fn re_match_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_match(vm, args, true)
+}
+
+fn re_find(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_find(vm, args, false)
+}
+
+fn re_find_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_find(vm, args, true)
+}
+
+fn re_replace(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_replace(vm, args, false)
+}
+
+fn re_replace_no_case(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    regex_replace(vm, args, true)
+}
+
+fn regex_prepare(pattern: &str, no_case: bool) -> String {
+    let pattern = regex_posix_replace(pattern, no_case);
+    regex_replace_non_quantifier_curly_braces(&pattern)
+}
+
+fn regex_match(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("reMatch() expects 2 arguments: (regex, string)".to_string());
     }
-    let pattern = vm.to_string(args[0]);
+    let pattern = regex_prepare(&vm.to_string(args[0]), no_case);
     let text = vm.to_string(args[1]);
-    let regex = regex::Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
     let array_id = vm.array_new();
     for cap in regex.find_iter(&text) {
         let s_id = vm.string_new(cap.as_str().to_string());
         vm.array_push(array_id, BxValue::new_ptr(s_id));
     }
     Ok(BxValue::new_ptr(array_id))
+}
+
+fn regex_find(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("reFind() expects at least 2 arguments: (regex, string)".to_string());
+    }
+
+    let pattern = regex_prepare(&vm.to_string(args[0]), no_case);
+    let text = vm.to_string(args[1]);
+    let mut start = if args.len() > 2 {
+        args[2].as_number() as isize
+    } else {
+        1
+    };
+    let return_subs = if args.len() > 3 {
+        args[3].as_bool()
+    } else {
+        false
+    };
+    let scope = if args.len() > 4 {
+        vm.to_string(args[4]).to_lowercase()
+    } else {
+        "one".to_string()
+    };
+    if start < 1 {
+        start = 1;
+    }
+    let start_idx = (start - 1) as usize;
+    let start_byte_idx = char_to_byte_index(&text, start_idx);
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
+    let region = &text[start_byte_idx..];
+    let mut matches = Vec::new();
+    for cap in regex.captures_iter(region) {
+        let Some(m) = cap.get(0) else { continue };
+        let mut len_array = vec![BxValue::new_number(m.as_str().chars().count() as f64)];
+        let mut match_array = vec![BxValue::new_ptr(vm.string_new(m.as_str().to_string()))];
+        let mut pos_array = vec![BxValue::new_number(
+            char_count_to_pos(region, m.start()) as f64 + start_idx as f64,
+        )];
+        for idx in 1..=cap.len().saturating_sub(1) {
+            match cap.get(idx) {
+                Some(group) => {
+                    len_array.push(BxValue::new_number(group.as_str().chars().count() as f64));
+                    match_array.push(BxValue::new_ptr(vm.string_new(group.as_str().to_string())));
+                    pos_array.push(BxValue::new_number(
+                        char_count_to_pos(region, group.start()) as f64 + start_idx as f64,
+                    ));
+                }
+                None => {
+                    len_array.push(BxValue::new_number(0.0));
+                    match_array.push(BxValue::new_ptr(vm.string_new(String::new())));
+                    pos_array.push(BxValue::new_number(0.0));
+                }
+            }
+        }
+        let len_id = vm.array_new();
+        for item in len_array {
+            vm.array_push(len_id, item);
+        }
+        let match_id = vm.array_new();
+        for item in match_array {
+            vm.array_push(match_id, item);
+        }
+        let pos_id = vm.array_new();
+        for item in pos_array {
+            vm.array_push(pos_id, item);
+        }
+        let struct_id = vm.struct_new();
+        vm.struct_set(struct_id, "len", BxValue::new_ptr(len_id));
+        vm.struct_set(struct_id, "match", BxValue::new_ptr(match_id));
+        vm.struct_set(struct_id, "pos", BxValue::new_ptr(pos_id));
+        matches.push(BxValue::new_ptr(struct_id));
+        if scope == "one" {
+            break;
+        }
+    }
+    if return_subs {
+        if matches.is_empty() {
+            let struct_id = vm.struct_new();
+            let len_id = vm.array_new();
+            vm.array_push(len_id, BxValue::new_number(0.0));
+            let match_id = vm.array_new();
+            let empty_id = vm.string_new(String::new());
+            vm.array_push(match_id, BxValue::new_ptr(empty_id));
+            let pos_id = vm.array_new();
+            vm.array_push(pos_id, BxValue::new_number(0.0));
+            vm.struct_set(struct_id, "len", BxValue::new_ptr(len_id));
+            vm.struct_set(struct_id, "match", BxValue::new_ptr(match_id));
+            vm.struct_set(struct_id, "pos", BxValue::new_ptr(pos_id));
+            if scope == "all" {
+                let arr_id = vm.array_new();
+                vm.array_push(arr_id, BxValue::new_ptr(struct_id));
+                Ok(BxValue::new_ptr(arr_id))
+            } else {
+                Ok(BxValue::new_ptr(struct_id))
+            }
+        } else if scope == "all" {
+            let arr_id = vm.array_new();
+            for m in matches {
+                vm.array_push(arr_id, m);
+            }
+            Ok(BxValue::new_ptr(arr_id))
+        } else {
+            Ok(matches.remove(0))
+        }
+    } else {
+        if matches.is_empty() {
+            Ok(BxValue::new_number(0.0))
+        } else if scope == "all" {
+            let arr_id = vm.array_new();
+            for m in matches {
+                if let Some(struct_id) = m.as_gc_id() {
+                    let pos_val = vm.struct_get(struct_id, "pos");
+                    if let Some(pos_arr_id) = pos_val.as_gc_id() {
+                        let first = vm.array_get(pos_arr_id, 0);
+                        vm.array_push(arr_id, first);
+                    }
+                }
+            }
+            Ok(BxValue::new_ptr(arr_id))
+        } else {
+            if let Some(struct_id) = matches[0].as_gc_id() {
+                let pos_val = vm.struct_get(struct_id, "pos");
+                if let Some(pos_arr_id) = pos_val.as_gc_id() {
+                    Ok(vm.array_get(pos_arr_id, 0))
+                } else {
+                    Ok(BxValue::new_number(0.0))
+                }
+            } else {
+                Ok(BxValue::new_number(0.0))
+            }
+        }
+    }
+}
+
+fn regex_replace(vm: &mut dyn BxVM, args: &[BxValue], no_case: bool) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err(
+            "reReplace() expects at least 3 arguments: (string, regex, replacement)".to_string(),
+        );
+    }
+    let string = vm.to_string(args[0]);
+    let pattern = regex_prepare(&vm.to_string(args[1]), no_case);
+    let substring = vm.to_string(args[2]);
+    let scope = if args.len() > 3 {
+        vm.to_string(args[3]).to_lowercase()
+    } else {
+        "one".to_string()
+    };
+
+    let regex = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(no_case)
+        .dot_matches_new_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
+
+    let result = if scope == "all" {
+        regex.replace_all(&string, substring.as_str()).to_string()
+    } else {
+        regex.replace(&string, substring.as_str()).to_string()
+    };
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn char_to_byte_index(text: &str, char_idx: usize) -> usize {
+    if char_idx == 0 {
+        return 0;
+    }
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
+}
+
+fn char_count_to_pos(text: &str, byte_idx: usize) -> usize {
+    text[..byte_idx].chars().count() + 1
+}
+
+fn regex_posix_replace(expression: &str, no_case: bool) -> String {
+    let mut return_expression = expression.to_string();
+    let replacements = [
+        ("[:alnum:]", "a-zA-Z0-9"),
+        ("[:alpha:]", "a-zA-Z"),
+        ("[:blank:]", " \\t"),
+        ("[:cntrl:]", "\\x00-\\x1F\\x7F"),
+        ("[:digit:]", "0-9"),
+        ("[:graph:]", "\\x21-\\x7E"),
+        ("[:lower:]", if no_case { "a-zA-Z" } else { "a-z" }),
+        ("[:print:]", "\\x20-\\x7E"),
+        ("[:punct:]", "!\"#$%&'()*+,-./:;<=>?@\\[\\]^_`{|}~"),
+        ("[:space:]", "\\s"),
+        ("[:upper:]", if no_case { "a-zA-Z" } else { "A-Z" }),
+        ("[:xdigit:]", "0-9a-fA-F"),
+    ];
+    for (needle, replacement) in replacements {
+        return_expression = return_expression.replace(needle, replacement);
+        return_expression =
+            return_expression.replace(&format!("[{}]", needle), &format!("[{}]", replacement));
+    }
+    return_expression
+}
+
+fn regex_replace_non_quantifier_curly_braces(input: &str) -> String {
+    let mut escaped = String::new();
+    let chars: Vec<char> = input.chars().collect();
+    let mut i = 0usize;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '\\' {
+            if i + 1 < chars.len() {
+                escaped.push(c);
+                escaped.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+        }
+        if c == '{' {
+            let mut j = i + 1;
+            let mut has_digit = false;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                has_digit = true;
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '}' && has_digit {
+                escaped.push(c);
+                i += 1;
+                continue;
+            }
+            escaped.push_str("\\{");
+        } else if c == '}' {
+            escaped.push_str("\\}");
+        } else {
+            escaped.push(c);
+        }
+        i += 1;
+    }
+    escaped
 }
 
 fn mid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -455,6 +1466,17 @@ fn round(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         Ok(BxValue::new_number(args[0].as_number().round()))
     } else {
         Err("round() expects a number".to_string())
+    }
+}
+
+fn floor_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("floor() expects exactly 1 argument".to_string());
+    }
+    if args[0].is_number() {
+        Ok(BxValue::new_number(args[0].as_number().floor()))
+    } else {
+        Err("floor() expects a number".to_string())
     }
 }
 
@@ -522,12 +1544,131 @@ fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("randRange() expects exactly 2 arguments".to_string());
     }
     if args[0].is_number() && args[1].is_number() {
-        let mut rng = rand::rng();
+        let mut rng = math_rng()
+            .lock()
+            .map_err(|_| "random generator is unavailable".to_string())?;
         let val = rng.random_range((args[0].as_number() as i64)..=(args[1].as_number() as i64));
         Ok(BxValue::new_number(val as f64))
     } else {
         Err("randRange() expects numbers".to_string())
     }
+}
+
+fn rand(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("rand() expects no arguments".to_string());
+    }
+    let mut rng = math_rng()
+        .lock()
+        .map_err(|_| "random generator is unavailable".to_string())?;
+    Ok(BxValue::new_number(rng.random::<f64>()))
+}
+
+fn randomize(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("randomize() expects at least 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        return Err(format!("randomize() expects a numeric seed, not {}", id));
+    }
+    if !args[0].is_number() {
+        return Err("randomize() expects a number".to_string());
+    }
+    let seed = args[0].as_number() as u64;
+    let mut rng = math_rng()
+        .lock()
+        .map_err(|_| "random generator is unavailable".to_string())?;
+    *rng = StdRng::seed_from_u64(seed);
+    Ok(BxValue::new_null())
+}
+
+fn pi(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("pi() expects no arguments".to_string());
+    }
+    Ok(BxValue::new_number(std::f64::consts::PI))
+}
+
+fn log_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("log() expects 1 or 2 arguments".to_string());
+    }
+    if !args[0].is_number() {
+        return Err("log() expects a number".to_string());
+    }
+    let value = args[0].as_number();
+    if args.len() == 1 {
+        Ok(BxValue::new_number(value.ln()))
+    } else if args[1].is_number() {
+        Ok(BxValue::new_number(value.log(args[1].as_number())))
+    } else {
+        Err("log() expects numeric arguments".to_string())
+    }
+}
+
+fn log10_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("log10() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().log10()))
+}
+
+fn exp_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("exp() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().exp()))
+}
+
+fn sin_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("sin() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().sin()))
+}
+
+fn cos_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("cos() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().cos()))
+}
+
+fn tan_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("tan() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().tan()))
+}
+
+fn asin_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("asin() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().asin()))
+}
+
+fn acos_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("acos() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().acos()))
+}
+
+fn atan_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 || !args[0].is_number() {
+        return Err("atan() expects exactly 1 numeric argument".to_string());
+    }
+    Ok(BxValue::new_number(args[0].as_number().atan()))
+}
+
+fn atan2_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 || !args[0].is_number() || !args[1].is_number() {
+        return Err("atan2() expects exactly 2 numeric arguments".to_string());
+    }
+    Ok(BxValue::new_number(
+        args[0].as_number().atan2(args[1].as_number()),
+    ))
 }
 
 fn len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -547,6 +1688,83 @@ fn write_output_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
         vm.write_output(&s);
     }
     Ok(BxValue::new_bool(true))
+}
+
+fn duplicate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("duplicate() expects at least 1 argument".to_string());
+    }
+    let deep = args.get(1).map(|v| v.as_bool()).unwrap_or(true);
+    let mut seen = HashMap::new();
+    duplicate_value(vm, args[0], deep, &mut seen)
+}
+
+fn duplicate_value(
+    vm: &mut dyn BxVM,
+    value: BxValue,
+    deep: bool,
+    seen: &mut HashMap<usize, BxValue>,
+) -> Result<BxValue, String> {
+    if value.is_null() || value.is_bool() || value.is_number() {
+        return Ok(value);
+    }
+
+    if vm.is_string_value(value) {
+        return Ok(BxValue::new_ptr(vm.string_new(vm.to_string(value))));
+    }
+
+    if vm.is_bytes(value) {
+        return Ok(BxValue::new_ptr(vm.bytes_new(vm.to_bytes(value)?)));
+    }
+
+    if let Some(type_name) = vm.type_name_from_value(value) {
+        if type_name.eq_ignore_ascii_case("datetime") {
+            let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+            return Ok(BxValue::new_ptr(vm.datetime_new(dt)));
+        }
+    }
+
+    let Some(id) = value.as_gc_id() else {
+        return Ok(value);
+    };
+
+    if let Some(existing) = seen.get(&id) {
+        return Ok(*existing);
+    }
+
+    if vm.is_array_value(value) {
+        let new_id = vm.array_new();
+        let duplicated = BxValue::new_ptr(new_id);
+        seen.insert(id, duplicated);
+        for idx in 0..vm.array_len(id) {
+            let item = vm.array_get(id, idx);
+            let copied = if deep {
+                duplicate_value(vm, item, true, seen)?
+            } else {
+                item
+            };
+            vm.array_push(new_id, copied);
+        }
+        return Ok(duplicated);
+    }
+
+    if vm.is_struct_value(value) {
+        let new_id = vm.struct_new();
+        let duplicated = BxValue::new_ptr(new_id);
+        seen.insert(id, duplicated);
+        for key in vm.struct_key_array(id) {
+            let item = vm.struct_get(id, &key);
+            let copied = if deep {
+                duplicate_value(vm, item, true, seen)?
+            } else {
+                item
+            };
+            vm.struct_set(new_id, &key, copied);
+        }
+        return Ok(duplicated);
+    }
+
+    Ok(value)
 }
 
 // --- System BIFs ---
@@ -648,6 +1866,54 @@ fn array_clear_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
         Ok(BxValue::new_bool(true))
     } else {
         Err("arrayClear() expects an array".to_string())
+    }
+}
+
+fn array_swap_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("arraySwap() expects 3 arguments: (array, fromIndex, toIndex)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let from = args[1].as_number() as usize;
+        let to = args[2].as_number() as usize;
+        if from == 0 || to == 0 {
+            return Err("Array index must be 1-based".to_string());
+        }
+        let from_idx = from - 1;
+        let to_idx = to - 1;
+        let len = vm.array_len(id);
+        if from_idx >= len || to_idx >= len {
+            return Err("arraySwap() index out of bounds".to_string());
+        }
+        let left = vm.array_get(id, from_idx);
+        let right = vm.array_get(id, to_idx);
+        vm.array_set(id, from_idx, right)?;
+        vm.array_set(id, to_idx, left)?;
+        Ok(args[0])
+    } else {
+        Err("arraySwap() expects an array as the first argument".to_string())
+    }
+}
+
+fn array_resize_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("arrayResize() expects 2 arguments: (array, size)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let size = args[1].as_number() as isize;
+        if size < 0 {
+            return Err("arrayResize() size must be non-negative".to_string());
+        }
+        let size = size as usize;
+        let current = vm.array_len(id);
+        if size > current {
+            for _ in current..size {
+                vm.array_push(id, BxValue::new_null());
+            }
+        }
+        Ok(args[0])
+    } else {
+        Err("arrayResize() expects an array as the first argument".to_string())
     }
 }
 
@@ -833,12 +2099,509 @@ fn struct_clear_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
 }
 
+fn struct_find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("structFind() expects at least 2 arguments: (struct, key)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let key = vm.to_string(args[1]);
+        let found = vm.struct_get(id, &key);
+        if found.is_null() {
+            if args.len() >= 3 {
+                Ok(args[2])
+            } else {
+                Err(format!("Key '{}' not found in struct", key))
+            }
+        } else {
+            Ok(found)
+        }
+    } else {
+        Err("structFind() expects a struct as the first argument".to_string())
+    }
+}
+
+fn struct_is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structIsEmpty() expects 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        Ok(BxValue::new_bool(vm.struct_len(id) == 0))
+    } else {
+        Err("structIsEmpty() expects a struct".to_string())
+    }
+}
+
 // --- Date/Time BIFs ---
 
+fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
+    let tz = tz?.trim();
+    if tz.is_empty()
+        || tz.eq_ignore_ascii_case("utc")
+        || tz.eq_ignore_ascii_case("gmt")
+        || tz == "z"
+    {
+        return FixedOffset::east_opt(0);
+    }
+
+    let raw = tz
+        .strip_prefix("UTC")
+        .or_else(|| tz.strip_prefix("utc"))
+        .unwrap_or(tz);
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return FixedOffset::east_opt(0);
+    }
+
+    let sign = match raw.chars().next()? {
+        '+' => 1,
+        '-' => -1,
+        _ => return None,
+    };
+    let digits = &raw[1..];
+    let digits = digits.replace(':', "");
+    if digits.len() != 2 && digits.len() != 4 {
+        return None;
+    }
+    let hours: i32 = digits[0..2].parse().ok()?;
+    let mins: i32 = if digits.len() == 4 {
+        digits[2..4].parse().ok()?
+    } else {
+        0
+    };
+    let total = sign * (hours * 3600 + mins * 60);
+    FixedOffset::east_opt(total)
+}
+
+fn translate_datetime_format(fmt: &str) -> String {
+    let mut out = String::new();
+    let mut chars = fmt.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\'' {
+            while let Some(next) = chars.next() {
+                if next == '\'' {
+                    break;
+                }
+                out.push(next);
+            }
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() {
+            let mut count = 1usize;
+            while chars.peek().copied() == Some(ch) {
+                count += 1;
+                chars.next();
+            }
+            let token = match (ch, count) {
+                ('y', 4) => "%Y",
+                ('y', 2) => "%y",
+                ('M', 4) => "%B",
+                ('M', 3) => "%b",
+                ('M', 2) => "%m",
+                ('M', 1) => "%-m",
+                ('d', 2) => "%d",
+                ('d', 1) => "%-d",
+                ('H', 2) => "%H",
+                ('H', 1) => "%-H",
+                ('h', 2) => "%I",
+                ('h', 1) => "%-I",
+                ('m', 2) => "%M",
+                ('m', 1) => "%-M",
+                ('s', 2) => "%S",
+                ('s', 1) => "%-S",
+                ('S', n) => {
+                    out.push_str(&format!("%.{}f", n));
+                    continue;
+                }
+                ('X', 1) => "%:z",
+                ('X', 2) => "%:z",
+                ('X', 3) => "%:z",
+                ('Z', _) => "%z",
+                _ => {
+                    for _ in 0..count {
+                        out.push(ch);
+                    }
+                    continue;
+                }
+            };
+            out.push_str(token);
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn format_datetime(
+    dt: DateTime<Utc>,
+    format: Option<&str>,
+    default_format: &str,
+    tz: Option<&str>,
+) -> Result<String, String> {
+    let format = format.unwrap_or(default_format).trim();
+    if format.eq_ignore_ascii_case("yyyy-MM-dd'T'HH:mm:ss.SSSX") {
+        let formatted = if let Some(offset) = parse_timezone_offset(tz) {
+            dt.with_timezone(&offset)
+                .format("%Y-%m-%dT%H:%M:%S%.3f%:z")
+                .to_string()
+        } else {
+            dt.format("%Y-%m-%dT%H:%M:%S%.3f%:z").to_string()
+        };
+        return Ok(if formatted.ends_with("+00:00") {
+            formatted.trim_end_matches("+00:00").to_string() + "Z"
+        } else if formatted.ends_with("+0000") {
+            formatted.trim_end_matches("+0000").to_string() + "Z"
+        } else {
+            formatted
+        });
+    }
+    let (format, alias) = match format.to_ascii_lowercase().as_str() {
+        "short" => (Some("dd-MMM-yy"), None),
+        "long" => (Some("MMMM d, yyyy"), None),
+        "iso" | "iso8601" => (Some("yyyy-MM-dd"), None),
+        _ => (None, Some(format)),
+    };
+
+    let chrono_format = if let Some(alias_fmt) = format {
+        alias_fmt.to_string()
+    } else {
+        translate_datetime_format(alias.unwrap())
+    };
+
+    let formatted = if let Some(offset) = parse_timezone_offset(tz) {
+        dt.with_timezone(&offset).format(&chrono_format).to_string()
+    } else {
+        dt.format(&chrono_format).to_string()
+    };
+
+    if format.is_none() && alias.unwrap_or("").contains('X') {
+        if formatted.ends_with("+00:00") {
+            Ok(formatted.trim_end_matches("+00:00").to_string() + "Z")
+        } else if formatted.ends_with("+0000") {
+            Ok(formatted.trim_end_matches("+0000").to_string() + "Z")
+        } else {
+            Ok(formatted)
+        }
+    } else {
+        Ok(formatted)
+    }
+}
+
+fn parse_datetime_with_format(
+    input: &str,
+    format: &str,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
+    let chrono_format = translate_datetime_format(format);
+    let has_offset = chrono_format.contains("%:z") || chrono_format.contains("%z");
+    if has_offset {
+        let normalized = if input.ends_with('Z') {
+            format!("{}+00:00", &input[..input.len().saturating_sub(1)])
+        } else if input.len() >= 5 {
+            let suffix = &input[input.len() - 5..];
+            if (suffix.starts_with('+') || suffix.starts_with('-'))
+                && suffix[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                format!(
+                    "{}{}:{}",
+                    &input[..input.len() - 5],
+                    &suffix[..3],
+                    &suffix[3..5]
+                )
+            } else {
+                input.to_string()
+            }
+        } else {
+            input.to_string()
+        };
+        let parsed = DateTime::parse_from_str(&normalized, &chrono_format)
+            .or_else(|_| DateTime::parse_from_str(input, &chrono_format))
+            .map_err(|e| e.to_string())?;
+        Ok(parsed.with_timezone(&Utc))
+    } else if chrono_format.contains("%Y")
+        || chrono_format.contains("%m")
+        || chrono_format.contains("%d")
+    {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(input, &chrono_format) {
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset
+                .from_local_datetime(&parsed)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc))
+        } else if let Ok(parsed) = NaiveDate::parse_from_str(input, &chrono_format) {
+            let naive = parsed.and_hms_opt(0, 0, 0).unwrap();
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            Ok(offset
+                .from_local_datetime(&naive)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc))
+        } else {
+            Err(format!("Unable to parse date '{}'", input))
+        }
+    } else {
+        Err(format!("Unsupported date format '{}'", format))
+    }
+}
+
+fn parse_datetime_input(
+    input: &str,
+    format: Option<&str>,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
+    if let Some(format) = format {
+        return parse_datetime_with_format(input, format, tz);
+    }
+
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(input) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    let normalized = if input.ends_with('Z') {
+        format!("{}+00:00", &input[..input.len().saturating_sub(1)])
+    } else if input.len() >= 5 {
+        let suffix = &input[input.len() - 5..];
+        if (suffix.starts_with('+') || suffix.starts_with('-'))
+            && suffix[1..].chars().all(|c| c.is_ascii_digit())
+        {
+            format!(
+                "{}{}:{}",
+                &input[..input.len() - 5],
+                &suffix[..3],
+                &suffix[3..5]
+            )
+        } else {
+            input.to_string()
+        }
+    } else {
+        input.to_string()
+    };
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(&normalized) {
+        return Ok(parsed.with_timezone(&Utc));
+    }
+
+    let naive_patterns = [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d",
+        "%Y.%m.%d",
+        "%m/%d/%Y",
+    ];
+    for pattern in naive_patterns {
+        if let Ok(parsed) = NaiveDateTime::parse_from_str(input, pattern) {
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset
+                .from_local_datetime(&parsed)
+                .single()
+                .unwrap()
+                .with_timezone(&Utc));
+        }
+        if let Ok(parsed) = NaiveDate::parse_from_str(input, pattern) {
+            let offset =
+                parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset
+                .from_local_datetime(&parsed.and_hms_opt(0, 0, 0).unwrap())
+                .single()
+                .unwrap()
+                .with_timezone(&Utc));
+        }
+    }
+
+    Err(format!("Unable to parse date '{}'", input))
+}
+
+fn datetime_from_parts(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+    millis: u32,
+    tz: Option<&str>,
+) -> Result<DateTime<Utc>, String> {
+    let date = NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| format!("Invalid date {}-{}-{}", year, month, day))?;
+    let naive = date
+        .and_hms_milli_opt(hour, minute, second, millis)
+        .ok_or_else(|| "Invalid time components".to_string())?;
+    let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+    Ok(offset
+        .from_local_datetime(&naive)
+        .single()
+        .ok_or_else(|| "Could not resolve local datetime".to_string())?
+        .with_timezone(&Utc))
+}
+
+fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
+    let total_months = dt.year() * 12 + (dt.month() as i32 - 1) + months;
+    let new_year = total_months.div_euclid(12);
+    let new_month = total_months.rem_euclid(12) + 1;
+    let last_day = match new_month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (new_year % 4 == 0 && new_year % 100 != 0) || (new_year % 400 == 0);
+            if leap { 29 } else { 28 }
+        }
+        _ => 30,
+    };
+    let day = dt.day().min(last_day);
+    let naive = NaiveDate::from_ymd_opt(new_year, new_month as u32, day)
+        .unwrap()
+        .and_hms_milli_opt(
+            dt.hour(),
+            dt.minute(),
+            dt.second(),
+            dt.timestamp_subsec_millis(),
+        )
+        .unwrap();
+    Utc.from_utc_datetime(&naive)
+}
+
+fn date_diff_months(a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
+    let a_total = a.year() as i64 * 12 + a.month() as i64 - 1;
+    let b_total = b.year() as i64 * 12 + b.month() as i64 - 1;
+    let mut months = a_total - b_total;
+    let adjusted = add_months(b, months as i32);
+    if months > 0 && adjusted > a {
+        months -= 1;
+    } else if months < 0 && adjusted < a {
+        months += 1;
+    }
+    months
+}
+
 fn now(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    let now = Local::now();
-    let s = now.format("%Y-%m-%d %H:%M:%S").to_string();
-    Ok(BxValue::new_ptr(vm.string_new(s)))
+    let now = Utc::now();
+    Ok(BxValue::new_ptr(vm.datetime_new(now)))
+}
+
+fn create_date(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("createDate() expects at least 3 arguments: (year, month, day)".to_string());
+    }
+    let tz = args.get(3).map(|v| vm.to_string(*v));
+    let dt = datetime_from_parts(
+        args[0].as_number() as i32,
+        args[1].as_number() as u32,
+        args[2].as_number() as u32,
+        0,
+        0,
+        0,
+        0,
+        tz.as_deref(),
+    )?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
+}
+
+fn create_date_time(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 7 {
+        return Err("createDateTime() expects at least 7 arguments".to_string());
+    }
+    let tz = args.get(7).map(|v| vm.to_string(*v));
+    let dt = datetime_from_parts(
+        args[0].as_number() as i32,
+        args[1].as_number() as u32,
+        args[2].as_number() as u32,
+        args[3].as_number() as u32,
+        args[4].as_number() as u32,
+        args[5].as_number() as u32,
+        args[6].as_number() as u32,
+        tz.as_deref(),
+    )?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
+}
+
+fn date_add(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("dateAdd() expects 3 arguments".to_string());
+    }
+    let is_member = args[0].as_gc_id().is_some() && !vm.is_string_value(args[0]);
+    let (datepart, number, value) = if is_member {
+        (vm.to_string(args[1]), args[2].as_number(), args[0])
+    } else {
+        (vm.to_string(args[0]), args[1].as_number(), args[2])
+    };
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let result = match datepart.trim().to_ascii_lowercase().as_str() {
+        "yyyy" | "yy" | "year" | "years" => add_months(dt, (number.round() as i32) * 12),
+        "m" | "month" | "months" => add_months(dt, number.round() as i32),
+        "ww" | "w" | "week" | "weeks" => dt + Duration::days((number * 7.0).round() as i64),
+        "d" | "day" | "days" => dt + Duration::days(number.round() as i64),
+        "h" | "hour" | "hours" => dt + Duration::hours(number.round() as i64),
+        "n" | "minute" | "minutes" => dt + Duration::minutes(number.round() as i64),
+        "s" | "second" | "seconds" => dt + Duration::milliseconds((number * 1000.0).round() as i64),
+        _ => return Err(format!("Unsupported date part '{}'", datepart)),
+    };
+    Ok(BxValue::new_ptr(vm.datetime_new(result)))
+}
+
+fn date_diff(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("dateDiff() expects 3 arguments".to_string());
+    }
+    let is_member = args[0].as_gc_id().is_some() && !vm.is_string_value(args[0]);
+    let (datepart, left, right) = if is_member {
+        (vm.to_string(args[1]), args[0], args[2])
+    } else {
+        (vm.to_string(args[0]), args[1], args[2])
+    };
+    let left_dt = parse_datetime_input(&vm.to_string(left), None, None)?;
+    let right_dt = parse_datetime_input(&vm.to_string(right), None, None)?;
+    let diff = match datepart.trim().to_ascii_lowercase().as_str() {
+        "yyyy" | "yy" | "year" | "years" => (date_diff_months(left_dt, right_dt) / 12) as f64,
+        "m" | "month" | "months" => date_diff_months(left_dt, right_dt) as f64,
+        "ww" | "w" | "week" | "weeks" => {
+            (left_dt.signed_duration_since(right_dt).num_days() / 7) as f64
+        }
+        "d" | "day" | "days" => left_dt.signed_duration_since(right_dt).num_days() as f64,
+        "h" | "hour" | "hours" => left_dt.signed_duration_since(right_dt).num_hours() as f64,
+        "n" | "minute" | "minutes" => left_dt.signed_duration_since(right_dt).num_minutes() as f64,
+        "s" | "second" | "seconds" => left_dt.signed_duration_since(right_dt).num_seconds() as f64,
+        _ => return Err(format!("Unsupported date part '{}'", datepart)),
+    };
+    Ok(BxValue::new_number(diff))
+}
+
+fn date_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("dateFormat() expects at least 1 argument".to_string());
+    }
+    let value = args[0];
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yy", tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+}
+
+fn date_time_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("dateTimeFormat() expects at least 1 argument".to_string());
+    }
+    let value = args[0];
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yyyy HH:mm:ss", tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+}
+
+fn parse_date_time_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("parseDateTime() expects at least 1 argument".to_string());
+    }
+    let value = vm.to_string(args[0]);
+    let format = args.get(1).map(|v| vm.to_string(*v));
+    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let dt = parse_datetime_input(&value, format.as_deref(), tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
 }
 
 fn get_tick_count(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
@@ -903,6 +2666,79 @@ fn is_null_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     Ok(BxValue::new_bool(args[0].is_null()))
 }
 
+fn is_array_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_array_value(args[0])))
+}
+
+fn is_struct_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_struct_value(args[0])))
+}
+
+fn is_boolean_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_bool = value.is_bool()
+        || value.is_number()
+        || matches!(
+            vm.to_string(value).to_ascii_lowercase().as_str(),
+            "true" | "false" | "yes" | "no" | "1" | "0"
+        );
+    Ok(BxValue::new_bool(is_bool))
+}
+
+fn is_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(vm.is_string_value(args[0])))
+}
+
+fn is_date_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_date = vm
+        .type_name_from_value(value)
+        .map(|name| name.eq_ignore_ascii_case("datetime"))
+        .unwrap_or(false)
+        || parse_datetime_input(&vm.to_string(value), None, None).is_ok();
+    Ok(BxValue::new_bool(is_date))
+}
+
+fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    let value = args[0];
+    let is_object = if value.is_null()
+        || value.is_bool()
+        || value.is_number()
+        || vm.is_string_value(value)
+        || vm.is_array_value(value)
+        || vm.is_struct_value(value)
+        || vm.is_bytes(value)
+    {
+        false
+    } else if let Some(type_name) = vm.type_name_from_value(value) {
+        !matches!(
+            type_name.to_ascii_lowercase().as_str(),
+            "datetime" | "range"
+        )
+    } else {
+        value.as_gc_id().is_some()
+    };
+    Ok(BxValue::new_bool(is_object))
+}
+
 fn is_numeric_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Ok(BxValue::new_bool(false));
@@ -924,6 +2760,12 @@ fn is_simple_value_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         return Ok(BxValue::new_bool(false));
     }
     let val = &args[0];
-    let is_simple = val.is_number() || val.is_bool() || vm.is_string_value(*val);
+    let is_simple = val.is_number()
+        || val.is_bool()
+        || vm.is_string_value(*val)
+        || vm
+            .type_name_from_value(*val)
+            .map(|name| name.eq_ignore_ascii_case("datetime"))
+            .unwrap_or(false);
     Ok(BxValue::new_bool(is_simple))
 }

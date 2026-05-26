@@ -9,9 +9,10 @@ pub mod jit;
 #[cfg(all(test, target_arch = "wasm32", feature = "js"))]
 mod interop_tests;
 
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
+use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxRange, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
+use chrono::{DateTime, SecondsFormat, Utc};
 use self::chunk::{Chunk, IcEntry};
 use self::opcode::op;
 use self::gc::{Heap, GcObject};
@@ -335,11 +336,57 @@ pub struct CallFrame {
 pub struct BxFiber {
     pub stack: Vec<BxValue>,
     pub frames: Vec<CallFrame>,
+    pub variables: Rc<RefCell<HashMap<String, BxValue>>>,
     pub future_id: usize,
     pub wait_until: Option<Instant>,
     pub yield_requested: bool,
     pub priority: u8,
     pub root_stack: Vec<BxValue>,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DebugLocation {
+    pub function: String,
+    pub filename: String,
+    pub line: u32,
+    pub frame_depth: usize,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DebugStepStatus {
+    Paused,
+    Completed,
+    RuntimeError,
+    BudgetExhausted,
+    Blocked,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DebugStepResult {
+    pub status: DebugStepStatus,
+    pub location: Option<DebugLocation>,
+    pub value: Option<serde_json::Value>,
+    pub instructions: u64,
+    pub error: Option<String>,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DebugPauseReason {
+    Line,
+    Budget,
+}
+
+#[cfg(feature = "debugger")]
+#[derive(Clone, Debug)]
+struct DebugRunState {
+    start: Option<DebugLocation>,
+    executed: u64,
+    budget: u64,
+    pause: Option<DebugPauseReason>,
 }
 
 enum NativeCompletion {
@@ -358,6 +405,7 @@ pub struct VM {
     pub fibers: Vec<BxFiber>,
     pub global_names: HashMap<u32, usize>,
     pub global_values: Vec<BxValue>,
+    pub script_variables: Rc<RefCell<HashMap<String, BxValue>>>,
     pub current_fiber_idx: Option<usize>,
     pub shapes: ShapeRegistry,
     pub heap: Heap,
@@ -370,6 +418,8 @@ pub struct VM {
     native_future_tx: Sender<NativeFutureMessage>,
     native_future_rx: Receiver<NativeFutureMessage>,
     pending_native_futures: HashMap<usize, usize>,
+    #[cfg(feature = "debugger")]
+    debug_run: Option<DebugRunState>,
     #[cfg(feature = "jit")]
     pub jit: Option<Box<jit::JitState>>,
     #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -380,6 +430,15 @@ pub struct VM {
 
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 const JS_INTEROP_MAX_DEPTH: usize = 32;
+
+impl VM {
+    fn datetime_value(&self, val: BxValue) -> Option<DateTime<Utc>> {
+        val.as_gc_id().and_then(|id| match self.heap.get(id) {
+            GcObject::DateTime(dt) => Some(dt.clone()),
+            _ => None,
+        })
+    }
+}
 
 impl BxVM for VM {
     fn current_chunk(&self) -> Option<Rc<RefCell<crate::vm::chunk::Chunk>>> {
@@ -456,6 +515,7 @@ impl BxVM for VM {
     fn get_len(&self, id: usize) -> usize {
         match self.heap.get(id) {
             GcObject::Array(arr) => arr.len(),
+            GcObject::Range(range) => range.len(),
             GcObject::Struct(s) => s.properties.len(),
             GcObject::String(s) => s.len(),
             GcObject::Bytes(bytes) => bytes.len(),
@@ -486,6 +546,253 @@ impl BxVM for VM {
             matches!(self.heap.get(id), GcObject::Bytes(_))
         } else {
             false
+        }
+    }
+
+    fn type_name_from_value(&self, val: BxValue) -> Option<String> {
+        if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::String(s) => Some(s.to_string()),
+                GcObject::Class(class) => Some(class.borrow().name.clone()),
+                GcObject::Interface(interface) => Some(interface.borrow().name.clone()),
+                GcObject::Instance(inst) => Some(inst.class.borrow().name.clone()),
+                GcObject::DateTime(_) => Some("datetime".to_string()),
+                GcObject::Range(_) => Some("range".to_string()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    fn find_global_class_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxClass>>> {
+        if let Some(val) = self.get_global(type_name) {
+            if let Some(id) = val.as_gc_id() {
+                if let GcObject::Class(class) = self.heap.get(id) {
+                    return Some(Rc::clone(class));
+                }
+            }
+        }
+
+        for (&name_id, _) in &self.global_names {
+            let name = self.interner.resolve(name_id);
+            if name.eq_ignore_ascii_case(type_name) {
+                if let Some(val) = self.get_global(name) {
+                    if let Some(id) = val.as_gc_id() {
+                        if let GcObject::Class(class) = self.heap.get(id) {
+                            return Some(Rc::clone(class));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn find_global_interface_by_name(&self, type_name: &str) -> Option<Rc<RefCell<BxInterface>>> {
+        if let Some(val) = self.get_global(type_name) {
+            if let Some(id) = val.as_gc_id() {
+                if let GcObject::Interface(interface) = self.heap.get(id) {
+                    return Some(Rc::clone(interface));
+                }
+            }
+        }
+
+        for (&name_id, _) in &self.global_names {
+            let name = self.interner.resolve(name_id);
+            if name.eq_ignore_ascii_case(type_name) {
+                if let Some(val) = self.get_global(name) {
+                    if let Some(id) = val.as_gc_id() {
+                        if let GcObject::Interface(interface) = self.heap.get(id) {
+                            return Some(Rc::clone(interface));
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn class_matches_type_name(&self, class: &Rc<RefCell<BxClass>>, type_name: &str) -> bool {
+        let (class_name, extends, implements) = {
+            let class_ref = class.borrow();
+            (
+                class_ref.name.clone(),
+                class_ref.extends.clone(),
+                class_ref.implements.clone(),
+            )
+        };
+
+        if class_name.eq_ignore_ascii_case(type_name) {
+            return true;
+        }
+        if implements.iter().any(|iface| iface.eq_ignore_ascii_case(type_name)) {
+            return true;
+        }
+        if let Some(parent_name) = extends {
+            if parent_name.eq_ignore_ascii_case(type_name) {
+                return true;
+            }
+            if let Some(parent_class) = self.find_global_class_by_name(&parent_name) {
+                return self.class_matches_type_name(&parent_class, type_name);
+            }
+        }
+        false
+    }
+
+    fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool {
+        let lower = type_name.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "any" | "object" => !val.is_null(),
+            "null" | "void" => val.is_null(),
+            "string" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::String(_))).unwrap_or(false),
+            "numeric" | "number" | "double" | "float" | "bigdecimal" => val.is_number(),
+            "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
+            "boolean" | "bool" => val.is_bool(),
+            "array" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Array(_))).unwrap_or(false),
+            "datetime" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::DateTime(_))).unwrap_or(false),
+            "range" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Range(_))).unwrap_or(false),
+            "struct" | "componentstruct" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Struct(_))).unwrap_or(false),
+            "function" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_))).unwrap_or(false),
+            "class" | "component" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Class(_) | GcObject::Instance(_))).unwrap_or(false),
+            "interface" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Interface(_))).unwrap_or(false),
+            _ => {
+                if let Some(class) = self.find_global_class_by_name(type_name) {
+                    match val.as_gc_id() {
+                        Some(id) => match self.heap.get(id) {
+                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &class.borrow().name),
+                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &class.borrow().name),
+                            _ => false,
+                        },
+                        None => false,
+                    }
+                } else if let Some(interface) = self.find_global_interface_by_name(type_name) {
+                    let interface_name = interface.borrow().name.clone();
+                    match val.as_gc_id() {
+                        Some(id) => match self.heap.get(id) {
+                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &interface_name),
+                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &interface_name),
+                            GcObject::Interface(existing) => existing.borrow().name.eq_ignore_ascii_case(&interface_name),
+                            _ => false,
+                        },
+                        None => false,
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    fn cast_value_to_type(&mut self, val: BxValue, type_name: &str) -> Result<BxValue, String> {
+        let lower = type_name.trim().to_ascii_lowercase();
+        match lower.as_str() {
+            "any" | "object" => Ok(val),
+            "null" | "void" => {
+                if val.is_null() {
+                    Ok(BxValue::new_null())
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "string" => {
+                if let Some(id) = val.as_gc_id() {
+                    if matches!(self.heap.get(id), GcObject::String(_)) {
+                        return Ok(val);
+                    }
+                }
+                let id = self.string_new(self.to_string(val));
+                Ok(BxValue::new_ptr(id))
+            }
+            "numeric" | "number" | "double" | "float" | "bigdecimal" => {
+                if val.is_number() {
+                    return Ok(val);
+                }
+                let parsed = if val.is_bool() {
+                    Some(if val.as_bool() { 1.0 } else { 0.0 })
+                } else {
+                    self.to_string(val).trim().parse::<f64>().ok()
+                };
+                if let Some(num) = parsed {
+                    if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
+                        Ok(BxValue::new_int(num as i32))
+                    } else {
+                        Ok(BxValue::new_number(num))
+                    }
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "integer" | "int" | "long" | "short" | "byte" => {
+                if val.is_int() {
+                    return Ok(val);
+                }
+                let parsed = if val.is_number() {
+                    let num = val.as_number();
+                    if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
+                        Some(num as i32)
+                    } else {
+                        None
+                    }
+                } else if val.is_bool() {
+                    Some(if val.as_bool() { 1 } else { 0 })
+                } else {
+                    self.to_string(val).trim().parse::<i32>().ok()
+                };
+                if let Some(num) = parsed {
+                    Ok(BxValue::new_int(num))
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "boolean" | "bool" => {
+                if val.is_bool() {
+                    Ok(val)
+                } else {
+                    Ok(BxValue::new_bool(self.is_truthy(val)))
+                }
+            }
+            "array" => {
+                if self.is_array_value(val) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "struct" | "componentstruct" => {
+                if self.is_struct_value(val) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "function" => {
+                if let Some(id) = val.as_gc_id() {
+                    if matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_)) {
+                        Ok(val)
+                    } else {
+                        Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    }
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            "class" | "component" | "interface" => {
+                if self.value_matches_type_name(val, type_name) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
+            _ => {
+                if self.value_matches_type_name(val, type_name) {
+                    Ok(val)
+                } else {
+                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                }
+            }
         }
     }
 
@@ -829,6 +1136,10 @@ impl BxVM for VM {
         self.instance_variables_json(receiver).map_err(|e| e.to_string())
     }
 
+    fn datetime_new(&mut self, dt: DateTime<Utc>) -> usize {
+        self.heap.alloc(GcObject::DateTime(dt))
+    }
+
     fn string_new(&mut self, s: String) -> usize {
         self.heap.alloc(GcObject::String(BoxString::new(&s)))
     }
@@ -848,6 +1159,80 @@ impl BxVM for VM {
 
     fn insert_global(&mut self, name: String, val: BxValue) {
         VM::insert_global(self, name, val);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue> {
+        let mut offset = 0;
+        if path.first()?.eq_ignore_ascii_case("variables") {
+            offset = 1;
+        }
+        let first = path.get(offset)?.to_lowercase();
+        let mut value = self
+            .current_variables_scope()
+            .borrow()
+            .get(&first)
+            .copied()
+            .or_else(|| self.get_global(&first))?;
+
+        for part in &path[(offset + 1)..] {
+            let id = value.as_gc_id()?;
+            value = match self.heap.get_opt(id)? {
+                GcObject::Struct(_) => {
+                    let direct = self.struct_get(id, part);
+                    if direct.is_null() {
+                        self.struct_get(id, &part.to_lowercase())
+                    } else {
+                        direct
+                    }
+                }
+                GcObject::Instance(instance) => instance
+                    .variables
+                    .borrow()
+                    .get(&part.to_lowercase())
+                    .copied()
+                    .unwrap_or_else(BxValue::new_null),
+                GcObject::NativeObject(obj) => obj.borrow().get_property(part),
+                _ => BxValue::new_null(),
+            };
+            if value.is_null() {
+                return None;
+            }
+        }
+
+        Some(value)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_result(&self, id: usize) -> Option<crate::datasource::traits::QueryResult> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_result(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_columns(&self, id: usize) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_columns(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_row_count(&self, id: usize) -> Option<usize> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_row_count(),
+            _ => None,
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue> {
+        match self.heap.get_opt(id) {
+            Some(GcObject::NativeObject(obj)) => obj.borrow().query_cell(row_idx, col_idx),
+            _ => None,
+        }
     }
 
     fn get_cli_args(&self) -> Vec<String> {
@@ -901,6 +1286,98 @@ impl BxVM for VM {
 }
 
 impl VM {
+    fn new_variables_scope() -> Rc<RefCell<HashMap<String, BxValue>>> {
+        Rc::new(RefCell::new(HashMap::new()))
+    }
+
+    fn current_variables_scope(&self) -> Rc<RefCell<HashMap<String, BxValue>>> {
+        self.current_fiber_idx
+            .and_then(|idx| self.fibers.get(idx))
+            .map(|fiber| Rc::clone(&fiber.variables))
+            .unwrap_or_else(|| Rc::clone(&self.script_variables))
+    }
+
+    fn flatten_spread_array_value(&self, val: BxValue) -> Result<Vec<BxValue>> {
+        if let Some(id) = val.as_gc_id() {
+            if let GcObject::Array(arr) = self.heap.get(id) {
+                Ok(arr.iter().copied().collect())
+            } else {
+                bail!(
+                    "Cannot spread value of type [{}] into an array literal.",
+                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                )
+            }
+        } else {
+            bail!(
+                "Cannot spread value of type [{}] into an array literal.",
+                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+            )
+        }
+    }
+
+    fn flatten_spread_struct_entries(&self, val: BxValue) -> Result<Vec<(String, BxValue)>> {
+        if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::Struct(_) => {
+                    let keys = self.struct_key_array(id);
+                    let mut entries = Vec::with_capacity(keys.len());
+                    for key in keys {
+                        entries.push((key.clone(), self.struct_get(id, &key)));
+                    }
+                    Ok(entries)
+                }
+                GcObject::Array(arr) => {
+                    let mut entries = Vec::with_capacity(arr.len());
+                    for (idx, item) in arr.iter().enumerate() {
+                        entries.push(((idx + 1).to_string(), *item));
+                    }
+                    Ok(entries)
+                }
+                _ => bail!(
+                    "Cannot spread value of type [{}] into a struct literal.",
+                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                ),
+            }
+        } else {
+            bail!(
+                "Cannot spread value of type [{}] into a struct literal.",
+                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+            )
+        }
+    }
+
+    fn flatten_encoded_named_spread_args(
+        &mut self,
+        fiber_idx: usize,
+        arg_count: u32,
+    ) -> Result<(Vec<BxValue>, Vec<String>)> {
+        let mut chunks: Vec<Vec<(String, BxValue)>> = Vec::with_capacity(arg_count as usize);
+        for _ in 0..arg_count {
+            let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+            if !marker.is_bool() {
+                bail!("Internal VM error: spread argument marker must be boolean");
+            }
+            let key_val = self.fibers[fiber_idx].stack.pop().unwrap();
+            let value = self.fibers[fiber_idx].stack.pop().unwrap();
+            if marker.as_bool() {
+                chunks.push(self.flatten_spread_struct_entries(value)?);
+            } else {
+                chunks.push(vec![(self.to_string(key_val), value)]);
+            }
+        }
+
+        chunks.reverse();
+        let mut args = Vec::new();
+        let mut names = Vec::new();
+        for chunk in chunks {
+            for (name, value) in chunk {
+                names.push(name);
+                args.push(value);
+            }
+        }
+        Ok((args, names))
+    }
+
     pub fn interpret_sync(&mut self, mut chunk: Chunk) -> Result<BxValue> {
         chunk.ensure_caches();
         let chunk_for_func = chunk.clone();
@@ -909,6 +1386,7 @@ impl VM {
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
             captured_receiver: None,
             chunk: chunk_for_func,
         });
@@ -954,6 +1432,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: Vec::new(),
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1055,6 +1534,8 @@ impl VM {
                 GcObject::String(s) => s.to_string(),
                 GcObject::Bytes(bytes) => format!("<bytes len:{}>", bytes.len()),
                 GcObject::Array(_) => self.bx_to_json(&val).to_string(),
+                GcObject::Range(range) => format!("{}", range),
+                GcObject::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Millis, true),
                 GcObject::Struct(_) => self.bx_to_json(&val).to_string(),
                 GcObject::Instance(inst) => format!("<instance of {}>", inst.class.borrow().name),
                 GcObject::Future(_) => format!("<future id:{}>", id),
@@ -1080,6 +1561,7 @@ impl VM {
                 (GcObject::String(s1), GcObject::String(s2)) => {
                     s1.to_string().to_lowercase() == s2.to_string().to_lowercase()
                 }
+                (GcObject::DateTime(a), GcObject::DateTime(b)) => a == b,
                 (GcObject::Bytes(a), GcObject::Bytes(b)) => a == b,
                 _ => false,
             }
@@ -1104,6 +1586,7 @@ impl VM {
             fibers: Vec::new(),
             global_names: HashMap::new(),
             global_values: Vec::new(),
+            script_variables: Self::new_variables_scope(),
             current_fiber_idx: None,
             shapes: ShapeRegistry::new(),
             heap: Heap::new(),
@@ -1116,6 +1599,8 @@ impl VM {
             native_future_tx,
             native_future_rx,
             pending_native_futures: HashMap::new(),
+            #[cfg(feature = "debugger")]
+            debug_run: None,
             #[cfg(feature = "jit")]
             jit: None,
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -1388,44 +1873,102 @@ impl VM {
 
 
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
-        let name = method_name;
+        let name = method_name.to_ascii_lowercase();
         if receiver.is_number() {
-            return match name {
+            return match name.as_str() {
                 "abs" => Some("abs".to_string()),
                 "round" => Some("round".to_string()),
+                "floor" => Some("floor".to_string()),
+                "log" => Some("log".to_string()),
+                "log10" => Some("log10".to_string()),
+                "exp" => Some("exp".to_string()),
+                "sin" => Some("sin".to_string()),
+                "cos" => Some("cos".to_string()),
+                "tan" => Some("tan".to_string()),
+                "asin" => Some("asin".to_string()),
+                "acos" => Some("acos".to_string()),
+                "atan" => Some("atan".to_string()),
+                "atn" => Some("atan".to_string()),
                 _ => None,
             };
         }
 
         if let Some(id) = receiver.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(_) => match name {
+                GcObject::String(_) => match name.as_str() {
                     "len" | "length" => Some("len".to_string()),
                     "ucase" | "touppercase" => Some("ucase".to_string()),
                     "lcase" | "tolowercase" => Some("lcase".to_string()),
                     "split" => Some("listtoarray".to_string()),
+                    "trim" => Some("trim".to_string()),
+                    "find" => Some("stringfind".to_string()),
+                    "findnocase" => Some("stringfindnocase".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
+                    "fromjson" => Some("deserializejson".to_string()),
+                    "rematch" => Some("rematch".to_string()),
+                    "rematchnocase" => Some("rematchnocase".to_string()),
+                    "refind" => Some("refind".to_string()),
+                    "refindnocase" => Some("refindnocase".to_string()),
+                    "rereplace" => Some("rereplace".to_string()),
+                    "rereplacenocase" => Some("rereplacenocase".to_string()),
+                    "hash" => Some("hash".to_string()),
+                    "hmac" => Some("hmac".to_string()),
                     "indexof" => Some("indexof".to_string()),
+                    "left" => Some("left".to_string()),
+                    "right" => Some("right".to_string()),
+                    "mid" => Some("mid".to_string()),
+                    "reverse" => Some("reverse".to_string()),
+                    "spanexcluding" => Some("spanexcluding".to_string()),
+                    "spanincluding" => Some("spanincluding".to_string()),
+                    "replace" => Some("replace".to_string()),
+                    "listlen" => Some("listlen".to_string()),
+                    "listgetat" => Some("listgetat".to_string()),
+                    "listappend" => Some("listappend".to_string()),
+                    "listfirst" => Some("listfirst".to_string()),
+                    "listlast" => Some("listlast".to_string()),
+                    "listrest" => Some("listrest".to_string()),
+                    "listdeleteat" => Some("listdeleteat".to_string()),
+                    "listfind" => Some("listfind".to_string()),
+                    "listfindnocase" => Some("listfindnocase".to_string()),
+                    "listsort" => Some("listsort".to_string()),
                     _ => None,
                 },
-                GcObject::Array(_) => match name {
+                GcObject::Array(_) => match name.as_str() {
                     "len" | "length" | "count" => Some("len".to_string()),
                     "append" | "add" => Some("arrayappend".to_string()),
+                    "resize" => Some("arrayresize".to_string()),
+                    "swap" => Some("arrayswap".to_string()),
                     "each" => Some("arrayeach".to_string()),
                     "map" => Some("arraymap".to_string()),
                     "reduce" => Some("arrayreduce".to_string()),
                     "filter" => Some("arrayfilter".to_string()),
                     "tolist" => Some("arraytolist".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
-                GcObject::Struct(_) => match name {
+                GcObject::Struct(_) => match name.as_str() {
                     "len" | "count" => Some("len".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
+                    "find" => Some("structfind".to_string()),
+                    "isempty" => Some("structisempty".to_string()),
                     "each" => Some("structeach".to_string()),
+                    "tojson" => Some("serializejson".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
-                GcObject::Future(_) => match name {
+                GcObject::Future(_) => match name.as_str() {
                     "onerror" => Some("futureonerror".to_string()),
                     "get" => Some("futureget".to_string()),
+                    _ => None,
+                },
+                GcObject::DateTime(_) => match name.as_str() {
+                    "add" => Some("dateadd".to_string()),
+                    "diff" => Some("datediff".to_string()),
+                    "format" => Some("datetimeformat".to_string()),
+                    "dateformat" => Some("dateformat".to_string()),
+                    "datetimeformat" => Some("datetimeformat".to_string()),
+                    "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
                 #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -1500,6 +2043,7 @@ impl VM {
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
             captured_receiver: None,
             chunk: chunk_for_func,
         });
@@ -1522,6 +2066,7 @@ impl VM {
                 promoted_constants: Vec::new(),
             }],
 
+            variables: Self::new_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1612,6 +2157,200 @@ impl VM {
         Ok(())
     }
 
+    #[cfg(feature = "debugger")]
+    pub fn start_debug_chunk(&mut self, mut chunk: Chunk) -> Result<BxValue> {
+        chunk.ensure_caches();
+        let chunk_for_func = chunk.clone();
+        let chunk_rc = Rc::new(RefCell::new(chunk));
+        let function = Rc::new(BxCompiledFunction {
+            name: "script".to_string(),
+            arity: 0,
+            min_arity: 0,
+            params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
+            captured_receiver: None,
+            chunk: chunk_for_func,
+        });
+
+        let future_id = self.heap.alloc(GcObject::Future(BxFuture {
+            value: BxValue::new_null(),
+            status: FutureStatus::Pending,
+            error_handler: None,
+        }));
+
+        let fiber = BxFiber {
+            stack: Vec::with_capacity(256),
+            frames: vec![CallFrame {
+                function,
+                chunk: chunk_rc,
+                ip: 0,
+                stack_base: 0,
+                receiver: None,
+                handlers: Vec::new(),
+                promoted_constants: Vec::new(),
+            }],
+            variables: Self::new_variables_scope(),
+            future_id,
+            wait_until: None,
+            yield_requested: false,
+            priority: 0,
+            root_stack: Vec::new(),
+        };
+
+        self.fibers.push(fiber);
+        Ok(BxValue::new_ptr(future_id))
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_step_source_line(
+        &mut self,
+        instruction_budget: u64,
+        value_path: Option<&str>,
+    ) -> DebugStepResult {
+        let budget = instruction_budget.max(1);
+        if self.fibers.is_empty() {
+            return DebugStepResult {
+                status: DebugStepStatus::Completed,
+                location: None,
+                value: value_path.and_then(|path| self.debug_get_value_json(path).ok()),
+                instructions: 0,
+                error: None,
+            };
+        }
+
+        self.drain_native_completions();
+        self.debug_run = Some(DebugRunState {
+            start: None,
+            executed: 0,
+            budget,
+            pause: None,
+        });
+
+        self.current_fiber_idx = Some(0);
+        let run_result = self.run_fiber(0, None);
+        self.current_fiber_idx = None;
+
+        let state = self.debug_run.take();
+        let instructions = state.as_ref().map(|s| s.executed).unwrap_or(0);
+        let pause = state.and_then(|s| s.pause);
+        let value = value_path.and_then(|path| self.debug_get_value_json(path).ok());
+
+        match run_result {
+            Ok(Some(result)) => {
+                let fiber = self.fibers.swap_remove(0);
+                if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                    f.value = result;
+                    f.status = FutureStatus::Completed;
+                }
+                DebugStepResult {
+                    status: DebugStepStatus::Completed,
+                    location: None,
+                    value,
+                    instructions,
+                    error: None,
+                }
+            }
+            Ok(None) => {
+                let status = match pause {
+                    Some(DebugPauseReason::Budget) => DebugStepStatus::BudgetExhausted,
+                    Some(DebugPauseReason::Line) => DebugStepStatus::Paused,
+                    None => DebugStepStatus::Blocked,
+                };
+                DebugStepResult {
+                    status,
+                    location: self.debug_current_location(),
+                    value,
+                    instructions,
+                    error: None,
+                }
+            }
+            Err(err) => {
+                let message = err.to_string();
+                if !self.fibers.is_empty() {
+                    let err_id = self.string_new(message.clone());
+                    let fiber = self.fibers.swap_remove(0);
+                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                        f.status = FutureStatus::Failed(BxValue::new_ptr(err_id));
+                    }
+                }
+                DebugStepResult {
+                    status: DebugStepStatus::RuntimeError,
+                    location: None,
+                    value,
+                    instructions,
+                    error: Some(message),
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_current_location(&self) -> Option<DebugLocation> {
+        let fiber_idx = self.current_fiber_idx.unwrap_or(0);
+        let frame = self.fibers.get(fiber_idx)?.frames.last()?;
+        self.debug_location_at_ip(fiber_idx, frame.ip)
+    }
+
+    #[cfg(feature = "debugger")]
+    fn debug_location_at_ip(&self, fiber_idx: usize, ip: usize) -> Option<DebugLocation> {
+        let fiber = self.fibers.get(fiber_idx)?;
+        let frame = fiber.frames.last()?;
+        let chunk = frame.chunk.borrow();
+        let line = if ip < chunk.lines.len() {
+            chunk.lines[ip]
+        } else if ip > 0 && ip - 1 < chunk.lines.len() {
+            chunk.lines[ip - 1]
+        } else {
+            0
+        };
+
+        Some(DebugLocation {
+            function: frame.function.name.clone(),
+            filename: chunk.filename.clone(),
+            line,
+            frame_depth: fiber.frames.len(),
+        })
+    }
+
+    #[cfg(feature = "debugger")]
+    pub fn debug_get_value_json(&self, path: &str) -> Result<serde_json::Value> {
+        let mut parts = path.split('.');
+        let root = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Value path cannot be empty"))?;
+        if !root.eq_ignore_ascii_case("variables") {
+            anyhow::bail!("Only variables.* paths are supported by the debugger inspector");
+        }
+
+        let fiber_idx = self.current_fiber_idx.unwrap_or(0);
+        let fiber = self
+            .fibers
+            .get(fiber_idx)
+            .ok_or_else(|| anyhow::anyhow!("No active debug fiber"))?;
+        let first = parts
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Value path must include a variables member"))?;
+        let mut value = fiber
+            .variables
+            .borrow()
+            .get(&first.to_lowercase())
+            .copied()
+            .unwrap_or(BxValue::new_null());
+
+        for part in parts {
+            let Some(id) = value.as_gc_id() else {
+                return Ok(serde_json::Value::Null);
+            };
+            value = match self.heap.get(id) {
+                GcObject::Struct(_) => self.struct_get(id, part),
+                GcObject::NativeObject(obj) => obj.borrow().get_property(part),
+                _ => BxValue::new_null(),
+            };
+        }
+
+        Ok(self.bx_to_json(&value))
+    }
+
     pub fn future_state(&self, future: BxValue) -> Result<HostFutureState> {
         let id = future.as_gc_id().ok_or_else(|| anyhow::anyhow!("Value is not a future"))?;
         match self.heap.get(id) {
@@ -1675,6 +2414,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: Vec::new(),
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -1892,10 +2632,49 @@ impl VM {
             if ip >= code_len {
                 return Ok(Some(BxValue::new_null()));
             }
+
+            #[cfg(feature = "debugger")]
+            {
+                let loc = self.debug_location_at_ip(fiber_idx, ip);
+                let mut pause_reason = None;
+                if let Some(state) = self.debug_run.as_mut() {
+                    if state.executed >= state.budget {
+                        pause_reason = Some(DebugPauseReason::Budget);
+                    } else if let Some(loc) = loc {
+                        match &state.start {
+                            Some(start)
+                                if state.executed > 0
+                                    && (start.line != loc.line
+                                        || start.frame_depth != loc.frame_depth
+                                        || start.function != loc.function) =>
+                            {
+                                pause_reason = Some(DebugPauseReason::Line);
+                            }
+                            Some(_) => {}
+                            None => state.start = Some(loc),
+                        }
+                    }
+
+                    if let Some(reason) = pause_reason {
+                        state.pause = Some(reason);
+                    }
+                }
+
+                if pause_reason.is_some() {
+                    self.fibers[fiber_idx].frames.last_mut().unwrap().ip = ip;
+                    return Ok(None);
+                }
+            }
+
             // SAFETY: ip < code_len; pointer is valid for the Rc<Chunk> lifetime.
             let word0 = unsafe { *code_ptr.add(ip) };
             let ip_at_start = ip;
             ip += 1;
+
+            #[cfg(feature = "debugger")]
+            if let Some(state) = self.debug_run.as_mut() {
+                state.executed += 1;
+            }
 
             let opcode = (word0 & 0xFF) as u8;
             let op0 = word0 >> 8;
@@ -2424,6 +3203,139 @@ impl VM {
                         frame_changed = true; continue 'quantum;
                     }
                 }
+                op::BIT_OR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) | (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise OR.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_AND => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) & (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise AND.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_XOR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) ^ (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise XOR.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_NOT => {
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() {
+                        let result = !(a.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operand must be a number for bitwise NOT.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_SHL => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) << (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift left.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_SHR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as i64) >> (b.as_number() as i64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift right.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::BIT_USHR => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        let result = (a.as_number() as u64) >> (b.as_number() as u64);
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise unsigned shift right.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::POW => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if a.is_number() && b.is_number() {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number().powf(b.as_number())));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers for power.")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+                }
+                op::XOR_OP => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a_true = self.is_truthy(a);
+                    let b_true = self.is_truthy(b);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true != b_true));
+                }
+                op::EQV_OP => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a_true = self.is_truthy(a);
+                    let b_true = self.is_truthy(b);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true == b_true));
+                }
+                op::RANGE => {
+                    let right_excl_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left_excl_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let end_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let start_val = self.fibers[fiber_idx].stack.pop().unwrap();
+
+                    let right_excl = right_excl_val.is_bool() && right_excl_val.as_bool();
+                    let left_excl = left_excl_val.is_bool() && left_excl_val.as_bool();
+
+                    if !start_val.is_number() || !end_val.is_number() {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Range bounds must be numbers")?;
+                        frame_changed = true; continue 'quantum;
+                    }
+
+                    let start = start_val.as_number() as i64;
+                    let end = end_val.as_number() as i64;
+                    let id = self.heap.alloc(GcObject::Range(BxRange::from_bounds(
+                        start,
+                        end,
+                        left_excl,
+                        right_excl,
+                    )));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
                 op::POP => {
                     self.fibers[fiber_idx].stack.pop();
                 }
@@ -2602,6 +3514,15 @@ impl VM {
                                 }
                             }
                         }
+
+                        if found.is_none() && name == "variables" {
+                            let proxy = VariablesScopeProxy {
+                                variables: Rc::clone(&self.fibers[fiber_idx].variables),
+                            };
+                            found = Some(BxValue::new_ptr(
+                                self.heap.alloc(GcObject::NativeObject(Rc::new(RefCell::new(proxy))))
+                            ));
+                        }
                         
                         if found.is_none() {
                             found = self.get_global(&name);
@@ -2629,9 +3550,7 @@ impl VM {
                             }
                         }
                     } else {
-                        flush_ip!();
-                        self.throw_error(fiber_idx, "'variables' scope only available in classes.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.fibers[fiber_idx].variables.borrow_mut().insert(name, val);
                     }
                 }
 
@@ -2684,6 +3603,58 @@ impl VM {
                     }
                     items.reverse();
                     let id = self.heap.alloc(GcObject::Array(items));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
+                op::ARRAY_SPREAD => {
+                    let count = op0;
+                    let mut result = Vec::new();
+                    let mut pairs = Vec::with_capacity(count as usize * 2);
+                    for _ in 0..(count * 2) {
+                        pairs.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                    }
+                    pairs.reverse();
+                    for chunk in pairs.chunks(2) {
+                        let should_spread = chunk[0].is_bool() && chunk[0].as_bool();
+                        let val = chunk[1];
+                        if should_spread {
+                            result.extend(self.flatten_spread_array_value(val)?);
+                        } else {
+                            result.push(val);
+                        }
+                    }
+                    let id = self.heap.alloc(GcObject::Array(result));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                }
+                op::STRUCT_SPREAD => {
+                    let count = op0;
+                    let mut resolved: Vec<(String, BxValue)> = Vec::new();
+                    for _ in 0..count {
+                        let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if !marker.is_bool() {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Internal error: struct spread marker must be boolean")?;
+                            frame_changed = true; continue 'quantum;
+                        }
+                        if marker.as_bool() {
+                            let spread_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                            let mut spread_entries = self.flatten_spread_struct_entries(spread_val)?;
+                            spread_entries.reverse();
+                            resolved.extend(spread_entries);
+                        } else {
+                            let value = self.fibers[fiber_idx].stack.pop().unwrap();
+                            let key_val = self.fibers[fiber_idx].stack.pop().unwrap();
+                            resolved.push((self.to_string(key_val), value));
+                        }
+                    }
+                    resolved.reverse();
+                    let mut shape_id = self.shapes.get_root();
+                    let mut props = Vec::with_capacity(resolved.len());
+                    for (key, value) in resolved {
+                        let key_id = self.interner.intern(&key);
+                        shape_id = self.shapes.transition(shape_id, key_id);
+                        props.push(value);
+                    }
+                    let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
                 op::STRUCT => {
@@ -3432,6 +4403,48 @@ impl VM {
                     frame_changed = true;
                     continue 'quantum;
                 }
+                op::CALL_SPREAD => {
+                    let count = op0 as usize;
+                    let mut flattened_chunks: Vec<Vec<BxValue>> = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let marker = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if !marker.is_bool() {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Internal error: call spread marker must be boolean")?;
+                            frame_changed = true; continue 'quantum;
+                        }
+                        let value = self.fibers[fiber_idx].stack.pop().unwrap();
+                        if marker.as_bool() {
+                            flattened_chunks.push(self.flatten_spread_array_value(value)?);
+                        } else {
+                            flattened_chunks.push(vec![value]);
+                        }
+                    }
+                    flattened_chunks.reverse();
+                    let flattened_len: usize = flattened_chunks.iter().map(|chunk| chunk.len()).sum();
+                    for chunk in flattened_chunks {
+                        for value in chunk {
+                            self.fibers[fiber_idx].stack.push(value);
+                        }
+                    }
+                    flush_ip!();
+                    self.execute_call(fiber_idx, flattened_len, None)?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    frame_changed = true;
+                    continue 'quantum;
+                }
+                op::CALL_NAMED_SPREAD => {
+                    let count = op0;
+                    let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, count)?;
+                    for value in args {
+                        self.fibers[fiber_idx].stack.push(value);
+                    }
+                    flush_ip!();
+                    self.execute_call(fiber_idx, names.len(), Some(names))?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    frame_changed = true;
+                    continue 'quantum;
+                }
                 op::CALL_NAMED => {
                     let total_count = op0;
                     let names_idx = next_word!();
@@ -3448,6 +4461,22 @@ impl VM {
                     flush_ip!();
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
                     if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    frame_changed = true;
+                    continue 'quantum;
+                }
+                op::INVOKE_NAMED_SPREAD => {
+                    let name_idx = op0;
+                    let total_count = next_word!();
+                    let _unused = next_word!();
+                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                    let name = self.interner.resolve(name_id).to_string();
+                    let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, total_count)?;
+                    for value in args {
+                        self.fibers[fiber_idx].stack.push(value);
+                    }
+                    flush_ip!();
+                    self.execute_invoke(fiber_idx, name, names.len(), Some(names), ip_at_start)?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -3615,6 +4644,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() < b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt < b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -3626,6 +4657,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() <= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt <= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -3637,6 +4670,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() > b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt > b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -3648,6 +4683,8 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() >= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt >= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
@@ -3669,30 +4706,56 @@ impl VM {
                     let offset = next_word!();
                     let collection_idx = stack_base + collection_slot as usize;
                     let cursor_idx = stack_base + cursor_slot as usize;
+                    let collection = self.fibers[fiber_idx].stack[collection_idx];
                     
                     let (is_done, next_val, next_idx) = {
                         let cursor_val = if self.fibers[fiber_idx].stack[cursor_idx].is_number() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_number() as usize
                         } else if self.fibers[fiber_idx].stack[cursor_idx].is_int() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_int() as usize
+                        } else if matches!(self.heap.get_opt(collection.as_gc_id().unwrap_or(usize::MAX)), Some(GcObject::Range(_))) {
+                            0
                         } else {
-                            bail!("Internal VM error: iterator cursor is not a number")
+                            bail!(
+                                "Internal VM error: iterator cursor is not a number (slot {}, value {:?}, collection slot {}, collection {:?})",
+                                cursor_idx,
+                                self.fibers[fiber_idx].stack[cursor_idx],
+                                collection_idx,
+                                collection,
+                            )
                         };
-                        
-                        let collection = self.fibers[fiber_idx].stack[collection_idx];
+
                         if let Some(id) = collection.as_gc_id() {
                             match self.heap.get(id) {
-                                GcObject::Array(arr) => {
-                                    if cursor_val < arr.len() {
-                                        (false, Some(arr[cursor_val]), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
-                                    } else {
-                                        (true, None, None)
-                                    }
+                            GcObject::Array(arr) => {
+                                if cursor_val < arr.len() {
+                                    (false, Some(arr[cursor_val]), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
+                                } else {
+                                    (true, None, None)
                                 }
-                                GcObject::Struct(s) => {
-                                    let keys = {
-                                        let mut k = Vec::new();
-                                        let shape = &self.shapes.shapes[s.shape_id as usize];
+                            }
+                            GcObject::Range(range) => {
+                                let (start, end) = range.iter_bounds();
+                                let current = if start <= end {
+                                    start + cursor_val as i64
+                                } else {
+                                    start - cursor_val as i64
+                                };
+                                let done = if start <= end {
+                                    current > end
+                                } else {
+                                    current < end
+                                };
+                                if done {
+                                    (true, None, None)
+                                } else {
+                                    (false, Some(BxValue::new_number(current as f64)), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
+                                }
+                            }
+                            GcObject::Struct(s) => {
+                                let keys = {
+                                    let mut k = Vec::new();
+                                    let shape = &self.shapes.shapes[s.shape_id as usize];
                                         for &intern_id in shape.fields.keys() {
                                             let resolved = self.interner.resolve(intern_id).to_string();
                                             k.push((intern_id, resolved));
@@ -3709,8 +4772,8 @@ impl VM {
                                     } else {
                                         (true, None, None)
                                     }
-                                }
-                                _ => { 
+                }
+                _ => {
                                     self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
                                     (true, None, None)
                                 }
@@ -3896,6 +4959,72 @@ impl VM {
                             buffer.push('\n');
                         } else {
                             println!("{}", out);
+                        }
+                    }
+                }
+                op::BUFFER_WRITE => {
+                    let val = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let s = self.to_string(val);
+                    if let Some(ref mut buffer) = self.output_buffer {
+                        buffer.push_str(&s);
+                    } else {
+                        print!("{s}");
+                    }
+                }
+                op::CONTAINS => {
+                    let needle = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let haystack = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let needle_s = self.to_string(needle);
+                    let result = if let Some(id) = haystack.as_gc_id() {
+                        match self.heap.get(id) {
+                            GcObject::String(s) => {
+                                s.to_string().contains(&needle_s)
+                            }
+                            GcObject::Array(arr) => arr.iter().any(|v| *v == needle),
+                            GcObject::Range(range) => {
+                                if needle.is_number() || needle.is_int() {
+                                    range.contains_number(needle.as_number())
+                                } else {
+                                    false
+                                }
+                            }
+                            GcObject::Struct(s) => {
+                                let intern_id = self.interner.intern(&needle_s);
+                                self.shapes.get_index(s.shape_id, intern_id).is_some()
+                            }
+                            _ => false,
+                        }
+                    } else if haystack.is_number() {
+                        false
+                    } else {
+                        let hs = self.to_string(haystack);
+                        hs.contains(&needle_s)
+                    };
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
+                }
+                op::INSTANCEOF => {
+                    let right = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let type_name = self
+                        .type_name_from_value(right)
+                        .unwrap_or_else(|| self.to_string(right));
+                    let result = self.value_matches_type_name(left, &type_name);
+                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
+                }
+                op::CASTAS => {
+                    let right = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let left = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let type_name = self
+                        .type_name_from_value(right)
+                        .unwrap_or_else(|| self.to_string(right));
+                    match self.cast_value_to_type(left, &type_name) {
+                        Ok(val) => self.fibers[fiber_idx].stack.push(val),
+                        Err(msg) => {
+                            flush_ip!();
+                            let err = self.exception_from_message("BoxCastException", msg, None);
+                            self.throw_value(fiber_idx, err)?;
+                            frame_changed = true;
+                            continue 'quantum;
                         }
                     }
                 }
@@ -4241,6 +5370,7 @@ impl VM {
                             handlers: Vec::new(),
                             promoted_constants: vec![None; constant_count],
                         }],
+                        variables: self.current_variables_scope(),
                         future_id,
                         wait_until: None,
                         yield_requested: false,
@@ -4325,6 +5455,7 @@ impl VM {
                 handlers: Vec::new(),
                 promoted_constants: vec![None; constant_count],
             }],
+            variables: self.current_variables_scope(),
             future_id,
             wait_until: None,
             yield_requested: false,
@@ -5180,6 +6311,8 @@ impl VM {
                     }
                     js_arr.into()
                 }
+                GcObject::Range(range) => JsValue::from_str(&format!("{}", range)),
+                GcObject::DateTime(dt) => JsValue::from_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
                 GcObject::Struct(s) => {
                     let js_obj = js_sys::Object::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];
@@ -5338,6 +6471,7 @@ impl VM {
         for fiber in &self.fibers {
             roots.extend(fiber.stack.iter().cloned());
             roots.extend(fiber.root_stack.iter().cloned());
+            roots.extend(fiber.variables.borrow().values().copied());
             for frame in &fiber.frames {
                 if let Some(recv) = &frame.receiver {
                     roots.push(*recv);
@@ -5348,6 +6482,7 @@ impl VM {
         }
         // 2. Globals
         roots.extend(self.global_values.iter().cloned());
+        roots.extend(self.script_variables.borrow().values().copied());
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
         roots.extend(self.callback_registry.borrow().values().cloned());
         for completion in &self.native_completions {
@@ -5370,12 +6505,12 @@ impl VM {
     }
 
     pub fn bx_to_json(&self, val: &BxValue) -> serde_json::Value {
-        if val.is_number() {
+        if val.is_int() {
+            serde_json::Value::Number(val.as_int().into())
+        } else if val.is_number() {
             serde_json::Number::from_f64(val.as_number())
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null)
-        } else if val.is_int() {
-            serde_json::Value::Number(val.as_int().into())
         } else if val.is_bool() {
             serde_json::Value::Bool(val.as_bool())
         } else if val.is_null() {
@@ -5383,10 +6518,12 @@ impl VM {
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
                 GcObject::String(s) => serde_json::Value::String(s.to_string()),
+                GcObject::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
                 GcObject::Array(arr) => {
                     let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| self.bx_to_json(v)).collect();
                     serde_json::Value::Array(json_arr)
                 }
+                GcObject::Range(range) => serde_json::Value::String(format!("{}", range)),
                 GcObject::Struct(s) => {
                     let mut map = serde_json::Map::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];

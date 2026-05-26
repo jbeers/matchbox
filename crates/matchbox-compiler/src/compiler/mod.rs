@@ -1,13 +1,15 @@
 use crate::ast::{
-    ClassMember, Expression, ExpressionKind, FunctionBody, Literal, Statement, StatementKind,
-    StringPart,
+    ClassMember, Expression, ExpressionKind, FunctionBody,
+    FunctionModifiers as AstFunctionModifiers, Literal, Statement, StatementKind, StringPart,
 };
-use anyhow::{bail, Result};
+use crate::parser;
+use anyhow::{Result, bail};
+use matchbox_vm::Chunk;
 use matchbox_vm::types::{
-    box_string::BoxString, BxClass, BxCompiledFunction, BxInterface, Constant,
+    BxClass, BxCompiledFunction, BxInterface, ClassModifiers as VmClassModifiers, Constant,
+    FunctionModifiers as VmFunctionModifiers, box_string::BoxString,
 };
 use matchbox_vm::vm::opcode::op;
-use matchbox_vm::Chunk;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,17 +32,20 @@ pub struct Compiler {
     continue_patches: Vec<Vec<usize>>,
     break_patches: Vec<Vec<usize>>,
     loop_locals: Vec<usize>,
+    catch_exception_slots: Vec<usize>,
     class_methods: HashSet<String>, // Method names of the current class being compiled
     /// Directory to resolve unqualified source paths against (e.g. sibling interfaces).
-    source_dir: Option<PathBuf>,
+    pub source_dir: Option<PathBuf>,
     /// Tracks which class names (lowercased) are known to define an init() method.
     /// Propagated to sub-compilers so that `new` expressions in functions/methods
     /// can still determine whether to emit an `init` invocation.
     class_has_init_map: HashMap<String, bool>,
+    current_function_is_static: bool,
 }
 
 impl Compiler {
     pub fn new(filename: &str) -> Self {
+        let source_dir = Path::new(filename).parent().map(|p| p.to_path_buf());
         Compiler {
             chunk: Chunk::new(filename),
             locals: Vec::new(),
@@ -53,13 +58,16 @@ impl Compiler {
             continue_patches: Vec::new(),
             break_patches: Vec::new(),
             loop_locals: Vec::new(),
+            catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
-            source_dir: None,
+            source_dir,
             class_has_init_map: HashMap::new(),
+            current_function_is_static: false,
         }
     }
 
     pub fn with_chunk(chunk: Chunk) -> Self {
+        let source_dir = Path::new(&chunk.filename).parent().map(|p| p.to_path_buf());
         Compiler {
             chunk,
             locals: Vec::new(),
@@ -72,9 +80,11 @@ impl Compiler {
             continue_patches: Vec::new(),
             break_patches: Vec::new(),
             loop_locals: Vec::new(),
+            catch_exception_slots: Vec::new(),
             class_methods: HashSet::new(),
-            source_dir: None,
+            source_dir,
             class_has_init_map: HashMap::new(),
+            current_function_is_static: false,
         }
     }
 
@@ -134,6 +144,7 @@ impl Compiler {
             }
             StatementKind::ClassDecl {
                 name,
+                modifiers: class_modifiers,
                 extends,
                 accessors,
                 implements,
@@ -150,6 +161,21 @@ impl Compiler {
 
                 let mut methods = HashMap::new();
                 let mut properties = Vec::new();
+
+                if class_modifiers.is_final && extends.is_some() {
+                    bail!("Class {} is final and cannot extend another class", name);
+                }
+                if let Some(parent_name) = extends.as_ref() {
+                    if let Some(parent_class) = self.find_class_constant(parent_name)? {
+                        if parent_class.modifiers.is_final {
+                            bail!(
+                                "Class {} cannot extend final class {}",
+                                name,
+                                parent_class.name
+                            );
+                        }
+                    }
+                }
 
                 // Collect method names so unqualified calls inside methods resolve correctly.
                 let mut class_method_names = HashSet::new();
@@ -187,13 +213,33 @@ impl Compiler {
                             StatementKind::FunctionDecl {
                                 name: func_name,
                                 attributes: _,
-                                access_modifier: _,
+                                modifiers,
                                 return_type: _,
                                 params,
                                 body,
                             } => {
                                 if let FunctionBody::Abstract = body {
                                     bail!("Abstract functions only allowed in interfaces");
+                                }
+                                if let Some(parent_name) = extends.as_ref() {
+                                    if let Some(parent_class) =
+                                        self.find_class_constant(parent_name)?
+                                    {
+                                        if let Some((_, final_method)) =
+                                            parent_class.methods.iter().find(|(method_name, _)| {
+                                                method_name.eq_ignore_ascii_case(func_name)
+                                            })
+                                        {
+                                            if final_method.modifiers.is_final {
+                                                bail!(
+                                                    "Method {} on class {} overrides final method from {}",
+                                                    func_name,
+                                                    name,
+                                                    parent_class.name
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                                 let mut method_compiler =
                                     Compiler::with_chunk(self.chunk.new_sub_chunk());
@@ -203,9 +249,14 @@ impl Compiler {
                                 method_compiler.source_dir = self.source_dir.clone();
                                 method_compiler.current_line = inner_stmt.line as u32;
                                 method_compiler.class_methods = class_method_names.clone();
-                                method_compiler.class_has_init_map = self.class_has_init_map.clone();
-                                let func =
-                                    method_compiler.compile_function(&func_name, &params, &body)?;
+                                method_compiler.class_has_init_map =
+                                    self.class_has_init_map.clone();
+                                let func = method_compiler.compile_function(
+                                    &func_name,
+                                    &params,
+                                    &body,
+                                    modifiers.clone(),
+                                )?;
                                 methods.insert(func_name.to_lowercase(), func);
                             }
                             _ => {
@@ -237,6 +288,7 @@ impl Compiler {
                                 arity: 0,
                                 min_arity: 0,
                                 params: Vec::new(),
+                                modifiers: VmFunctionModifiers::default(),
                                 captured_receiver: None,
                                 chunk: getter_chunk,
                             };
@@ -259,6 +311,7 @@ impl Compiler {
                                 arity: 1,
                                 min_arity: 1,
                                 params: vec!["val".to_string()],
+                                modifiers: VmFunctionModifiers::default(),
                                 captured_receiver: None,
                                 chunk: setter_chunk,
                             };
@@ -293,7 +346,12 @@ impl Compiler {
                                 if let Some(default_impl) = method_opt {
                                     methods.insert(method_name.clone(), default_impl.clone());
                                 } else {
-                                    bail!("Class {} must implement abstract method {} from interface {}", name, method_name, iface.name);
+                                    bail!(
+                                        "Class {} must implement abstract method {} from interface {}",
+                                        name,
+                                        method_name,
+                                        iface.name
+                                    );
                                 }
                             }
                         }
@@ -309,6 +367,7 @@ impl Compiler {
                     arity: 0,
                     min_arity: 0,
                     params: Vec::new(),
+                    modifiers: VmFunctionModifiers::default(),
                     captured_receiver: None,
                     chunk: constructor_compiler.chunk,
                 };
@@ -319,6 +378,10 @@ impl Compiler {
 
                 let class = BxClass {
                     name: name.clone(),
+                    modifiers: VmClassModifiers {
+                        is_abstract: class_modifiers.is_abstract,
+                        is_final: class_modifiers.is_final,
+                    },
                     extends: extends.as_ref().map(|s| s.to_lowercase()),
                     implements: implements.iter().map(|s| s.to_lowercase()).collect(),
                     constructor,
@@ -340,7 +403,7 @@ impl Compiler {
                     if let StatementKind::FunctionDecl {
                         name: func_name,
                         attributes: _,
-                        access_modifier: _,
+                        modifiers: _,
                         return_type: _,
                         params,
                         body,
@@ -356,7 +419,12 @@ impl Compiler {
                             method_compiler.module_paths = self.module_paths.clone();
                             method_compiler.source_dir = self.source_dir.clone();
                             method_compiler.current_line = member.line;
-                            let func = method_compiler.compile_function(func_name, params, body)?;
+                            let func = method_compiler.compile_function(
+                                func_name,
+                                params,
+                                body,
+                                AstFunctionModifiers::default(),
+                            )?;
                             Some(func)
                         };
                         methods.insert(func_name.to_lowercase(), method);
@@ -448,6 +516,144 @@ impl Compiler {
                 }
                 Ok(())
             }
+            StatementKind::Rethrow => {
+                let slot = self.catch_exception_slots.last().copied().ok_or_else(|| {
+                    anyhow::anyhow!("rethrow can only be used inside a catch block")
+                })?;
+                self.chunk
+                    .emit1(op::GET_LOCAL, slot as u32, stmt.line as u32);
+                self.chunk.emit0(op::THROW, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::Assert { condition, message } => {
+                // Compile: condition, JUMP_IF_FALSE to throw, POP, JUMP end, throw: POP + THROW
+                self.compile_expression(condition)?;
+                let jif_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_FALSE, 0, stmt.line as u32);
+                // Truthy path
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                let jump_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
+                // Falsy path
+                let falsy_target = self.chunk.code.len();
+                self.chunk.code[jif_idx] =
+                    op::JUMP_IF_FALSE as u32 | (((falsy_target - jif_idx - 1) as u32) << 8);
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                if let Some(message) = message {
+                    self.compile_expression(message)?;
+                } else {
+                    let msg_idx = self
+                        .chunk
+                        .add_constant(Constant::String(BoxString::new("Assertion failed")));
+                    self.chunk.emit1(op::CONSTANT, msg_idx, stmt.line as u32);
+                }
+                self.chunk.emit0(op::THROW, stmt.line as u32);
+                // End
+                let end_target = self.chunk.code.len();
+                self.chunk.code[jump_idx] =
+                    op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
+                Ok(())
+            }
+            StatementKind::Param { name, default } => {
+                let name_const = BoxString::new(name.as_str());
+                let name_idx = self.chunk.add_constant(Constant::String(name_const));
+                self.chunk.emit1(op::GET_GLOBAL, name_idx, stmt.line as u32);
+                let jn_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_NULL, 0, stmt.line as u32);
+                // Variable exists — pop and skip to end
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                let jump_idx = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
+                // Variable is null/undefined
+                let null_target = self.chunk.code.len();
+                self.chunk.code[jn_idx] =
+                    op::JUMP_IF_NULL as u32 | (((null_target - jn_idx - 1) as u32) << 8);
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                if let Some(def) = default {
+                    self.compile_expression(def)?;
+                    let name_idx2 = self
+                        .chunk
+                        .add_constant(Constant::String(BoxString::new(name.as_str())));
+                    self.chunk
+                        .emit1(op::DEFINE_GLOBAL, name_idx2, stmt.line as u32);
+                } else {
+                    // No default — throw error
+                    let err_idx =
+                        self.chunk
+                            .add_constant(Constant::String(BoxString::new(&format!(
+                                "Required param '{}' not set",
+                                name
+                            ))));
+                    self.chunk.emit1(op::CONSTANT, err_idx, stmt.line as u32);
+                    self.chunk.emit0(op::THROW, stmt.line as u32);
+                }
+                // End
+                let end_target = self.chunk.code.len();
+                self.chunk.code[jump_idx] =
+                    op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
+                Ok(())
+            }
+            StatementKind::Not(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit0(op::POP, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::Include(expr) => {
+                if let Some(include_path) = self.literal_include_path(expr) {
+                    self.compile_include_file(&include_path)?;
+                } else {
+                    let include_idx = self
+                        .chunk
+                        .add_constant(Constant::String(BoxString::new("include")));
+                    self.chunk
+                        .emit1(op::GET_GLOBAL, include_idx, stmt.line as u32);
+                    self.compile_expression(expr)?;
+                    self.chunk.emit1(op::CALL, 1, stmt.line as u32);
+                    self.chunk.emit0(op::POP, stmt.line as u32);
+                }
+                Ok(())
+            }
+            StatementKind::BufferOutput(expr) => {
+                self.compile_expression(expr)?;
+                self.chunk.emit0(op::BUFFER_WRITE, stmt.line as u32);
+                Ok(())
+            }
+            StatementKind::Destructure {
+                kind,
+                source,
+                bindings,
+            } => {
+                self.compile_expression(source)?;
+                for (idx, (src_name, local_name)) in bindings.iter().enumerate() {
+                    self.chunk.emit0(op::DUP, source.line);
+                    match kind {
+                        crate::ast::DestructureKind::Object => {
+                            let name_idx = self
+                                .chunk
+                                .add_constant(Constant::String(BoxString::new(src_name.as_str())));
+                            self.chunk.emit1(op::MEMBER, name_idx, source.line);
+                        }
+                        crate::ast::DestructureKind::Array => {
+                            let index_idx =
+                                self.chunk.add_constant(Constant::Number((idx + 1) as f64));
+                            self.chunk.emit1(op::CONSTANT, index_idx, source.line);
+                            self.chunk.emit0(op::INDEX, source.line);
+                        }
+                    }
+                    let bind_name = local_name.as_ref().unwrap_or(src_name);
+                    if let Some(local_idx) = self.resolve_local(bind_name) {
+                        self.chunk
+                            .emit1(op::SET_LOCAL_POP, local_idx as u32, source.line);
+                    } else {
+                        let bind_idx = self
+                            .chunk
+                            .add_constant(Constant::String(BoxString::new(bind_name.as_str())));
+                        self.chunk.emit1(op::DEFINE_GLOBAL, bind_idx, source.line);
+                    }
+                }
+                self.chunk.emit0(op::POP, source.line);
+                Ok(())
+            }
             StatementKind::TryCatch {
                 try_branch,
                 catches,
@@ -476,10 +682,17 @@ impl Compiler {
                     let first_catch = &catches[0];
                     self.begin_scope();
                     self.add_local(first_catch.exception_var.clone());
-                    for s in &first_catch.body {
-                        self.compile_statement(s, false)?;
-                    }
+                    let catch_slot = self.locals.len() - 1;
+                    self.catch_exception_slots.push(catch_slot);
+                    let catch_result = (|| -> Result<()> {
+                        for s in &first_catch.body {
+                            self.compile_statement(s, false)?;
+                        }
+                        Ok(())
+                    })();
+                    self.catch_exception_slots.pop();
                     self.end_scope();
+                    catch_result?;
                 } else {
                     self.chunk.emit0(op::THROW, stmt.line as u32);
                 }
@@ -861,7 +1074,7 @@ impl Compiler {
                 self.loop_locals.pop();
                 self.end_scope();
 
-                // 4. Continue target: where 'continue' jumps to (just before LOOP back)
+                // 4. Continue target
                 let continue_target = self.chunk.code.len();
                 let continues = self.continue_patches.pop().unwrap();
                 for idx in continues {
@@ -869,12 +1082,12 @@ impl Compiler {
                     self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
                 }
 
-                // 5. Loop back to evaluate condition again
+                // 5. Loop back
                 let loop_end = self.chunk.code.len();
                 let offset = loop_end - loop_start + 1;
                 self.chunk.emit1(op::LOOP, offset as u32, condition.line);
 
-                // 6. Exit target: patch exit_jump
+                // 6. Exit target
                 let exit_target = self.chunk.code.len();
                 let exit_offset = exit_target - exit_jump - 1;
                 self.chunk.code[exit_jump] = op::JUMP_IF_FALSE as u32 | ((exit_offset as u32) << 8);
@@ -883,6 +1096,58 @@ impl Compiler {
                 self.chunk.emit0(op::POP, condition.line);
 
                 // Patch any break jumps to land at the end of the loop
+                let break_target = self.chunk.code.len();
+                if let Some(breaks) = self.break_patches.pop() {
+                    for idx in breaks {
+                        let offset = break_target - idx - 1;
+                        self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
+                    }
+                }
+
+                Ok(())
+            }
+            StatementKind::DoWhile { body, condition } => {
+                let loop_start = self.chunk.code.len();
+
+                // 1. Execute body unconditionally first
+                self.begin_scope();
+                self.continue_patches.push(Vec::new());
+                self.break_patches.push(Vec::new());
+                self.loop_locals.push(self.locals.len());
+                for stmt in body {
+                    self.compile_statement(stmt, false)?;
+                }
+                self.loop_locals.pop();
+                self.end_scope();
+
+                // 2. Continue target
+                let continue_target = self.chunk.code.len();
+                let continues = self.continue_patches.pop().unwrap();
+                for idx in continues {
+                    let offset = continue_target - idx - 1;
+                    self.chunk.code[idx] = op::JUMP as u32 | ((offset as u32) << 8);
+                }
+
+                // 3. Evaluate condition
+                self.compile_expression(condition)?;
+
+                // 4. Jump to exit if false
+                let exit_jump = self.chunk.code.len();
+                self.chunk.emit1(op::JUMP_IF_FALSE, 0, condition.line);
+
+                // 5. Pop truthy result and loop back
+                self.chunk.emit0(op::POP, condition.line);
+                let loop_end = self.chunk.code.len();
+                let offset = loop_end - loop_start + 1;
+                self.chunk.emit1(op::LOOP, offset as u32, condition.line);
+
+                // 6. Exit: patch exit_jump, pop falsy result
+                let exit_target = self.chunk.code.len();
+                let exit_offset = exit_target - exit_jump - 1;
+                self.chunk.code[exit_jump] = op::JUMP_IF_FALSE as u32 | ((exit_offset as u32) << 8);
+                self.chunk.emit0(op::POP, condition.line);
+
+                // 7. Patch break jumps
                 let break_target = self.chunk.code.len();
                 if let Some(breaks) = self.break_patches.pop() {
                     for idx in breaks {
@@ -986,12 +1251,16 @@ impl Compiler {
             StatementKind::FunctionDecl {
                 name,
                 attributes: _,
-                access_modifier: _,
+                modifiers,
                 return_type: _,
                 params,
                 body,
             } => {
-                let func = self.compile_function(&name, &params, &body)?;
+                if let FunctionBody::Abstract = body {
+                    // Abstract function — skip compilation (no body to emit)
+                    return Ok(());
+                }
+                let func = self.compile_function(&name, &params, &body, modifiers.clone())?;
                 let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                 if self.is_repl && is_last {
                     self.chunk.emit1(op::CONSTANT, func_idx, stmt.line as u32);
@@ -1179,6 +1448,9 @@ impl Compiler {
                 if resolved_path.contains('.') {
                     let class_val = self.load_class_from_path(&resolved_path)?;
                     if let Constant::Class(ref cls) = class_val {
+                        if cls.modifiers.is_abstract {
+                            bail!("Cannot instantiate abstract class {}", cls.name);
+                        }
                         class_has_init = cls
                             .methods
                             .iter()
@@ -1187,13 +1459,24 @@ impl Compiler {
                     let class_idx = self.chunk.add_constant(class_val);
                     self.chunk.emit1(op::CONSTANT, class_idx, expr.line);
                 } else {
+                    if let Some(class) = self.find_class_constant(&resolved_path)? {
+                        if class.modifiers.is_abstract {
+                            bail!("Cannot instantiate abstract class {}", class.name);
+                        }
+                        class_has_init = class
+                            .methods
+                            .iter()
+                            .any(|(n, _)| n.eq_ignore_ascii_case("init"));
+                    }
                     // Check inline classes in this chunk or any parent chunk tracked
                     // via the shared class_has_init_map.
-                    class_has_init = self
-                        .class_has_init_map
-                        .get(&resolved_path.to_lowercase())
-                        .copied()
-                        .unwrap_or(false);
+                    if !class_has_init {
+                        class_has_init = self
+                            .class_has_init_map
+                            .get(&resolved_path.to_lowercase())
+                            .copied()
+                            .unwrap_or(false);
+                    }
                     if !class_has_init {
                         class_has_init = self.chunk.constants.iter().any(|c| {
                             if let Constant::Class(cls) = c {
@@ -1291,32 +1574,91 @@ impl Compiler {
                     Ok(())
                 }
                 Literal::Array(items) => {
-                    for item in items {
-                        self.compile_expression(item)?;
+                    let has_spread = items
+                        .iter()
+                        .any(|i| matches!(i.kind, ExpressionKind::Spread(_)));
+                    if has_spread {
+                        let count = items.len() as u32;
+                        for item in items {
+                            let (is_spread, inner) = match &item.kind {
+                                ExpressionKind::Spread(expr) => (true, expr.as_ref()),
+                                _ => (false, item),
+                            };
+                            // Push spread marker (boolean)
+                            let marker_idx = self.chunk.add_constant(Constant::Boolean(is_spread));
+                            self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            // Push the value
+                            self.compile_expression(inner)?;
+                        }
+                        self.chunk.emit1(op::ARRAY_SPREAD, count, expr.line);
+                    } else {
+                        for item in items {
+                            self.compile_expression(item)?;
+                        }
+                        self.chunk.emit1(op::ARRAY, items.len() as u32, expr.line);
                     }
-                    self.chunk.emit1(op::ARRAY, items.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Struct(members) => {
-                    for (key_expr, val_expr) in members {
-                        match &key_expr.kind {
-                            ExpressionKind::Identifier(name) => {
-                                let idx = self
-                                    .chunk
-                                    .add_constant(Constant::String(BoxString::new(name.as_str())));
-                                self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                    let has_spread = members
+                        .iter()
+                        .any(|(key_expr, _)| matches!(key_expr.kind, ExpressionKind::Spread(_)));
+                    if has_spread {
+                        for (key_expr, val_expr) in members {
+                            match &key_expr.kind {
+                                ExpressionKind::Spread(inner) => {
+                                    self.compile_expression(inner)?;
+                                    let marker_idx =
+                                        self.chunk.add_constant(Constant::Boolean(true));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                ExpressionKind::Identifier(name) => {
+                                    let idx = self.chunk.add_constant(Constant::String(
+                                        BoxString::new(name.as_str()),
+                                    ));
+                                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                                    self.compile_expression(val_expr)?;
+                                    let marker_idx =
+                                        self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                _ => {
+                                    self.compile_expression(key_expr)?;
+                                    self.compile_expression(val_expr)?;
+                                    let marker_idx =
+                                        self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
                             }
-                            _ => self.compile_expression(key_expr)?,
                         }
-                        self.compile_expression(val_expr)?;
+                        self.chunk
+                            .emit1(op::STRUCT_SPREAD, members.len() as u32, expr.line);
+                    } else {
+                        for (key_expr, val_expr) in members {
+                            match &key_expr.kind {
+                                ExpressionKind::Identifier(name) => {
+                                    let idx = self.chunk.add_constant(Constant::String(
+                                        BoxString::new(name.as_str()),
+                                    ));
+                                    self.chunk.emit1(op::CONSTANT, idx as u32, expr.line);
+                                }
+                                _ => self.compile_expression(key_expr)?,
+                            }
+                            self.compile_expression(val_expr)?;
+                        }
+                        self.chunk
+                            .emit1(op::STRUCT, members.len() as u32, expr.line);
                     }
-                    self.chunk
-                        .emit1(op::STRUCT, members.len() as u32, expr.line);
                     Ok(())
                 }
                 Literal::Function { params, body } => {
                     let anon_name = format!("anonymous@{}@{}", expr.line, self.chunk.code.len());
-                    let func = self.compile_function(&anon_name, &params, &body)?;
+                    let func = self.compile_function(
+                        &anon_name,
+                        &params,
+                        &body,
+                        AstFunctionModifiers::default(),
+                    )?;
                     let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                     self.chunk.emit1(op::CONSTANT, func_idx, expr.line);
                     Ok(())
@@ -1347,6 +1689,47 @@ impl Compiler {
                         let end_target = self.chunk.code.len();
                         self.chunk.code[jump_idx] =
                             op::JUMP as u32 | (((end_target - jump_idx - 1) as u32) << 8);
+                        return Ok(());
+                    }
+                    ".." => {
+                        self.compile_range(expr, left, right, false, false);
+                        return Ok(());
+                    }
+                    "..<" => {
+                        self.compile_range(expr, left, right, false, true);
+                        return Ok(());
+                    }
+                    ">.." => {
+                        self.compile_range(expr, left, right, true, false);
+                        return Ok(());
+                    }
+                    ">..<" => {
+                        self.compile_range(expr, left, right, true, true);
+                        return Ok(());
+                    }
+                    "contains" | "ct" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CONTAINS, expr.line);
+                        return Ok(());
+                    }
+                    "not contains" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CONTAINS, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
+                        return Ok(());
+                    }
+                    "instanceof" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::INSTANCEOF, expr.line);
+                        return Ok(());
+                    }
+                    "castas" => {
+                        self.compile_expression(left)?;
+                        self.compile_expression(right)?;
+                        self.chunk.emit0(op::CASTAS, expr.line);
                         return Ok(());
                     }
                     "&&" => {
@@ -1446,6 +1829,15 @@ impl Compiler {
                     "<=" => self.chunk.emit0(op::LESS_EQUAL, expr.line),
                     ">" => self.chunk.emit0(op::GREATER, expr.line),
                     ">=" => self.chunk.emit0(op::GREATER_EQUAL, expr.line),
+                    "b|" => self.chunk.emit0(op::BIT_OR, expr.line),
+                    "b&" => self.chunk.emit0(op::BIT_AND, expr.line),
+                    "b^" => self.chunk.emit0(op::BIT_XOR, expr.line),
+                    "b<<" => self.chunk.emit0(op::BIT_SHL, expr.line),
+                    "b>>" => self.chunk.emit0(op::BIT_SHR, expr.line),
+                    "b>>>" => self.chunk.emit0(op::BIT_USHR, expr.line),
+                    "xor" => self.chunk.emit0(op::XOR_OP, expr.line),
+                    "eqv" => self.chunk.emit0(op::EQV_OP, expr.line),
+                    "^" => self.chunk.emit0(op::POW, expr.line),
                     _ => bail!("Unknown operator: {}", operator),
                 }
                 Ok(())
@@ -1503,6 +1895,10 @@ impl Compiler {
                     op::JUMP as u32 | (((end_target - jmp_end_idx - 1) as u32) << 8);
                 Ok(())
             }
+            ExpressionKind::Spread(expr) => {
+                self.compile_expression(expr)?;
+                Ok(())
+            }
             ExpressionKind::Identifier(name) => {
                 let lower_name = name.to_lowercase();
                 let is_js_import = self
@@ -1511,6 +1907,9 @@ impl Compiler {
                     .map(|p| p.to_lowercase().starts_with("js:"))
                     == Some(true);
                 if lower_name == "this" {
+                    if self.current_function_is_static {
+                        bail!("Cannot reference 'this' in a static function");
+                    }
                     let idx = self
                         .chunk
                         .add_constant(Constant::String(BoxString::new("this")));
@@ -1659,34 +2058,118 @@ impl Compiler {
                     member,
                 } = &base.kind
                 {
+                    let has_spread = args
+                        .iter()
+                        .any(|arg| matches!(arg.value.kind, ExpressionKind::Spread(_)));
                     self.compile_expression(member_base)?;
-                    for arg in args {
-                        self.compile_expression(&arg.value)?;
-                    }
                     let name_idx = self
                         .chunk
                         .add_constant(Constant::String(BoxString::new(member.as_str())));
-                    if has_named {
-                        let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
+                    if has_spread {
+                        for arg in args {
+                            match &arg.value.kind {
+                                ExpressionKind::Spread(inner) => {
+                                    self.compile_expression(inner)?;
+                                    let key_idx = self
+                                        .chunk
+                                        .add_constant(Constant::String(BoxString::new("")));
+                                    self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                    let marker_idx =
+                                        self.chunk.add_constant(Constant::Boolean(true));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                                _ => {
+                                    self.compile_expression(&arg.value)?;
+                                    let key_idx = self.chunk.add_constant(Constant::String(
+                                        BoxString::new(arg.name.as_deref().unwrap_or("")),
+                                    ));
+                                    self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                    let marker_idx =
+                                        self.chunk.add_constant(Constant::Boolean(false));
+                                    self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                                }
+                            }
+                        }
                         self.chunk.emit3(
-                            op::INVOKE_NAMED,
+                            op::INVOKE_NAMED_SPREAD,
                             name_idx as u32,
                             args.len() as u32,
-                            names_idx as u32,
+                            0,
                             expr.line,
                         );
                     } else {
-                        self.chunk
-                            .emit2(op::INVOKE, name_idx as u32, args.len() as u32, expr.line);
+                        for arg in args {
+                            self.compile_expression(&arg.value)?;
+                        }
+                        if has_named {
+                            let names_idx =
+                                self.chunk.add_constant(Constant::StringArray(arg_names));
+                            self.chunk.emit3(
+                                op::INVOKE_NAMED,
+                                name_idx as u32,
+                                args.len() as u32,
+                                names_idx as u32,
+                                expr.line,
+                            );
+                        } else {
+                            self.chunk.emit2(
+                                op::INVOKE,
+                                name_idx as u32,
+                                args.len() as u32,
+                                expr.line,
+                            );
+                        }
                     }
                     return Ok(());
                 }
 
                 self.compile_expression(base)?;
-                for arg in args {
-                    self.compile_expression(&arg.value)?;
-                }
-                if has_named {
+                let has_spread = args
+                    .iter()
+                    .any(|arg| matches!(arg.value.kind, ExpressionKind::Spread(_)));
+                if has_spread && has_named {
+                    for arg in args {
+                        match &arg.value.kind {
+                            ExpressionKind::Spread(inner) => {
+                                self.compile_expression(inner)?;
+                                let key_idx = self.chunk.add_constant(Constant::String(
+                                    BoxString::new(arg.name.as_deref().unwrap_or("")),
+                                ));
+                                self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                            _ => {
+                                self.compile_expression(&arg.value)?;
+                                let key_idx = self.chunk.add_constant(Constant::String(
+                                    BoxString::new(arg.name.as_deref().unwrap_or("")),
+                                ));
+                                self.chunk.emit1(op::CONSTANT, key_idx as u32, expr.line);
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                        }
+                    }
+                    self.chunk
+                        .emit1(op::CALL_NAMED_SPREAD, args.len() as u32, expr.line);
+                } else if has_spread {
+                    for arg in args {
+                        match &arg.value.kind {
+                            ExpressionKind::Spread(inner) => {
+                                self.compile_expression(inner)?;
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(true));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                            _ => {
+                                self.compile_expression(&arg.value)?;
+                                let marker_idx = self.chunk.add_constant(Constant::Boolean(false));
+                                self.chunk.emit1(op::CONSTANT, marker_idx, expr.line);
+                            }
+                        }
+                    }
+                    self.chunk
+                        .emit1(op::CALL_SPREAD, args.len() as u32, expr.line);
+                } else if has_named {
                     let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                     self.chunk.emit2(
                         op::CALL_NAMED,
@@ -1695,6 +2178,9 @@ impl Compiler {
                         expr.line,
                     );
                 } else {
+                    for arg in args {
+                        self.compile_expression(&arg.value)?;
+                    }
                     self.chunk.emit1(op::CALL, args.len() as u32, expr.line);
                 }
                 Ok(())
@@ -1843,6 +2329,7 @@ impl Compiler {
         name: &str,
         params: &[crate::ast::FunctionParam],
         body: &crate::ast::FunctionBody,
+        modifiers: AstFunctionModifiers,
     ) -> Result<BxCompiledFunction> {
         let mut sub_compiler = Compiler::with_chunk(self.chunk.new_sub_chunk());
         // Source text lives only in the root chunk to avoid N copies per file.
@@ -1855,6 +2342,7 @@ impl Compiler {
         sub_compiler.class_methods = self.class_methods.clone();
         sub_compiler.current_line = self.current_line;
         sub_compiler.class_has_init_map = self.class_has_init_map.clone();
+        sub_compiler.current_function_is_static = modifiers.is_static;
 
         let mut min_arity = 0;
         for (i, param) in params.iter().enumerate() {
@@ -1963,6 +2451,12 @@ impl Compiler {
             arity: (params.len() + 1) as u32, // +1 for the implicit `arguments` local
             min_arity,
             params: params.iter().map(|p| p.name.to_lowercase()).collect(),
+            modifiers: VmFunctionModifiers {
+                access: modifiers.access,
+                is_static: modifiers.is_static,
+                is_abstract: modifiers.is_abstract,
+                is_final: modifiers.is_final,
+            },
             captured_receiver: None,
             chunk: sub_compiler.chunk,
         })
@@ -1976,6 +2470,116 @@ impl Compiler {
             }
         }
         None
+    }
+
+    fn find_class_constant(&mut self, class_name: &str) -> Result<Option<BxClass>> {
+        let lower_name = class_name.to_lowercase();
+        for constant in &self.chunk.constants {
+            if let Constant::Class(class) = constant {
+                if class.name.to_lowercase() == lower_name {
+                    return Ok(Some(class.clone()));
+                }
+            }
+        }
+
+        if class_name.contains('.') {
+            if let Ok(class_val) = self.load_class_from_path(class_name) {
+                if let Constant::Class(class) = class_val {
+                    return Ok(Some(class));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn literal_include_path(&self, expr: &Expression) -> Option<String> {
+        match &expr.kind {
+            ExpressionKind::Literal(Literal::String(parts)) if parts.len() == 1 => {
+                if let StringPart::Text(text) = &parts[0] {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn compile_include_file(&mut self, include_path: &str) -> Result<()> {
+        let base_dir = self
+            .source_dir
+            .clone()
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let raw_path = Path::new(include_path);
+        let resolved = if raw_path.is_absolute() {
+            raw_path.to_path_buf()
+        } else {
+            base_dir.join(raw_path)
+        };
+
+        let file_path = if resolved.exists() {
+            resolved
+        } else if resolved.extension().is_none() {
+            let with_bxs = resolved.with_extension("bxs");
+            if with_bxs.exists() {
+                with_bxs
+            } else {
+                let with_bx = resolved.with_extension("bx");
+                if with_bx.exists() {
+                    with_bx
+                } else {
+                    bail!("Include file not found: {}", resolved.display());
+                }
+            }
+        } else {
+            bail!("Include file not found: {}", resolved.display());
+        };
+
+        let source = fs::read_to_string(&file_path)?;
+        let source_path = file_path.to_string_lossy().to_string();
+        let ast = if file_path.extension().and_then(|s| s.to_str()) == Some("bxm") {
+            parser::parse_bxm(&source, Some(&source_path))?
+        } else {
+            parser::parse(&source, Some(&source_path))?
+        };
+
+        let prev_source_dir = self.source_dir.clone();
+        let prev_filename = self.chunk.filename.clone();
+        let prev_line = self.current_line;
+        self.source_dir = file_path.parent().map(|p| p.to_path_buf());
+        self.chunk.filename = source_path;
+
+        let result = (|| {
+            for (i, stmt) in ast.iter().enumerate() {
+                let is_last = i == ast.len() - 1;
+                self.compile_statement(stmt, is_last)?;
+            }
+            Ok(())
+        })();
+
+        self.source_dir = prev_source_dir;
+        self.chunk.filename = prev_filename;
+        self.current_line = prev_line;
+        result
+    }
+
+    fn compile_range(
+        &mut self,
+        expr: &Expression,
+        left: &Expression,
+        right: &Expression,
+        left_exclusive: bool,
+        right_exclusive: bool,
+    ) {
+        self.compile_expression(left).unwrap();
+        self.compile_expression(right).unwrap();
+        let left_excl_idx = self.chunk.add_constant(Constant::Boolean(left_exclusive));
+        self.chunk.emit1(op::CONSTANT, left_excl_idx, expr.line);
+        let right_excl_idx = self.chunk.add_constant(Constant::Boolean(right_exclusive));
+        self.chunk.emit1(op::CONSTANT, right_excl_idx, expr.line);
+        self.chunk.emit0(op::RANGE, expr.line);
     }
 
     fn compile_expression_as_statement(&mut self, expr: &Expression) -> Result<()> {
@@ -2434,6 +3038,10 @@ impl DependencyTracker {
                 self.track_expression(condition);
                 self.track_statements(body);
             }
+            StatementKind::DoWhile { body, condition } => {
+                self.track_statements(body);
+                self.track_expression(condition);
+            }
             StatementKind::Switch {
                 value,
                 cases,
@@ -2458,7 +3066,30 @@ impl DependencyTracker {
                     self.track_expression(e);
                 }
             }
-            StatementKind::Break | StatementKind::Continue => {}
+            StatementKind::Break | StatementKind::Continue | StatementKind::Rethrow => {}
+            StatementKind::Assert { condition, message } => {
+                self.track_expression(condition);
+                if let Some(m) = message {
+                    self.track_expression(m);
+                }
+            }
+            StatementKind::Param { default, .. } => {
+                if let Some(d) = default {
+                    self.track_expression(d);
+                }
+            }
+            StatementKind::Not(expr)
+            | StatementKind::Include(expr)
+            | StatementKind::BufferOutput(expr) => {
+                self.track_expression(expr);
+            }
+            StatementKind::Destructure {
+                source,
+                bindings: _,
+                ..
+            } => {
+                self.track_expression(source);
+            }
             StatementKind::VariableDecl { value, .. } => {
                 self.track_expression(value);
             }
@@ -2546,6 +3177,9 @@ impl DependencyTracker {
             },
             ExpressionKind::Identifier(name) => {
                 self.used_symbols.insert(name.to_lowercase());
+            }
+            ExpressionKind::Spread(expr) => {
+                self.track_expression(expr);
             }
             _ => {}
         }

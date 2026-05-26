@@ -1,12 +1,16 @@
 pub mod ast;
-pub mod parser;
 pub mod compiler;
+pub mod cst;
+pub mod parser;
+pub mod tokenizer;
+#[cfg(all(feature = "qoq", not(target_arch = "wasm32")))]
+pub use matchbox_vm::qoq;
 
 pub const PRELUDE_SOURCE: &str = include_str!("prelude.bxs");
 
-use std::collections::{HashSet, HashMap};
-use std::path::PathBuf;
 use crate::ast::{Statement, StatementKind};
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Compile `ast` to bytecode, optionally tree-shaking the built-in prelude and any module BIFs.
 ///
@@ -101,7 +105,10 @@ fn tree_shake_stmts(
         .collect();
 
     for stmt in pool {
-        if let StatementKind::FunctionDecl { name, attributes, .. } = &stmt.kind {
+        if let StatementKind::FunctionDecl {
+            name, attributes, ..
+        } = &stmt.kind
+        {
             pool_map.insert(name.to_lowercase(), stmt.clone());
             for attr in attributes {
                 if attr.name.to_lowercase() == "matchbox-keep" {
@@ -113,7 +120,10 @@ fn tree_shake_stmts(
 
     // Also honour @matchbox-keep on user-defined functions.
     for stmt in user_ast {
-        if let StatementKind::FunctionDecl { name, attributes, .. } = &stmt.kind {
+        if let StatementKind::FunctionDecl {
+            name, attributes, ..
+        } = &stmt.kind
+        {
             for attr in attributes {
                 if attr.name.to_lowercase() == "matchbox-keep" {
                     forced.push(name.to_lowercase());

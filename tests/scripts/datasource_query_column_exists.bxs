@@ -1,0 +1,40 @@
+// Test queryColumnExists / queryKeyExists
+// No database connection required.
+
+cols = arrayNew()
+arrayAppend(cols, "id")
+arrayAppend(cols, "name")
+
+q = queryNew(cols)
+
+// query.columnExists()
+if (!q.columnExists("id")) {
+    throw "Expected column 'id' to exist"
+}
+if (!q.columnExists("NAME")) {
+    throw "Expected column 'NAME' to exist (case-insensitive)"
+}
+if (q.columnExists("missing")) {
+    throw "Expected column 'missing' to NOT exist"
+}
+
+// Standalone BIF
+if (!queryColumnExists(q, "name")) {
+    throw "Expected queryColumnExists for 'name' to return true"
+}
+if (queryColumnExists(q, "nope")) {
+    throw "Expected queryColumnExists for 'nope' to return false"
+}
+
+// queryKeyExists (alias)
+if (!queryKeyExists(q, "id")) {
+    throw "Expected queryKeyExists for 'id' to return true"
+}
+if (queryKeyExists(q, "bogus")) {
+    throw "Expected queryKeyExists for 'bogus' to return false"
+}
+
+// Member method
+if (!q.keyExists("name")) {
+    throw "Expected q.keyExists('name') to return true"
+}
