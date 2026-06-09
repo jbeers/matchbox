@@ -31,15 +31,11 @@ static STUBS: &[(&str, &[u8])] = &[
                 include_bytes!("../stubs/runner_stub_esp32c3.elf"),
     ),
     (
-        "x86_64-unknown-linux-gnu",
-        include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
-    ),
-    (
-        "x86_64-unknown-linux-gnu",
-        include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
-    ),
-    (
         "host",
+        include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
+    ),
+    (
+        "x86_64-unknown-linux-gnu",
         include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
     ),
 ];

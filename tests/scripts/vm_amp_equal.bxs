@@ -1,0 +1,16 @@
+// Test &= compound assignment operator
+var s = "hello";
+s &= " world";
+if ( s != "hello world" ) { throw "&= basic failed: got [" & s & "]"; }
+
+var empty = "";
+empty &= "start";
+if ( empty != "start" ) { throw "&= empty start failed"; }
+
+var multi = "a";
+multi &= "b";
+multi &= "c";
+multi &= "d";
+if ( multi != "abcd" ) { throw "&= multi failed: got [" & multi & "]"; }
+
+println( "&= OK" );

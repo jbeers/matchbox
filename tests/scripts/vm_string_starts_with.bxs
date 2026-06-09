@@ -1,0 +1,25 @@
+// Test stringStartsWith function
+var result1 = stringStartsWith( "hello world", "hello" );
+if ( result1 != true ) { throw "stringStartsWith basic failed"; }
+
+var result2 = stringStartsWith( "hello world", "world" );
+if ( result2 != false ) { throw "stringStartsWith negative failed"; }
+
+var result3 = stringStartsWith( "test.txt", "test" );
+if ( result3 != true ) { throw "stringStartsWith prefix failed"; }
+
+var result4 = stringStartsWith( "", "" );
+if ( result4 != true ) { throw "stringStartsWith empty strings failed"; }
+
+var result5 = stringStartsWith( "test", "" );
+if ( result5 != true ) { throw "stringStartsWith empty prefix failed"; }
+
+var result6 = stringStartsWith( "", "test" );
+if ( result6 != false ) { throw "stringStartsWith empty string with prefix failed"; }
+
+// Test as string method
+var str = "boxlang.bxs";
+if ( !str.startsWith( "boxlang" ) ) { throw "startsWith method failed"; }
+if ( str.startsWith( "coldfusion" ) ) { throw "startsWith method negative failed"; }
+
+println( "stringStartsWith OK" );

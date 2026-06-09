@@ -1,0 +1,15 @@
+// Test char() function (alias for chr())
+var result = char( 65 );
+if ( result != "A" ) { throw "char(65) failed: got [" & result & "]"; }
+
+var newline = char( 10 );
+if ( len( newline ) != 1 ) { throw "char(10) length failed"; }
+
+var esc = char( 27 );
+if ( len( esc ) != 1 ) { throw "char(27) length failed"; }
+
+// Verify chr() still works too
+var chrResult = chr( 66 );
+if ( chrResult != "B" ) { throw "chr(66) failed"; }
+
+println( "char OK" );

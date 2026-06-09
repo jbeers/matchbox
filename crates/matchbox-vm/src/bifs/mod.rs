@@ -156,6 +156,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
+    bifs.insert("repeatstring".to_string(), repeat_string as BxNativeFunction);
     bifs.insert("find".to_string(), find_bif as BxNativeFunction);
     bifs.insert(
         "findnocase".to_string(),
@@ -169,6 +170,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "stringfindnocase".to_string(),
         string_find_no_case_bif as BxNativeFunction,
     );
+    bifs.insert(
+        "stringendswith".to_string(),
+        string_ends_with_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "stringstartswith".to_string(),
+        string_starts_with_bif as BxNativeFunction,
+    );
+    bifs.insert("val".to_string(), val_bif as BxNativeFunction);
     bifs.insert("left".to_string(), left_bif as BxNativeFunction);
     bifs.insert("right".to_string(), right_bif as BxNativeFunction);
     bifs.insert("reverse".to_string(), reverse_bif as BxNativeFunction);
@@ -223,6 +233,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("mid".to_string(), mid_bif as BxNativeFunction);
     bifs.insert("replace".to_string(), replace_bif as BxNativeFunction);
     bifs.insert("chr".to_string(), chr_bif as BxNativeFunction);
+    bifs.insert("char".to_string(), chr_bif as BxNativeFunction);
     bifs.insert(
         "futureonerror".to_string(),
         future_on_error as BxNativeFunction,
@@ -532,6 +543,16 @@ fn trim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_ptr(vm.string_new(s)))
 }
 
+fn repeat_string(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("repeatString() expects exactly 2 arguments".to_string());
+    }
+    let s = vm.to_string(args[0]);
+    let count = args[1].as_number() as usize;
+    let result = s.repeat(count);
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
 fn find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     find_bif_internal(vm, args, false, true)
 }
@@ -546,6 +567,66 @@ fn string_find_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 
 fn string_find_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     find_bif_internal(vm, args, true, false)
+}
+
+fn string_ends_with_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("stringEndsWith() expects exactly 2 arguments: (string, suffix)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let suffix = vm.to_string(args[1]);
+    Ok(BxValue::new_bool(input.ends_with(&suffix)))
+}
+
+fn string_starts_with_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("stringStartsWith() expects exactly 2 arguments: (string, prefix)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let prefix = vm.to_string(args[1]);
+    Ok(BxValue::new_bool(input.starts_with(&prefix)))
+}
+
+fn val_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("val() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    
+    if input.is_empty() {
+        return Ok(BxValue::new_number(0.0));
+    }
+    
+    let mut result = String::new();
+    let mut found_dot = false;
+    let mut found_digit = false;
+    
+    for (i, c) in input.chars().enumerate() {
+        // Only allow digits, one dot, and minus at the start
+        if c.is_ascii_digit() {
+            found_digit = true;
+            result.push(c);
+        } else if c == '.' && !found_dot {
+            found_dot = true;
+            result.push(c);
+        } else if c == '-' && i == 0 {
+            result.push(c);
+        } else {
+            break;
+        }
+    }
+    
+    if !found_digit {
+        return Ok(BxValue::new_number(0.0));
+    }
+    
+    // Remove trailing dot if present
+    if result.ends_with('.') {
+        result.pop();
+    }
+    
+    let num: f64 = result.parse().unwrap_or(0.0);
+    Ok(BxValue::new_number(num))
 }
 
 fn find_bif_internal(

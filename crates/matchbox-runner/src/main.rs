@@ -194,7 +194,9 @@ fn main() -> Result<()> {
         }
     };
 
-    let mut vm = VM::new();
+    // Collect CLI arguments (including the executable path as args[0])
+    let cli_args: Vec<String> = std_env::args().collect();
+    let mut vm = VM::new_with_args(cli_args);
     match vm.interpret(chunk) {
         Ok(_val) => {
             // println!("Result: {}", val);

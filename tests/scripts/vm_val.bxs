@@ -1,0 +1,33 @@
+// Test val function - extract numeric value from beginning of string
+var result1 = val( "123abc" );
+if ( result1 != 123 ) { throw "val basic failed: got " & result1; }
+
+var result2 = val( "45.67xyz" );
+if ( result2 != 45.67 ) { throw "val decimal failed: got " & result2; }
+
+var result3 = val( "-99test" );
+if ( result3 != -99 ) { throw "val negative failed: got " & result3; }
+
+var result4 = val( "abc123" );
+if ( result4 != 0 ) { throw "val no leading digits failed: got " & result4; }
+
+var result5 = val( "" );
+if ( result5 != 0 ) { throw "val empty string failed: got " & result5; }
+
+var result6 = val( "3.14.15" );
+if ( result6 != 3.14 ) { throw "val multiple decimals failed: got " & result6; }
+
+var result7 = val( "-.5test" );
+if ( result7 != -0.5 ) { throw "val negative decimal failed: got " & result7; }
+
+var result8 = val( "0" );
+if ( result8 != 0 ) { throw "val zero failed: got " & result8; }
+
+var result9 = val( "123.456.789" );
+if ( result9 != 123.456 ) { throw "val multiple dots failed: got " & result9; }
+
+// Test as string method
+var str = "42 is the answer";
+if ( str.val() != 42 ) { throw "val method failed: got " & str.val(); }
+
+println( "val OK" );

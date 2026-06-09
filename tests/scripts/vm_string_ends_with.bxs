@@ -1,0 +1,25 @@
+// Test stringEndsWith function
+var result1 = stringEndsWith( "hello world", "world" );
+if ( result1 != true ) { throw "stringEndsWith basic failed"; }
+
+var result2 = stringEndsWith( "hello world", "hello" );
+if ( result2 != false ) { throw "stringEndsWith negative failed"; }
+
+var result3 = stringEndsWith( "test.txt", ".txt" );
+if ( result3 != true ) { throw "stringEndsWith extension failed"; }
+
+var result4 = stringEndsWith( "", "" );
+if ( result4 != true ) { throw "stringEndsWith empty strings failed"; }
+
+var result5 = stringEndsWith( "test", "" );
+if ( result5 != true ) { throw "stringEndsWith empty suffix failed"; }
+
+var result6 = stringEndsWith( "", "test" );
+if ( result6 != false ) { throw "stringEndsWith empty string with suffix failed"; }
+
+// Test as string method
+var str = "filename.bxs";
+if ( !str.endsWith( ".bxs" ) ) { throw "endsWith method failed"; }
+if ( str.endsWith( ".bxm" ) ) { throw "endsWith method negative failed"; }
+
+println( "stringEndsWith OK" );

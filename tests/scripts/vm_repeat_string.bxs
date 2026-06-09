@@ -1,0 +1,14 @@
+// Test repeatString function
+var result = repeatString( "abc", 3 );
+if ( result != "abcabcabc" ) { throw "repeatString basic failed: got [" & result & "]"; }
+
+var empty = repeatString( "x", 0 );
+if ( empty != "" ) { throw "repeatString zero failed"; }
+
+var single = repeatString( "hello", 1 );
+if ( single != "hello" ) { throw "repeatString one failed"; }
+
+var spaces = repeatString( " ", 5 );
+if ( spaces != "     " ) { throw "repeatString spaces failed"; }
+
+println( "repeatString OK" );

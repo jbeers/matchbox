@@ -868,7 +868,7 @@ impl<'a> Parser<'a> {
         } else if matches!(self.peek_kind(),
             Some(TokenKind::PlusEqual) | Some(TokenKind::MinusEqual)
             | Some(TokenKind::StarEqual) | Some(TokenKind::SlashEqual)
-            | Some(TokenKind::PercentEqual)
+            | Some(TokenKind::PercentEqual) | Some(TokenKind::AmpEqual)
         ) {
             let op = self.advance_lexeme().unwrap_or_default();
             let bin_op = op[..op.len() - 1].to_string();
@@ -1050,6 +1050,7 @@ impl<'a> Parser<'a> {
                     Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
                     | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
                     | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+                    | Some(TokenKind::AmpEqual)
                 ) {
                     let assign_op = self.advance_lexeme().unwrap_or_default();
                     let val = self.parse_expression()?;
@@ -1119,6 +1120,7 @@ impl<'a> Parser<'a> {
                 Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
                 | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
                 | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+                | Some(TokenKind::AmpEqual)
             ) {
                 let assign_op = self.advance_lexeme().unwrap_or_default();
                 let val = self.parse_expression()?;
@@ -1151,6 +1153,7 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Equal) | Some(TokenKind::PlusEqual)
             | Some(TokenKind::MinusEqual) | Some(TokenKind::StarEqual)
             | Some(TokenKind::SlashEqual) | Some(TokenKind::PercentEqual)
+            | Some(TokenKind::AmpEqual)
         ) {
             let assign_op = self.advance_lexeme().unwrap_or_default();
             let value = self.parse_expression()?;
