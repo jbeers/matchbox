@@ -34,9 +34,15 @@ The prelude is written in BoxLang and gets tree-shaken during compilation (only 
 ### Decision Tree
 
 ```
-Can it be implemented using existing MatchBox primitives?
-├── YES → Implement in prelude.bxs
+Try prelude first. Only go native if you need:
+- Direct VM access (array_push, struct_set, etc.)
+- System operations (file I/O, HTTP, crypto)
+- Performance-critical operations
+
+Can it be implemented using existing primitives?
+├── YES → Implement in prelude.bxs (DEFAULT)
 │   Examples: arrayMap, arrayFilter, structEach, arrayToList
+│   ~80% of BIFs can be prelude
 │
 └── NO → Implement as native Rust BIF
     Examples: fileRead, http, hash, queryExecute
@@ -123,11 +129,11 @@ Then read BOTH the implementation AND the tests:
 
 ```bash
 # Find and read the BIF implementation
-find ~/dev/ortus-boxlang/BoxLang/src/main/java/ortus/boxlang/runtime/bifs -name "*<BifName>*.java"
+find reference/boxlang/src/main/java/ortus/boxlang/runtime/bifs -name "*<BifName>*.java"
 cat <path-to-bif>.java
 
 # Find and read the tests - these reveal expected behavior and edge cases
-find ~/dev/ortus-boxlang/BoxLang/src/test/java -name "*<BifName>*Test.java"
+find reference/boxlang/src/test/java -name "*<BifName>*Test.java"
 cat <path-to-test>.java
 ```
 
@@ -537,18 +543,33 @@ Before submitting:
 - [ ] Wrote comprehensive tests (basic, edge cases, member method syntax, nested structures)
 - [ ] Test fails before implementation (RED)
 - [ ] Implementation matches BoxLang behavior
-- [ ] Registered BIF in `register_all()` (lowercase name)
-- [ ] Registered member method in `resolve_member_method()` if applicable (lowercase match arm)
 - [ ] Test passes after implementation (GREEN)
 - [ ] Full test suite passes (no regressions)
 - [ ] Updated `BIF_STATUS.md` (individual row + section summary counts)
 
-### Prelude-specific checklist:
+### Native Rust checklist:
+
+- [ ] Registered BIF in `register_all()` (lowercase name)
+- [ ] Registered member method in `resolve_member_method()` if applicable (lowercase match arm)
+
+### Prelude checklist:
 
 - [ ] Can be implemented using existing primitives (no VM internals needed)
 - [ ] Includes JSDoc-style documentation comment
 - [ ] Uses camelCase naming convention
 - [ ] Tested with tree-shaking enabled (default build)
+- [ ] No variadic args — use fixed parameters with `isNull()` checks for optionals
+- [ ] No recursion with mutable state — use iterative patterns or helper functions
+
+## Prelude Limitations
+
+The prelude is BoxLang code, so it has the same constraints as any BoxLang program:
+
+- **No variadic functions** — `arrayTranspose` in BoxLang JVM accepts N arrays; in prelude we accept a fixed 2D array instead
+- **Optional args need `isNull()` checks** — there's no `= undefined` default; use `function foo(x, optional)` then check `if (!isNull(optional))`
+- **No direct VM access** — can't call `vm.array_push()` etc., only existing BIFs
+- **Recursion works but watch depth** — `arrayFlatten` uses recursion; fine for typical nesting but not infinite
+- **Tree-shaken** — only functions actually called by user code are included in output
 
 ## Examples from Recent Work
 
@@ -556,8 +577,8 @@ Before submitting:
 
 ```bash
 # 1. Research in BoxLang (using reference-boxlang skill)
-cat ~/dev/ortus-boxlang/BoxLang/src/main/java/ortus/boxlang/runtime/bifs/global/struct/StructEquals.java
-cat ~/dev/ortus-boxlang/BoxLang/src/test/java/ortus/boxlang/runtime/bifs/global/struct/StructEqualsTest.java
+cat reference/boxlang/src/main/java/ortus/boxlang/runtime/bifs/global/struct/StructEquals.java
+cat reference/boxlang/src/test/java/ortus/boxlang/runtime/bifs/global/struct/StructEqualsTest.java
 
 # 2. Write test
 cat > tests/scripts/vm_struct_equals.bxs << 'EOF'
@@ -640,6 +661,52 @@ function arrayMap(array, callback) {
     return result;
 }
 ```
+
+### Batch Prelude Example (Multiple Related BIFs)
+
+When adding a group of related BIFs, implement them together in one pass. Here's the pattern from adding 18 array BIFs:
+
+```boxlang
+// In crates/matchbox-compiler/src/prelude.bxs, add all related functions together:
+
+/**
+ * Removes and returns the first element.
+ */
+function arrayShift(array, defaultValue) {
+    if (len(array) == 0) {
+        if (!isNull(defaultValue)) {
+            return defaultValue;
+        }
+        throw "arrayShift() cannot shift an empty array";
+    }
+    var value = array[1];
+    arrayDeleteAt(array, 1);
+    return value;
+}
+
+/**
+ * Adds a value to the beginning of an array. Returns the new size.
+ */
+function arrayUnshift(array, value) {
+    arrayInsertAt(array, 1, value);
+    return len(array);
+}
+
+/**
+ * Returns true if the array is empty.
+ */
+function arrayIsEmpty(array) {
+    return len(array) == 0;
+}
+
+// ... continue with all related BIFs
+```
+
+**Key patterns for batch implementation:**
+- Group related BIFs together (all array ops, all string ops, etc.)
+- Write one comprehensive test file covering all BIFs
+- Test edge cases: empty arrays, null values, boundary conditions
+- Use existing primitives consistently (e.g., `arrayDeleteAt` for removal)
 
 ## Troubleshooting
 

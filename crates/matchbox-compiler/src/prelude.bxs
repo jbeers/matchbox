@@ -338,6 +338,355 @@ function arraySort(array, sortType = "text", sortOrder = "asc") {
     return true;
 }
 
+/**
+ * Adds a value to the end of an array. Returns the new size.
+ */
+function arrayPush(array, value) {
+    arrayAppend(array, value);
+    return len(array);
+}
+
+/**
+ * Returns true if the array is empty.
+ */
+function arrayIsEmpty(array) {
+    return len(array) == 0;
+}
+
+/**
+ * Returns true if the given 1-based index exists and is not null.
+ */
+function arrayIndexExists(array, index) {
+    var idx = index;
+    if (idx < 1 || idx > len(array)) {
+        return false;
+    }
+    return !isNull(array[idx]);
+}
+
+/**
+ * Removes and returns the first element.
+ */
+function arrayShift(array, defaultValue) {
+    if (len(array) == 0) {
+        if (!isNull(defaultValue)) {
+            return defaultValue;
+        }
+        throw "arrayShift() cannot shift an empty array";
+    }
+    var value = array[1];
+    arrayDeleteAt(array, 1);
+    return value;
+}
+
+/**
+ * Adds a value to the beginning of an array. Returns the new size.
+ */
+function arrayUnshift(array, value) {
+    arrayInsertAt(array, 1, value);
+    return len(array);
+}
+
+/**
+ * Merges two arrays.
+ */
+function arrayMerge(array1, array2, leaveIndex = false) {
+    if (!leaveIndex) {
+        var result = [];
+        for (var item in array1) {
+            arrayAppend(result, item);
+        }
+        for (var item in array2) {
+            arrayAppend(result, item);
+        }
+        return result;
+    } else {
+        var len1 = len(array1);
+        var len2 = len(array2);
+        var maxLen = len1;
+        if (len2 > maxLen) {
+            maxLen = len2;
+        }
+        var result = [];
+        for (var i = 1; i <= maxLen; i++) {
+            if (i <= len1) {
+                arrayAppend(result, array1[i]);
+            } else {
+                arrayAppend(result, array2[i]);
+            }
+        }
+        for (var i = 1; i <= len1; i++) {
+            result[i] = array1[i];
+        }
+        return result;
+    }
+}
+
+/**
+ * Creates an array of numbers in a range (inclusive).
+ */
+function arrayRange(start = 1, end) {
+    if (isNull(end)) {
+        end = start;
+    }
+    if (isSimpleValue(start) && !isNumeric(start)) {
+        var str = toString(start);
+        var dotPos = find("..", str);
+        if (dotPos > 0) {
+            var fromStr = left(str, dotPos - 1);
+            var toStr = right(str, len(str) - dotPos - 1);
+            start = val(fromStr);
+            end = val(toStr);
+        } else {
+            start = val(str);
+            end = start;
+        }
+    }
+    if (end < start) {
+        end = start;
+    }
+    var result = [];
+    for (var i = start; i <= end; i++) {
+        arrayAppend(result, i);
+    }
+    return result;
+}
+
+/**
+ * Splits an array into chunks of the given size.
+ */
+function arrayChunk(array, chunkSize) {
+    var result = [];
+    var length = len(array);
+    var i = 1;
+    while (i <= length) {
+        var chunk = [];
+        var end = i + chunkSize - 1;
+        if (end > length) {
+            end = length;
+        }
+        for (var j = i; j <= end; j++) {
+            arrayAppend(chunk, array[j]);
+        }
+        arrayAppend(result, chunk);
+        i = i + chunkSize;
+    }
+    return result;
+}
+
+/**
+ * Flattens nested arrays.
+ */
+function arrayFlatten(array, depth = -1) {
+    var result = [];
+    for (var item in array) {
+        if (isArray(item) && depth != 0) {
+            var sub = arrayFlatten(item, depth - 1);
+            for (var s in sub) {
+                arrayAppend(result, s);
+            }
+        } else {
+            arrayAppend(result, item);
+        }
+    }
+    return result;
+}
+
+/**
+ * Maps then flattens one level.
+ */
+function arrayFlatMap(array, callback) {
+    return arrayFlatten(arrayMap(array, callback), 1);
+}
+
+/**
+ * Returns array of 1-based indices where value matches.
+ */
+function arrayFindAll(array, value) {
+    var result = [];
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        if (array[i] == value) {
+            arrayAppend(result, i);
+        }
+    }
+    return result;
+}
+
+/**
+ * Returns the first element matching the callback.
+ */
+function arrayFindFirst(array, callback, defaultValue) {
+    for (var item in array) {
+        if (callback(item)) {
+            return item;
+        }
+    }
+    if (!isNull(defaultValue)) {
+        return defaultValue;
+    }
+    throw "arrayFindFirst() no element found and no default provided";
+}
+
+/**
+ * Reduces from right to left.
+ */
+function arrayReduceRight(array, callback, initialValue) {
+    var result = initialValue;
+    var length = len(array);
+    for (var i = length; i >= 1; i--) {
+        result = callback(result, array[i]);
+    }
+    return result;
+}
+
+/**
+ * Returns elements that do NOT match the predicate.
+ */
+function arrayReject(array, predicate) {
+    var result = [];
+    for (var item in array) {
+        if (!predicate(item)) {
+            arrayAppend(result, item);
+        }
+    }
+    return result;
+}
+
+/**
+ * Converts array to struct with 1-based numeric keys.
+ */
+function arrayToStruct(array) {
+    var result = {};
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        structInsert(result, toString(i), array[i]);
+    }
+    return result;
+}
+
+/**
+ * Returns the median value of a numeric array.
+ */
+function arrayMedian(array) {
+    var length = len(array);
+    if (length == 0) {
+        return 0;
+    }
+    var sorted = [];
+    for (var item in array) {
+        arrayAppend(sorted, item);
+    }
+    arraySort(sorted, "numeric", "asc");
+    var mid = int(length / 2);
+    if (length % 2 == 1) {
+        return sorted[mid + 1];
+    }
+    return (sorted[mid] + sorted[mid + 1]) / 2;
+}
+
+/**
+ * Groups array elements by callback result.
+ */
+function arrayGroupBy(array, callback) {
+    var result = {};
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        var key = toString(callback(array[i]));
+        if (!structKeyExists(result, key)) {
+            structInsert(result, key, []);
+        }
+        arrayAppend(result[key], array[i]);
+    }
+    return result;
+}
+
+/**
+ * Transposes a 2D array (rows become columns).
+ */
+function arrayTranspose(array) {
+    var rows = len(array);
+    if (rows == 0) {
+        return [];
+    }
+    var cols = len(array[1]);
+    if (cols == 0) {
+        return [];
+    }
+    var result = [];
+    for (var c = 1; c <= cols; c++) {
+        var row = [];
+        for (var r = 1; r <= rows; r++) {
+            arrayAppend(row, array[r][c]);
+        }
+        arrayAppend(result, row);
+    }
+    return result;
+}
+
+/**
+ * Zips two arrays into an array of pairs.
+ */
+function arrayZip(array1, array2, callback) {
+    var len1 = len(array1);
+    var len2 = len(array2);
+    if (len1 != len2) {
+        throw "arrayZip() arrays must be the same length";
+    }
+    var result = [];
+    for (var i = 1; i <= len1; i++) {
+        if (!isNull(callback)) {
+            arrayAppend(result, callback(array1[i], array2[i]));
+        } else {
+            var pair = [];
+            arrayAppend(pair, array1[i]);
+            arrayAppend(pair, array2[i]);
+            arrayAppend(result, pair);
+        }
+    }
+    return result;
+}
+
+/**
+ * Removes/replaces elements in an array. Returns the modified array.
+ */
+function arraySplice(array, index, deleteCount = 0, replacements) {
+    var len_arr = len(array);
+    var start = index;
+    if (start < 0) {
+        start = len_arr + start + 1;
+    }
+    if (start < 1) {
+        start = 1;
+    }
+    if (start > len_arr + 1) {
+        start = len_arr + 1;
+    }
+    var dc = deleteCount;
+    if (dc < 0) {
+        dc = 0;
+    }
+    for (var d = 0; d < dc; d++) {
+        if (start <= len(array)) {
+            arrayDeleteAt(array, start);
+        }
+    }
+    if (!isNull(replacements)) {
+        var rLen = len(replacements);
+        for (var r = 1; r <= rLen; r++) {
+            arrayInsertAt(array, start + r - 1, replacements[r]);
+        }
+    }
+    return array;
+}
+
+/**
+ * Returns basic array metadata.
+ */
+function arrayGetMetadata(array) {
+    return { "datatype": "any", "dimensions": 1 };
+}
+
 // --- Struct BIFs ---
 
 /**

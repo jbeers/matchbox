@@ -144,6 +144,25 @@ Key elements:
 - `_invoke` method contains the implementation
 - Arguments accessed via `arguments.getAsString()`, `getAsInteger()`, etc.
 
+## Member Methods (@BoxMember)
+
+Many BIFs are also available as member methods on types (arrays, structs, strings). Look for the `@BoxMember` annotation to identify these:
+
+```java
+@BoxBIF
+@BoxMember( type = MemberType.ARRAY )
+public class ArrayShift extends BIF {
+    // ...
+}
+```
+
+**MemberType values:**
+- `MemberType.ARRAY` — method on arrays (e.g., `arr.shift()`)
+- `MemberType.STRUCT` — method on structs (e.g., `s.keyExists("x")`)
+- `MemberType.STRING` — method on strings (e.g., `str.startsWith("x")`)
+
+When a BIF has `@BoxMember`, you must also register it in `resolve_member_method()` in MatchBox's VM. See the add-bif skill for details.
+
 ## Reading Tests
 
 Always read the JVM tests — they reveal expected behavior that implementation alone might not show:

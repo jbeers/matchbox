@@ -1,0 +1,236 @@
+// ============================================================
+// arrayPush
+// ============================================================
+var arr = [1, 2, 3];
+var newSize = arrayPush(arr, 4);
+if (newSize != 4) { throw "arrayPush return value failed: expected 4, got " & newSize; }
+if (len(arr) != 4) { throw "arrayPush length failed"; }
+if (arr[4] != 4) { throw "arrayPush value failed"; }
+
+// ============================================================
+// arrayIsEmpty
+// ============================================================
+var empty = [];
+if (!arrayIsEmpty(empty)) { throw "arrayIsEmpty empty failed"; }
+var notEmpty = [1];
+if (arrayIsEmpty(notEmpty)) { throw "arrayIsEmpty non-empty failed"; }
+
+// ============================================================
+// arrayIndexExists
+// ============================================================
+var idxArr = [10, 20, 30];
+if (!arrayIndexExists(idxArr, 1)) { throw "arrayIndexExists valid index failed"; }
+if (!arrayIndexExists(idxArr, 3)) { throw "arrayIndexExists last index failed"; }
+if (arrayIndexExists(idxArr, 0)) { throw "arrayIndexExists zero failed"; }
+if (arrayIndexExists(idxArr, 4)) { throw "arrayIndexExists out of bounds failed"; }
+if (arrayIndexExists(idxArr, -1)) { throw "arrayIndexExists negative failed"; }
+
+// ============================================================
+// arrayShift
+// ============================================================
+var shiftArr = [10, 20, 30];
+var shifted = arrayShift(shiftArr);
+if (shifted != 10) { throw "arrayShift value failed: got " & shifted; }
+if (len(shiftArr) != 2) { throw "arrayShift length failed"; }
+if (shiftArr[1] != 20) { throw "arrayShift remaining failed"; }
+
+// arrayShift with default on empty
+var emptyShift = [];
+var def = arrayShift(emptyShift, 99);
+if (def != 99) { throw "arrayShift default failed: got " & def; }
+
+// ============================================================
+// arrayUnshift
+// ============================================================
+var unshiftArr = [2, 3];
+var newLen = arrayUnshift(unshiftArr, 1);
+if (newLen != 3) { throw "arrayUnshift return failed: got " & newLen; }
+if (unshiftArr[1] != 1) { throw "arrayUnshift value failed"; }
+if (unshiftArr[2] != 2) { throw "arrayUnshift shift failed"; }
+
+// ============================================================
+// arrayMerge (concatenation)
+// ============================================================
+var a1 = [1, 2, 3];
+var a2 = [4, 5, 6];
+var merged = arrayMerge(a1, a2);
+if (len(merged) != 6) { throw "arrayMerge length failed: got " & len(merged); }
+if (merged[1] != 1 || merged[4] != 4) { throw "arrayMerge values failed"; }
+
+// arrayMerge with leaveIndex
+var m1 = [10, 20, 30];
+var m2 = [1, 2, 3, 4, 5];
+var mergedIdx = arrayMerge(m1, m2, true);
+if (len(mergedIdx) != 5) { throw "arrayMerge leaveIndex length failed"; }
+if (mergedIdx[1] != 10) { throw "arrayMerge leaveIndex val[1] failed: got " & mergedIdx[1]; }
+if (mergedIdx[3] != 30) { throw "arrayMerge leaveIndex val[3] failed: got " & mergedIdx[3]; }
+if (mergedIdx[4] != 4) { throw "arrayMerge leaveIndex val[4] failed: got " & mergedIdx[4]; }
+
+// ============================================================
+// arrayRange
+// ============================================================
+var range1 = arrayRange(1, 5);
+if (len(range1) != 5) { throw "arrayRange length failed: got " & len(range1); }
+if (range1[1] != 1 || range1[5] != 5) { throw "arrayRange values failed"; }
+
+var range2 = arrayRange(3);
+if (len(range2) != 1 || range2[1] != 3) { throw "arrayRange single failed"; }
+
+var range3 = arrayRange(5, 3);
+if (len(range3) != 1) { throw "arrayRange clamped failed: got len " & len(range3); }
+
+// ============================================================
+// arrayChunk
+// ============================================================
+var chunkArr = [1, 2, 3, 4, 5];
+var chunks = arrayChunk(chunkArr, 2);
+if (len(chunks) != 3) { throw "arrayChunk count failed: got " & len(chunks); }
+if (len(chunks[1]) != 2) { throw "arrayChunk first size failed"; }
+if (chunks[1][1] != 1 || chunks[1][2] != 2) { throw "arrayChunk first values failed"; }
+if (len(chunks[3]) != 1) { throw "arrayChunk last size failed"; }
+if (chunks[3][1] != 5) { throw "arrayChunk last value failed"; }
+
+// ============================================================
+// arrayFlatten
+// ============================================================
+var nested = [[1, 2], [3, [4, 5]]];
+var flat = arrayFlatten(nested);
+if (len(flat) != 5) { throw "arrayFlatten full length failed: got " & len(flat); }
+if (flat[1] != 1 || flat[5] != 5) { throw "arrayFlatten full values failed"; }
+
+var partial = arrayFlatten(nested, 1);
+if (len(partial) != 4) { throw "arrayFlatten depth=1 length failed: got " & len(partial); }
+
+// ============================================================
+// arrayFlatMap
+// ============================================================
+var fmArr = [1, 2, 3];
+var fmResult = arrayFlatMap(fmArr, function(x) { return [x, x * 10]; });
+if (len(fmResult) != 6) { throw "arrayFlatMap length failed: got " & len(fmResult); }
+if (fmResult[1] != 1 || fmResult[2] != 10) { throw "arrayFlatMap values failed"; }
+
+// ============================================================
+// arrayFindAll
+// ============================================================
+var faArr = [1, 2, 3, 2, 4, 2];
+var found = arrayFindAll(faArr, 2);
+if (len(found) != 3) { throw "arrayFindAll count failed: got " & len(found); }
+if (found[1] != 2 || found[2] != 4 || found[3] != 6) { throw "arrayFindAll indices failed"; }
+
+var noMatch = arrayFindAll(faArr, 99);
+if (len(noMatch) != 0) { throw "arrayFindAll no match failed"; }
+
+// ============================================================
+// arrayFindFirst
+// ============================================================
+var ffArr = [1, 2, 3, 4, 5];
+var first = arrayFindFirst(ffArr, function(x) { return x > 3; });
+if (first != 4) { throw "arrayFindFirst failed: got " & first; }
+
+var firstDef = arrayFindFirst(ffArr, function(x) { return x > 100; }, -1);
+if (firstDef != -1) { throw "arrayFindFirst default failed: got " & firstDef; }
+
+// ============================================================
+// arrayReduceRight
+// ============================================================
+var rrArr = [1, 2, 3];
+var rrResult = arrayReduceRight(rrArr, function(acc, val) { return acc & val; }, "");
+if (rrResult != "321") { throw "arrayReduceRight failed: got " & rrResult; }
+
+// ============================================================
+// arrayReject
+// ============================================================
+var rejArr = [1, 2, 3, 4, 5];
+var rejected = arrayReject(rejArr, function(x) { return x % 2 == 0; });
+if (len(rejected) != 3) { throw "arrayReject length failed: got " & len(rejected); }
+if (rejected[1] != 1 || rejected[2] != 3 || rejected[3] != 5) { throw "arrayReject values failed"; }
+
+// ============================================================
+// arrayToStruct
+// ============================================================
+var tsArr = ["a", "b", "c"];
+var tsResult = arrayToStruct(tsArr);
+if (tsResult["1"] != "a") { throw "arrayToStruct key 1 failed"; }
+if (tsResult["2"] != "b") { throw "arrayToStruct key 2 failed"; }
+if (tsResult["3"] != "c") { throw "arrayToStruct key 3 failed"; }
+if (structCount(tsResult) != 3) { throw "arrayToStruct count failed"; }
+
+// ============================================================
+// arrayMedian
+// ============================================================
+var medOdd = [3, 1, 2];
+if (arrayMedian(medOdd) != 2) { throw "arrayMedian odd failed: got " & arrayMedian(medOdd); }
+
+var medEven = [4, 1, 3, 2];
+if (arrayMedian(medEven) != 2.5) { throw "arrayMedian even failed: got " & arrayMedian(medEven); }
+
+var medEmpty = [];
+if (arrayMedian(medEmpty) != 0) { throw "arrayMedian empty failed"; }
+
+// ============================================================
+// arrayGroupBy
+// ============================================================
+var gbArr = [1, 2, 3, 4, 5, 6];
+var grouped = arrayGroupBy(gbArr, function(x) {
+    if (x % 2 == 0) { return "even"; }
+    return "odd";
+});
+if (len(grouped["even"]) != 3) { throw "arrayGroupBy even count failed: got " & len(grouped["even"]); }
+if (len(grouped["odd"]) != 3) { throw "arrayGroupBy odd count failed: got " & len(grouped["odd"]); }
+
+// ============================================================
+// arrayTranspose
+// ============================================================
+var matrix = [[1, 2, 3], [4, 5, 6]];
+var transposed = arrayTranspose(matrix);
+if (len(transposed) != 3) { throw "arrayTranspose rows failed: got " & len(transposed); }
+if (len(transposed[1]) != 2) { throw "arrayTranspose cols failed"; }
+if (transposed[1][1] != 1 || transposed[1][2] != 4) { throw "arrayTranspose col 1 failed"; }
+if (transposed[2][1] != 2 || transposed[2][2] != 5) { throw "arrayTranspose col 2 failed"; }
+if (transposed[3][1] != 3 || transposed[3][2] != 6) { throw "arrayTranspose col 3 failed"; }
+
+// ============================================================
+// arrayZip
+// ============================================================
+var z1 = [1, 2, 3];
+var z2 = ["a", "b", "c"];
+var zipped = arrayZip(z1, z2);
+if (len(zipped) != 3) { throw "arrayZip length failed"; }
+if (zipped[1][1] != 1 || zipped[1][2] != "a") { throw "arrayZip pair 1 failed"; }
+if (zipped[3][1] != 3 || zipped[3][2] != "c") { throw "arrayZip pair 3 failed"; }
+
+// arrayZip with callback
+var zipCb = arrayZip(z1, z2, function(a, b) { return a & b; });
+if (zipCb[1] != "1a") { throw "arrayZip callback 1 failed: got " & zipCb[1]; }
+if (zipCb[3] != "3c") { throw "arrayZip callback 3 failed: got " & zipCb[3]; }
+
+// ============================================================
+// arraySplice
+// ============================================================
+// Remove elements
+var spArr = [1, 2, 3, 4, 5];
+var spResult = arraySplice(spArr, 2, 2);
+if (len(spResult) != 3) { throw "arraySplice remove length failed: got " & len(spResult); }
+if (spResult[1] != 1 || spResult[2] != 4 || spResult[3] != 5) { throw "arraySplice remove values failed"; }
+
+// Insert without removal
+var spArr2 = [1, 2, 3];
+arraySplice(spArr2, 2, 0, [10, 20]);
+if (len(spArr2) != 5) { throw "arraySplice insert length failed: got " & len(spArr2); }
+if (spArr2[1] != 1 || spArr2[2] != 10 || spArr2[3] != 20 || spArr2[4] != 2) { throw "arraySplice insert values failed"; }
+
+// Replace
+var spArr3 = [1, 2, 3, 4, 5];
+arraySplice(spArr3, 2, 2, [99]);
+if (len(spArr3) != 4) { throw "arraySplice replace length failed: got " & len(spArr3); }
+if (spArr3[1] != 1 || spArr3[2] != 99 || spArr3[3] != 4) { throw "arraySplice replace values failed"; }
+
+// ============================================================
+// arrayGetMetadata
+// ============================================================
+var metaArr = [1, 2, 3];
+var meta = arrayGetMetadata(metaArr);
+if (meta["datatype"] != "any") { throw "arrayGetMetadata datatype failed"; }
+if (meta["dimensions"] != 1) { throw "arrayGetMetadata dimensions failed"; }
+
+println("All array BIFs OK");
