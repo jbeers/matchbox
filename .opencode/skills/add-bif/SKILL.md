@@ -170,7 +170,21 @@ Register the test in `tests/integration_tests.rs`:
 script_test!(vm_<bif_name>, "vm_<bif_name>.bxs");
 ```
 
-Run the test to confirm it fails:
+**IMPORTANT: Run the test through BoxLang JVM first to verify expected output:**
+
+```bash
+# Run on BoxLang JVM to see expected behavior
+cd reference/boxlang
+./gradlew run --args="/path/to/tests/scripts/vm_<bif_name>.bxs"
+
+# Then run on MatchBox to compare
+cd /home/jacob/dev/ortus-boxlang/matchbox
+cargo test vm_<bif_name>
+```
+
+The outputs must match. If they differ, adjust the MatchBox implementation (not the test). If you encounter compatibility differences that are intentional (MatchBox design decisions vs BoxLang JVM), load the `matchbox-compat` skill for guidance on identifying and documenting these differences.
+
+Run the test to confirm it fails before implementation:
 
 ```bash
 cargo test vm_<bif_name>
@@ -217,6 +231,24 @@ If the BIF is a member method on a type (check `@BoxMember` annotation in JVM so
 ```
 
 The method name in the match arm must be lowercase (the VM lowercases all method names before lookup). The BIF name it maps to must match exactly what was registered in `register_all()`.
+
+#### Method Argument Order with `objectArgument`
+
+The JVM `@BoxMember` annotation can specify `objectArgument` which determines which parameter the receiver maps to. This affects argument order when called as a method vs function:
+
+```java
+// JVM: @BoxMember(type = STRING_STRICT, name = "FindOneOf", objectArgument = "string")
+// declaredArguments = new Argument[] {
+//     new Argument( true, "string", Key.set ),      // args[0] in function call
+//     new Argument( true, "string", Key.string ),   // receiver in method call
+//     new Argument( false, "integer", Key.start, 1 )
+// };
+```
+
+**Function call:** `findOneOf(set, string)` → args[0]=set, args[1]=string
+**Method call:** `"string".findOneOf(set)` → args[0]=string (receiver), args[1]=set
+
+When the receiver becomes args[0], the BIF implementation must handle both orderings. For simple BIFs where the receiver is always the first logical argument, this is straightforward. For BIFs with `objectArgument`, you may need to detect and handle the swapped order.
 
 ### Step 3b: Implement BIF in Prelude (Alternative to Rust)
 
@@ -486,7 +518,69 @@ bifs.insert("mybif".to_string(), my_bif as BxNativeFunction);
 key.eq_ignore_ascii_case(&search_key)
 ```
 
+### Truthiness Checking in Native BIFs
+
+`is_truthy()` is not on the `BxVM` trait. Implement truthiness manually when a BIF needs to evaluate a value as boolean:
+
+```rust
+fn is_truthy_value(vm: &mut dyn BxVM, val: BxValue) -> bool {
+    if val.is_bool() {
+        val.as_bool()
+    } else if val.is_number() {
+        val.as_number() != 0.0
+    } else if val.is_int() {
+        val.as_int() != 0
+    } else if val.is_null() {
+        false
+    } else if let Some(_id) = val.as_gc_id() {
+        let s = vm.to_string(val);
+        !s.is_empty() && s.to_lowercase() != "false"
+    } else {
+        false
+    }
+}
+```
+
+### BxValue Integer Methods
+
+BxValue supports both floating-point and integer representations:
+
+```rust
+// Check and extract integers
+val.is_int() -> bool      // Check if integer
+val.as_int() -> i64       // Extract integer value
+
+// Create integers (use new_number with cast if no new_int)
+BxValue::new_number(42.0) // Numbers are f64 internally
+```
+
 ## Testing Patterns
+
+### String Escape Sequences in Tests
+
+BoxLang test scripts do NOT interpret escape sequences like `\n` or `\r` in string literals. Use `chr()` to create special characters:
+
+```boxlang
+// WRONG - these are literal backslash-n, not newline
+var s = "hello\nworld";
+
+// CORRECT - use chr() for special characters
+var cr = chr(13);  // carriage return
+var lf = chr(10);  // line feed
+var s = "hello" & cr & lf & "world";
+```
+
+### Testing Functions That Produce Escaped Output
+
+When testing functions that produce backslashes (like `reEscape`), comparing result strings directly is unreliable. Use `len()` to verify output length:
+
+```boxlang
+var escaped = reEscape( "foo.bar" );
+// "foo.bar" (7 chars) → "foo\.bar" (8 chars)
+if ( len( escaped ) != 8 ) {
+    throw "reEscape failed: got [" & escaped & "] len " & len( escaped );
+}
+```
 
 ### Basic Functionality
 
@@ -541,11 +635,12 @@ Before submitting:
 - [ ] Read BOTH the JVM implementation AND the JVM tests
 - [ ] Decided: prelude (BoxLang) vs native (Rust) implementation
 - [ ] Wrote comprehensive tests (basic, edge cases, member method syntax, nested structures)
+- [ ] **Ran test through BoxLang JVM to verify expected output matches**
 - [ ] Test fails before implementation (RED)
 - [ ] Implementation matches BoxLang behavior
 - [ ] Test passes after implementation (GREEN)
 - [ ] Full test suite passes (no regressions)
-- [ ] Updated `BIF_STATUS.md` (individual row + section summary counts)
+- [ ] `cargo clippy` passes (no new warnings)
 
 ### Native Rust checklist:
 
@@ -707,6 +802,90 @@ function arrayIsEmpty(array) {
 - Write one comprehensive test file covering all BIFs
 - Test edge cases: empty arrays, null values, boundary conditions
 - Use existing primitives consistently (e.g., `arrayDeleteAt` for removal)
+
+### Batch Native Rust Implementation
+
+When implementing multiple related BIFs in native Rust:
+
+```rust
+// 1. Implement all BIF functions together in bifs/mod.rs
+fn ltrim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> { /* ... */ }
+fn rtrim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> { /* ... */ }
+fn compare_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> { /* ... */ }
+// ... more BIFs
+
+// 2. Register all in register_all() in one block
+bifs.insert("ltrim".to_string(), ltrim_bif as BxNativeFunction);
+bifs.insert("rtrim".to_string(), rtrim_bif as BxNativeFunction);
+bifs.insert("compare".to_string(), compare_bif as BxNativeFunction);
+
+// 3. Register all methods in resolve_member_method() together
+"ltrim" => Some("ltrim".to_string()),
+"rtrim" => Some("rtrim".to_string()),
+"compare" => Some("compare".to_string()),
+
+// 4. Write one comprehensive test file covering all BIFs
+// tests/scripts/vm_string_bifs_batch1.bxs
+```
+
+### Helper Functions for Related BIFs
+
+When BIFs share logic (like case conversions), extract helpers:
+
+```rust
+// Shared helper for case conversion
+fn split_into_words(input: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    for c in input.chars() {
+        if c == '_' || c == '-' || c == ' ' {
+            if !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+        } else if c.is_uppercase() {
+            if !current.is_empty() && current.chars().last().unwrap().is_lowercase() {
+                words.push(current.clone());
+                current.clear();
+            }
+            current.push(c);
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn to_case(input: &str, separator: char) -> String {
+    split_into_words(input)
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(&separator.to_string())
+}
+
+// Individual BIFs use the shared helper
+fn snake_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("snakeCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let result = to_case(&input, '_');
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn kebab_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("kebabCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let result = to_case(&input, '-');
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+```
 
 ## Troubleshooting
 

@@ -159,7 +159,35 @@ public class ArrayShift extends BIF {
 **MemberType values:**
 - `MemberType.ARRAY` — method on arrays (e.g., `arr.shift()`)
 - `MemberType.STRUCT` — method on structs (e.g., `s.keyExists("x")`)
-- `MemberType.STRING` — method on strings (e.g., `str.startsWith("x")`)
+- `MemberType.STRING` / `MemberType.STRING_STRICT` — method on strings (e.g., `str.startsWith("x")`)
+
+### The `objectArgument` Attribute
+
+The `@BoxMember` annotation can specify `objectArgument` which determines which parameter the receiver maps to:
+
+```java
+@BoxBIF
+@BoxMember( type = BoxLangType.STRING_STRICT, name = "Insert", objectArgument = "string" )
+public class Insert extends BIF {
+    public Insert() {
+        super();
+        declaredArguments = new Argument[] {
+            new Argument( true, "string", Key.substring ),   // position 0
+            new Argument( true, "string", Key.string ),      // position 1 (receiver)
+            new Argument( true, "integer", Key.position )    // position 2
+        };
+    }
+}
+```
+
+**Argument order implications:**
+
+| Call Form | Example | args[0] | args[1] | args[2] |
+|-----------|---------|---------|---------|---------|
+| Function | `insert(sub, str, pos)` | substring | string | position |
+| Method | `"str".insert(sub, pos)` | string (receiver) | substring | position |
+
+When `objectArgument` is specified, the receiver becomes that argument's position, shifting other arguments. Your MatchBox implementation must handle both orderings, or the method form requires special handling in `resolve_member_method()`.
 
 When a BIF has `@BoxMember`, you must also register it in `resolve_member_method()` in MatchBox's VM. See the add-bif skill for details.
 

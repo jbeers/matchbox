@@ -13,6 +13,7 @@ cargo build                    # Build
 cargo test                     # Run all tests
 cargo test vm_array_bifs       # Run specific test
 cargo clippy                   # Lint
+cargo build --release --features "bif-http,bif-zip"  # Verify release build
 ```
 
 ## Project Structure
