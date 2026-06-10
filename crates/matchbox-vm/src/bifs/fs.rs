@@ -279,3 +279,479 @@ pub fn file_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
         .map_err(|e| e.to_string())?;
     Ok(BxValue::new_bool(true))
 }
+
+#[cfg(feature = "bif-io")]
+pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("contractPath() expects 1 argument".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let path = Path::new(&path_str);
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let relative = path.strip_prefix(&cwd).unwrap_or(path);
+    let result = relative.to_string_lossy().to_string();
+    let result = if result.is_empty() { ".".to_string() } else { result };
+    let s_id = vm.string_new(result);
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn create_temp_directory(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let directory = if !args.is_empty() {
+        vm.to_string(args[0])
+    } else {
+        std::env::temp_dir().to_string_lossy().to_string()
+    };
+    let prefix = if args.len() > 1 {
+        vm.to_string(args[1])
+    } else {
+        String::new()
+    };
+
+    let base = Path::new(&directory);
+    if !base.exists() {
+        fs::create_dir_all(base).map_err(|e| e.to_string())?;
+    }
+
+    let mut name = if prefix.is_empty() {
+        "tmp".to_string()
+    } else {
+        prefix
+    };
+    let random_suffix: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    name.push_str(&format!("_{}", random_suffix));
+
+    let dir_path = base.join(&name);
+    fs::create_dir_all(&dir_path).map_err(|e| e.to_string())?;
+    let canonical = dir_path
+        .canonicalize()
+        .unwrap_or(dir_path)
+        .to_string_lossy()
+        .to_string();
+    let s_id = vm.string_new(canonical);
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let directory = if !args.is_empty() {
+        vm.to_string(args[0])
+    } else {
+        std::env::temp_dir().to_string_lossy().to_string()
+    };
+    let prefix = if args.len() > 1 {
+        vm.to_string(args[1])
+    } else {
+        String::new()
+    };
+    let suffix = if args.len() > 2 {
+        vm.to_string(args[2])
+    } else {
+        ".tmp".to_string()
+    };
+
+    let base = Path::new(&directory);
+    if !base.exists() {
+        fs::create_dir_all(base).map_err(|e| e.to_string())?;
+    }
+
+    let mut name = if prefix.is_empty() {
+        "tmp".to_string()
+    } else {
+        prefix
+    };
+    let random_suffix: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+    name.push_str(&format!("_{}", random_suffix));
+    name.push_str(&suffix);
+
+    let file_path = base.join(&name);
+    fs::write(&file_path, b"").map_err(|e| e.to_string())?;
+    let canonical = file_path
+        .canonicalize()
+        .unwrap_or(file_path)
+        .to_string_lossy()
+        .to_string();
+    let s_id = vm.string_new(canonical);
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("directoryCopy() expects at least 2 arguments: (source, destination)".to_string());
+    }
+    let source = vm.to_string(args[0]);
+    let dest = vm.to_string(args[1]);
+    let recurse = if args.len() > 2 { args[2].as_bool() } else { false };
+    let create_path = if args.len() > 4 { args[4].as_bool() } else { true };
+    let overwrite = if args.len() > 5 { args[5].as_bool() } else { false };
+
+    let src_path = Path::new(&source);
+    if !src_path.exists() || !src_path.is_dir() {
+        return Err(format!("Source directory does not exist: {}", source));
+    }
+
+    let dest_path = Path::new(&dest);
+    if create_path && !dest_path.exists() {
+        fs::create_dir_all(dest_path).map_err(|e| e.to_string())?;
+    }
+
+    if recurse {
+        for entry in WalkDir::new(src_path).min_depth(1) {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let rel = entry.path().strip_prefix(src_path).map_err(|e| e.to_string())?;
+            let target = dest_path.join(rel);
+            if entry.file_type().is_dir() {
+                if !target.exists() {
+                    fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+                }
+            } else {
+                if target.exists() && !overwrite {
+                    continue;
+                }
+                if let Some(parent) = target.parent() {
+                    if !parent.exists() {
+                        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                    }
+                }
+                fs::copy(entry.path(), &target).map_err(|e| e.to_string())?;
+            }
+        }
+    } else {
+        for entry in fs::read_dir(src_path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let target = dest_path.join(entry.file_name());
+            if entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                if target.exists() && !overwrite {
+                    continue;
+                }
+                fs::copy(entry.path(), &target).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    Ok(BxValue::new_null())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn directory_move(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("directoryMove() expects 2 arguments: (source, destination)".to_string());
+    }
+    let source = vm.to_string(args[0]);
+    let dest = vm.to_string(args[1]);
+    let create_path = if args.len() > 2 { args[2].as_bool() } else { true };
+
+    let dest_path = Path::new(&dest);
+    if create_path {
+        if let Some(parent) = dest_path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    fs::rename(&source, &dest).map_err(|e| e.to_string())?;
+    Ok(BxValue::new_null())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn expand_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("expandPath() expects 1 argument".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let path = Path::new(&path_str);
+    let has_trailing = path_str.ends_with('/') || path_str.ends_with('\\');
+
+    let expanded = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(path)
+    };
+
+    let resolved = expanded.canonicalize().unwrap_or(expanded);
+    let mut result = resolved.to_string_lossy().to_string();
+    if has_trailing && !result.ends_with(std::path::MAIN_SEPARATOR) {
+        result.push(std::path::MAIN_SEPARATOR);
+    }
+    let s_id = vm.string_new(result);
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_close(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileClose() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_get_mime_type(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("fileGetMimeType() expects 1 argument".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let strict = if args.len() > 1 { args[1].as_bool() } else { true };
+
+    let path = Path::new(&path_str);
+    if strict {
+        if !path.exists() {
+            return Err(format!("The file [{}] does not exist", path_str));
+        }
+        let meta = fs::metadata(path).map_err(|e| e.to_string())?;
+        if meta.len() == 0 {
+            return Err(format!("The file [{}] is empty", path_str));
+        }
+    }
+
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let mime = match ext.as_str() {
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "application/javascript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "txt" => "text/plain",
+        "csv" => "text/csv",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "bxs" | "bx" => "text/plain",
+        "rs" => "text/plain",
+        "java" => "text/plain",
+        "md" => "text/markdown",
+        "yaml" | "yml" => "application/x-yaml",
+        "toml" => "application/toml",
+        _ => "application/octet-stream",
+    };
+
+    let s_id = vm.string_new(mime.to_string());
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_is_eof(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileIsEOF() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_open(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileOpen() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_read_line(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileReadLine() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_seek(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileSeek() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_set_access_mode(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("fileSetAccessMode() expects 2 arguments: (path, mode)".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let mode_str = vm.to_string(args[1]);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = u32::from_str_radix(&mode_str, 8)
+            .map_err(|_| format!("Invalid POSIX mode string: {}", mode_str))?;
+        let mut perms = fs::metadata(&path_str)
+            .map_err(|e| e.to_string())?
+            .permissions();
+        perms.set_mode(mode);
+        fs::set_permissions(&path_str, perms).map_err(|e| e.to_string())?;
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (path_str, mode_str);
+    }
+
+    Ok(BxValue::new_bool(true))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_set_attribute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("fileSetAttribute() expects 2 arguments: (path, attribute)".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let attribute = vm.to_string(args[1]).to_lowercase();
+
+    let path = Path::new(&path_str);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", path_str));
+    }
+
+    match attribute.as_str() {
+        "normal" | "default" => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = fs::Permissions::from_mode(0o664);
+                fs::set_permissions(path, perms).map_err(|e| e.to_string())?;
+            }
+        }
+        "readonly" => {
+            let mut perms = fs::metadata(path).map_err(|e| e.to_string())?.permissions();
+            perms.set_readonly(true);
+            fs::set_permissions(path, perms).map_err(|e| e.to_string())?;
+        }
+        "archive" | "hidden" | "system" => {}
+        _ => {
+            return Err(format!("The attribute provided [{}] is not valid", attribute));
+        }
+    }
+
+    Ok(BxValue::new_bool(true))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_set_last_modified(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("fileSetLastModified() expects 2 arguments: (path, date)".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let date_str = vm.to_string(args[1]);
+
+    let epoch_millis: f64 = if let Ok(n) = date_str.parse::<f64>() {
+        n
+    } else {
+        return Err(format!("Cannot parse date: {}", date_str));
+    };
+
+    let duration = std::time::Duration::from_millis(epoch_millis as u64);
+    let system_time = std::time::UNIX_EPOCH + duration;
+    let ft = filetime::FileTime::from_system_time(system_time);
+    filetime::set_file_mtime(&path_str, ft).map_err(|e| e.to_string())?;
+
+    Ok(BxValue::new_bool(true))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_write_line(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Err("fileWriteLine() is not yet implemented: file handle infrastructure required".to_string())
+}
+
+#[cfg(feature = "bif-io")]
+pub fn get_canonical_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("getCanonicalPath() expects 1 argument".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+    let path = Path::new(&path_str);
+
+    match path.canonicalize() {
+        Ok(canonical) => {
+            let mut result = canonical.to_string_lossy().to_string();
+            if canonical.is_dir() && !result.ends_with(std::path::MAIN_SEPARATOR) {
+                result.push(std::path::MAIN_SEPARATOR);
+            }
+            let s_id = vm.string_new(result);
+            Ok(BxValue::new_ptr(s_id))
+        }
+        Err(_) => {
+            let s_id = vm.string_new(path_str);
+            Ok(BxValue::new_ptr(s_id))
+        }
+    }
+}
+
+#[cfg(feature = "bif-io")]
+pub fn get_directory_from_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("getDirectoryFromPath() expects 1 argument".to_string());
+    }
+    let path_str = vm.to_string(args[0]);
+
+    if path_str.is_empty() {
+        let s_id = vm.string_new("/".to_string());
+        return Ok(BxValue::new_ptr(s_id));
+    }
+
+    if path_str.ends_with('/') || path_str.ends_with('\\') {
+        let s_id = vm.string_new(path_str);
+        return Ok(BxValue::new_ptr(s_id));
+    }
+
+    let last_sep = path_str.rfind('/').or_else(|| path_str.rfind('\\'));
+    let result = match last_sep {
+        Some(idx) => path_str[..=idx].to_string(),
+        None => "/".to_string(),
+    };
+
+    let s_id = vm.string_new(result);
+    Ok(BxValue::new_ptr(s_id))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn property_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        let struct_id = vm.struct_new();
+        return Ok(BxValue::new_ptr(struct_id));
+    }
+    let path_str = vm.to_string(args[0]);
+    if path_str.is_empty() {
+        let struct_id = vm.struct_new();
+        return Ok(BxValue::new_ptr(struct_id));
+    }
+
+    let content = fs::read_to_string(&path_str)
+        .map_err(|e| format!("Cannot read property file [{}]: {}", path_str, e))?;
+
+    let struct_id = vm.struct_new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('!') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let k = key.trim();
+            let v = value.trim();
+            let v_id = vm.string_new(v.to_string());
+            vm.struct_set(struct_id, k, BxValue::new_ptr(v_id));
+        }
+    }
+
+    Ok(BxValue::new_ptr(struct_id))
+}

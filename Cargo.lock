@@ -905,6 +905,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1816,6 +1826,7 @@ name = "matchbox_vm"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "base64",
  "bincode",
  "chrono",
  "cranelift-codegen",
@@ -1826,6 +1837,7 @@ dependencies = [
  "crossterm",
  "ctrlc",
  "digest",
+ "filetime",
  "fs_extra",
  "getrandom 0.4.2",
  "hmac",

@@ -157,6 +157,16 @@ script_test!(vm_val, "vm_val.bxs");
 script_test!(vm_functional_bif, "vm_functional_bif.bxs");
 script_test!(vm_spread, "vm_spread.bxs");
 script_test!(vm_destructuring, "vm_destructuring.bxs");
+script_test!(vm_math_datetime, "vm_math_datetime.bxs");
+script_test!(vm_type_format, "vm_type_format.bxs");
+script_test!(vm_conversion_bifs, "vm_conversion_bifs.bxs");
+script_test!(vm_io_bifs, "vm_io_bifs.bxs");
+script_test!(vm_list_query_extra, "vm_list_query_extra.bxs");
+script_test!(vm_binary_encryption, "vm_binary_encryption.bxs");
+script_test!(vm_set_bifs, "vm_set_bifs.bxs");
+script_test!(vm_i18n_bifs, "vm_i18n_bifs.bxs");
+script_test!(vm_watcher_bifs, "vm_watcher_bifs.bxs");
+script_test!(vm_cache_bifs, "vm_cache_bifs.bxs");
 #[cfg(feature = "qoq")]
 script_test!(vm_qoq_query_execute, "vm_qoq_query_execute.bxs");
 #[cfg(feature = "qoq")]

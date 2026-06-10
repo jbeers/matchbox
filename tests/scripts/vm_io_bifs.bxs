@@ -1,0 +1,94 @@
+// ============================================================
+// getDirectoryFromPath
+// ============================================================
+var result = getDirectoryFromPath("/foo/bar/baz.txt");
+if (result != "/foo/bar/") { throw "getDirectoryFromPath failed: expected '/foo/bar/', got '" & result & "'"; }
+
+result = getDirectoryFromPath("/foo/bar/");
+if (result != "/foo/bar/") { throw "getDirectoryFromPath trailing slash failed: got '" & result & "'"; }
+
+result = getDirectoryFromPath("filename.txt");
+if (result != "/") { throw "getDirectoryFromPath no dir failed: got '" & result & "'"; }
+
+// ============================================================
+// expandPath
+// ============================================================
+result = expandPath(".");
+if (len(result) < 1) { throw "expandPath dot failed"; }
+
+// ============================================================
+// getCanonicalPath
+// ============================================================
+result = getCanonicalPath("/tmp");
+if (len(result) < 1) { throw "getCanonicalPath failed"; }
+
+// ============================================================
+// createTempFile
+// ============================================================
+var tmpFile = createTempFile("/tmp", "test_", ".txt");
+if (len(tmpFile) < 1) { throw "createTempFile failed"; }
+if (!fileExists(tmpFile)) { throw "createTempFile file should exist"; }
+fileDelete(tmpFile);
+
+// ============================================================
+// createTempDirectory
+// ============================================================
+var tmpDir = createTempDirectory("/tmp", "testdir_");
+if (len(tmpDir) < 1) { throw "createTempDirectory failed"; }
+if (!directoryExists(tmpDir)) { throw "createTempDirectory dir should exist"; }
+directoryDelete(tmpDir, false);
+
+// ============================================================
+// fileGetMimeType
+// ============================================================
+result = fileGetMimeType("/tmp/test.html", false);
+if (result != "text/html") { throw "fileGetMimeType html failed: got '" & result & "'"; }
+
+result = fileGetMimeType("/tmp/test.json", false);
+if (result != "application/json") { throw "fileGetMimeType json failed: got '" & result & "'"; }
+
+result = fileGetMimeType("/tmp/test.unknown", false);
+if (result != "application/octet-stream") { throw "fileGetMimeType unknown failed: got '" & result & "'"; }
+
+// ============================================================
+// directoryCopy
+// ============================================================
+var srcDir = "/tmp/matchbox_test_dirCopy_src";
+var dstDir = "/tmp/matchbox_test_dirCopy_dst";
+directoryCreate(srcDir, true);
+fileWrite(srcDir & "/file1.txt", "hello");
+directoryCopy(srcDir, dstDir, true);
+if (!fileExists(dstDir & "/file1.txt")) { throw "directoryCopy failed: file not copied"; }
+var content = fileRead(dstDir & "/file1.txt");
+if (content != "hello") { throw "directoryCopy content mismatch"; }
+directoryDelete(srcDir, true);
+directoryDelete(dstDir, true);
+
+// ============================================================
+// directoryMove
+// ============================================================
+var moveSrc = "/tmp/matchbox_test_dirMove_src";
+var moveDst = "/tmp/matchbox_test_dirMove_dst";
+directoryCreate(moveSrc, true);
+fileWrite(moveSrc & "/file1.txt", "world");
+directoryMove(moveSrc, moveDst);
+if (directoryExists(moveSrc)) { throw "directoryMove: source should not exist"; }
+if (!fileExists(moveDst & "/file1.txt")) { throw "directoryMove: file not moved"; }
+directoryDelete(moveDst, true);
+
+// ============================================================
+// propertyFile
+// ============================================================
+var propPath = "/tmp/matchbox_test.properties";
+fileWrite(propPath, "key1=value1" & chr(10) & "key2=value2" & chr(10) & "key3=value3");
+var props = propertyFile(propPath);
+if (props.key1 != "value1") { throw "propertyFile key1 failed: got '" & props.key1 & "'"; }
+if (props.key2 != "value2") { throw "propertyFile key2 failed: got '" & props.key2 & "'"; }
+if (props.key3 != "value3") { throw "propertyFile key3 failed"; }
+fileDelete(propPath);
+
+// ============================================================
+// contractPath
+// ============================================================
+result = contractPath(expandPath("."));
+if (result != ".") { throw "contractPath round-trip failed: got '" & result & "'"; }
