@@ -1,0 +1,122 @@
+// Test jsStringFormat
+var js1 = jsStringFormat( "Hello World" );
+if ( js1 != "Hello World" ) { throw "jsStringFormat basic failed: " & js1; }
+
+var js2 = jsStringFormat( "Line1" & chr(10) & "Line2" );
+if ( len( js2 ) != 12 ) { throw "jsStringFormat newline len failed: " & len( js2 ) & " got: " & js2; }
+
+var js3 = jsStringFormat( "Tab" & chr(9) & "here" );
+if ( len( js3 ) != 9 ) { throw "jsStringFormat tab len failed: " & len( js3 ); }
+
+println( "jsStringFormat OK" );
+
+// Test lJustify
+var lj1 = lJustify( "hello", 10 );
+if ( len( lj1 ) != 10 ) { throw "lJustify basic len failed: " & len( lj1 ); }
+if ( left( lj1, 5 ) != "hello" ) { throw "lJustify basic content failed"; }
+
+var lj2 = lJustify( "hello", 3 );
+if ( lj2 != "hello" ) { throw "lJustify short failed: " & lj2; }
+
+// Test rJustify
+var rj1 = rJustify( "hello", 10 );
+if ( len( rj1 ) != 10 ) { throw "rJustify basic len failed: " & len( rj1 ); }
+if ( right( rj1, 5 ) != "hello" ) { throw "rJustify basic content failed"; }
+
+var rj2 = rJustify( "hello", 3 );
+if ( rj2 != "hello" ) { throw "rJustify short failed: " & rj2; }
+
+println( "justify OK" );
+
+// Test paragraphFormat
+var pf1 = paragraphFormat( "Line 1" & chr(10) & "Line 2" );
+if ( !find( "<p>Line 1</p>", pf1 ) ) { throw "paragraphFormat line1 failed: " & pf1; }
+if ( !find( "<p>Line 2</p>", pf1 ) ) { throw "paragraphFormat line2 failed: " & pf1; }
+
+var pf2 = paragraphFormat( "Single line" );
+if ( pf2 != "<p>Single line</p>" ) { throw "paragraphFormat single failed: " & pf2; }
+
+println( "paragraphFormat OK" );
+
+// Test slugify
+var sl1 = slugify( "Hello World" );
+if ( sl1 != "hello-world" ) { throw "slugify basic failed: " & sl1; }
+
+var sl2 = slugify( "Hello   World  Test" );
+if ( sl2 != "hello-world-test" ) { throw "slugify spaces failed: " & sl2; }
+
+var sl3 = slugify( "Hello World", 5 );
+if ( sl3 != "hello" ) { throw "slugify maxlength failed: " & sl3; }
+
+// Test as method
+var slMethod = "Test Slug".slugify();
+if ( slMethod != "test-slug" ) { throw "slugify method failed: " & slMethod; }
+
+println( "slugify OK" );
+
+// Test wrap
+var wr1 = wrap( "Hello World Test", 5 );
+if ( !find( "Hello", wr1 ) ) { throw "wrap Hello failed: " & wr1; }
+if ( !find( "World", wr1 ) ) { throw "wrap World failed: " & wr1; }
+if ( !find( "Test", wr1 ) ) { throw "wrap Test failed: " & wr1; }
+
+var wr2 = wrap( "Short", 10 );
+if ( wr2 != "Short" ) { throw "wrap short failed: " & wr2; }
+
+println( "wrap OK" );
+
+// Test stringBind
+var sb1 = stringBind( "Hello ${name}!", { name: "World" } );
+if ( sb1 != "Hello World!" ) { throw "stringBind basic failed: " & sb1; }
+
+var sb2 = stringBind( "${a} + ${b} = ${c}", { a: "1", b: "2", c: "3" } );
+if ( sb2 != "1 + 2 = 3" ) { throw "stringBind multi failed: " & sb2; }
+
+var sb3 = stringBind( "Hello ${name:Guest}!", {} );
+if ( sb3 != "Hello Guest!" ) { throw "stringBind default failed: " & sb3; }
+
+var sb4 = stringBind( "Hello ${name}!", {} );
+if ( sb4 != "Hello ${name}!" ) { throw "stringBind missing failed: " & sb4; }
+
+// Test as method
+var sbMethod = "Hi ${user}".bind( { user: "Bob" } );
+if ( sbMethod != "Hi Bob" ) { throw "stringBind method failed: " & sbMethod; }
+
+println( "stringBind OK" );
+
+// Test queryStringToStruct
+var qs1 = queryStringToStruct( "foo=bar&baz=qux" );
+if ( qs1.foo != "bar" ) { throw "queryStringToStruct foo failed: " & qs1.foo; }
+if ( qs1.baz != "qux" ) { throw "queryStringToStruct baz failed: " & qs1.baz; }
+
+var qs2 = queryStringToStruct( "?name=John&age=30" );
+if ( qs2.name != "John" ) { throw "queryStringToStruct name failed: " & qs2.name; }
+if ( qs2.age != "30" ) { throw "queryStringToStruct age failed: " & qs2.age; }
+
+var qs3 = queryStringToStruct( "" );
+if ( structCount( qs3 ) != 0 ) { throw "queryStringToStruct empty failed"; }
+
+var qs4 = queryStringToStruct( "key=value", "&" );
+if ( qs4.key != "value" ) { throw "queryStringToStruct delim failed: " & qs4.key; }
+
+println( "queryStringToStruct OK" );
+
+// Test charsetDecode/charsetEncode roundtrip
+var decoded = charsetDecode( "Hello", "utf-8" );
+var encoded = charsetEncode( decoded, "utf-8" );
+if ( encoded != "Hello" ) { throw "charset roundtrip failed: " & encoded; }
+
+println( "charsetDecode/charsetEncode OK" );
+
+// Test sqlPrettify
+var sql1 = sqlPrettify( "select * from users where id = 1" );
+if ( !findNoCase( "SELECT", sql1 ) ) { throw "sqlPrettify SELECT failed: " & sql1; }
+if ( !findNoCase( "FROM", sql1 ) ) { throw "sqlPrettify FROM failed: " & sql1; }
+if ( !findNoCase( "WHERE", sql1 ) ) { throw "sqlPrettify WHERE failed: " & sql1; }
+
+var sql2 = sqlPrettify( "" );
+if ( sql2 != "" ) { throw "sqlPrettify empty failed: " & sql2; }
+
+println( "sqlPrettify OK" );
+
+println( "All string BIFs OK" );

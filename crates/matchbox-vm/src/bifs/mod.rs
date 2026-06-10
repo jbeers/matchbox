@@ -263,6 +263,35 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "spanincluding".to_string(),
         span_including_bif as BxNativeFunction,
     );
+    bifs.insert(
+        "jsstringformat".to_string(),
+        js_string_format_bif as BxNativeFunction,
+    );
+    bifs.insert("ljustify".to_string(), l_justify_bif as BxNativeFunction);
+    bifs.insert("rjustify".to_string(), r_justify_bif as BxNativeFunction);
+    bifs.insert(
+        "paragraphformat".to_string(),
+        paragraph_format_bif as BxNativeFunction,
+    );
+    bifs.insert("slugify".to_string(), slugify_bif as BxNativeFunction);
+    bifs.insert("wrap".to_string(), wrap_bif as BxNativeFunction);
+    bifs.insert("stringbind".to_string(), string_bind_bif as BxNativeFunction);
+    bifs.insert(
+        "querystringtostruct".to_string(),
+        query_string_to_struct_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "charsetdecode".to_string(),
+        charset_decode_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "charsetencode".to_string(),
+        charset_encode_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "sqlprettify".to_string(),
+        sql_prettify_bif as BxNativeFunction,
+    );
     bifs.insert("tostring".to_string(), to_string_bif as BxNativeFunction);
     bifs.insert("now".to_string(), now as BxNativeFunction);
     bifs.insert("createdate".to_string(), create_date as BxNativeFunction);
@@ -3634,4 +3663,337 @@ fn is_simple_value_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
             .map(|name| name.eq_ignore_ascii_case("datetime"))
             .unwrap_or(false);
     Ok(BxValue::new_bool(is_simple))
+}
+
+fn js_string_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("jsStringFormat() expects at least 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let mut result = String::with_capacity(input.len() + 10);
+    for c in input.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\x0c' => result.push_str("\\f"),
+            '\t' => result.push_str("\\t"),
+            '"' => result.push_str("\\\""),
+            '\'' => result.push_str("\\'"),
+            _ => result.push(c),
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn l_justify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("lJustify() expects exactly 2 arguments".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let length = args[1].as_number() as usize;
+    if length == 0 {
+        return Err("lJustify() length must be greater than 0".to_string());
+    }
+    let input_len = input.chars().count();
+    if input_len >= length {
+        return Ok(BxValue::new_ptr(vm.string_new(input)));
+    }
+    let padding = length - input_len;
+    let mut result = String::with_capacity(length);
+    result.push_str(&input);
+    for _ in 0..padding {
+        result.push(' ');
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn r_justify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("rJustify() expects exactly 2 arguments".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let length = args[1].as_number() as usize;
+    if length == 0 {
+        return Err("rJustify() length must be greater than 0".to_string());
+    }
+    let input_len = input.chars().count();
+    if input_len >= length {
+        return Ok(BxValue::new_ptr(vm.string_new(input)));
+    }
+    let padding = length - input_len;
+    let mut result = String::with_capacity(length);
+    for _ in 0..padding {
+        result.push(' ');
+    }
+    result.push_str(&input);
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn paragraph_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("paragraphFormat() expects at least 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let lines: Vec<&str> = input.lines().collect();
+    let mut result = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            result.push('\n');
+        }
+        result.push_str("<p>");
+        result.push_str(line);
+        result.push_str("</p>");
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn slugify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("slugify() expects at least 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let max_length = args.get(1).map(|v| v.as_number() as usize).unwrap_or(0);
+    let allow = args.get(2).map(|v| vm.to_string(*v)).unwrap_or_default();
+
+    let slug = input.trim().to_lowercase();
+    let slug = slug.split_whitespace().collect::<Vec<_>>().join("-");
+    let pattern = format!("[^a-z0-9{}]", allow);
+    let re = regex::Regex::new(&pattern).map_err(|e| format!("slugify() invalid regex: {}", e))?;
+    let mut slug = re.replace_all(&slug, "-").to_string();
+    let multi_dash = regex::Regex::new("-+").unwrap();
+    slug = multi_dash.replace_all(&slug, "-").to_string();
+    slug = slug.trim_matches('-').to_string();
+
+    if max_length > 0 && slug.len() > max_length {
+        slug = slug[..max_length].to_string();
+    }
+
+    Ok(BxValue::new_ptr(vm.string_new(slug)))
+}
+
+fn wrap_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("wrap() expects at least 2 arguments".to_string());
+    }
+    let mut input = vm.to_string(args[0]);
+    let limit = args[1].as_number() as usize;
+    let strip = args.get(2).map(|v| v.as_bool()).unwrap_or(false);
+
+    if limit == 0 {
+        return Err("wrap() limit must be greater than 0".to_string());
+    }
+
+    if strip {
+        input = input.replace('\r', " ").replace('\n', " ");
+        let multi_space = regex::Regex::new("\\s+").unwrap();
+        input = multi_space.replace_all(&input, " ").to_string();
+    }
+
+    let mut result = String::new();
+    let mut index = 0;
+    let chars: Vec<char> = input.chars().collect();
+
+    while index < chars.len() {
+        if index + limit > chars.len() {
+            result.extend(&chars[index..]);
+            break;
+        }
+
+        let mut space_idx = None;
+        for i in (0..=limit).rev() {
+            if index + i < chars.len() && chars[index + i] == ' ' {
+                space_idx = Some(i);
+                break;
+            }
+        }
+
+        if let Some(space_pos) = space_idx {
+            if space_pos == 0 {
+                result.extend(&chars[index..index + limit]);
+                result.push('\n');
+                index += limit;
+            } else {
+                result.extend(&chars[index..index + space_pos]);
+                result.push('\n');
+                index += space_pos + 1;
+            }
+        } else {
+            result.extend(&chars[index..index + limit]);
+            result.push('\n');
+            index += limit;
+        }
+    }
+
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn string_bind_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("stringBind() expects exactly 2 arguments".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let struct_id = args[1]
+        .as_gc_id()
+        .ok_or("stringBind() second argument must be a struct")?;
+
+    if !vm.is_struct_value(args[1]) {
+        return Err("stringBind() second argument must be a struct".to_string());
+    }
+
+    let re = regex::Regex::new(r"\$\{([^:}]+)(?::([^}]+))?\}").map_err(|e| format!("stringBind() regex error: {}", e))?;
+    let result = re
+        .replace_all(&input, |caps: &regex::Captures| {
+            let placeholder = &caps[1];
+            let default_val = caps.get(2).map(|m| m.as_str());
+            let value = vm.struct_get(struct_id, placeholder);
+            if value.is_null() {
+                if let Some(def) = default_val {
+                    def.to_string()
+                } else {
+                    caps[0].to_string()
+                }
+            } else {
+                vm.to_string(value)
+            }
+        })
+        .to_string();
+
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn query_string_to_struct_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("queryStringToStruct() expects at least 1 argument".to_string());
+    }
+    let mut target = vm.to_string(args[0]).trim().to_string();
+    let delimiter = args
+        .get(1)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| "&".to_string());
+
+    if target.is_empty() {
+        let id = vm.struct_new();
+        return Ok(BxValue::new_ptr(id));
+    }
+
+    if target.starts_with('?') {
+        target = target[1..].to_string();
+    }
+
+    let struct_id = vm.struct_new();
+    for pair in target.split(&delimiter) {
+        let parts: Vec<&str> = pair.splitn(2, '=').collect();
+        if parts.is_empty() {
+            continue;
+        }
+        let key = urlencoding::decode(parts[0].trim())
+            .unwrap_or_else(|_| parts[0].trim().into())
+            .to_string();
+        let value = if parts.len() > 1 {
+            urlencoding::decode(parts[1].trim())
+                .unwrap_or_else(|_| parts[1].trim().into())
+                .to_string()
+        } else {
+            String::new()
+        };
+        let value_id = vm.string_new(value);
+        vm.struct_set(struct_id, &key, BxValue::new_ptr(value_id));
+    }
+
+    Ok(BxValue::new_ptr(struct_id))
+}
+
+fn charset_decode_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("charsetDecode() expects at least 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let encoding = args
+        .get(1)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| "utf-8".to_string())
+        .to_lowercase();
+
+    let bytes = match encoding.as_str() {
+        "utf-8" | "utf8" => input.as_bytes().to_vec(),
+        "ascii" | "us-ascii" => input.as_bytes().to_vec(),
+        "iso-8859-1" | "latin1" | "latin-1" => input.as_bytes().to_vec(),
+        _ => return Err(format!("charsetDecode() unsupported encoding: {}", encoding)),
+    };
+
+    let id = vm.bytes_new(bytes);
+    Ok(BxValue::new_ptr(id))
+}
+
+fn charset_encode_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("charsetEncode() expects at least 1 argument".to_string());
+    }
+    let bytes = vm
+        .to_bytes(args[0])
+        .map_err(|_| "charsetEncode() first argument must be binary data".to_string())?;
+    let encoding = args
+        .get(1)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| "utf-8".to_string())
+        .to_lowercase();
+
+    let result = match encoding.as_str() {
+        "utf-8" | "utf8" => String::from_utf8_lossy(&bytes).to_string(),
+        "ascii" | "us-ascii" => String::from_utf8_lossy(&bytes).to_string(),
+        "iso-8859-1" | "latin1" | "latin-1" => String::from_utf8_lossy(&bytes).to_string(),
+        _ => return Err(format!("charsetEncode() unsupported encoding: {}", encoding)),
+    };
+
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn sql_prettify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("sqlPrettify() expects at least 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.trim().is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+
+    let sql_keywords = [
+        "ALTER TABLE", "CREATE TABLE", "CASE", "NULLIF", "DELETE", "DROP TABLE",
+        "FROM", "GROUP BY", "HAVING", "INSERT INTO", "LIMIT", "ORDER BY",
+        "OFFSET", "SELECT", "UNION", "UPDATE", "WHERE",
+    ];
+    let sql_indented_keywords = [
+        "FULL JOIN", "INNER JOIN", "JOIN", "LEFT JOIN", "OUTER JOIN", "LIKE",
+        "BETWEEN", "IS NULL", "IS NOT NULL", "EXISTS", "DISTINCT", "UNION ALL",
+        "INTERSECT", "MINUS", "EXCEPT",
+    ];
+    let sql_logical_operators = ["AND", "OR", "NOT"];
+    let indent = "  ";
+
+    let mut result = input.clone();
+
+    for keyword in &sql_keywords {
+        let pattern = format!(r"(?i)\b{}\b", regex::escape(keyword));
+        let re = regex::Regex::new(&pattern).unwrap();
+        result = re.replace_all(&result, format!("\n{}\n{}", keyword.to_uppercase(), indent)).to_string();
+    }
+
+    for keyword in &sql_indented_keywords {
+        let pattern = format!(r"(?i)\b{}\b", regex::escape(keyword));
+        let re = regex::Regex::new(&pattern).unwrap();
+        result = re.replace_all(&result, format!("\n{}{}", indent, keyword.to_uppercase())).to_string();
+    }
+
+    for op in &sql_logical_operators {
+        let pattern = format!(r"(?i)\b{}\b", regex::escape(op));
+        let re = regex::Regex::new(&pattern).unwrap();
+        result = re.replace_all(&result, format!("{}\n", op.to_uppercase())).to_string();
+    }
+
+    let multi_newline = regex::Regex::new(r"\n\s*\n").unwrap();
+    result = multi_newline.replace_all(&result, "\n").to_string();
+    result = result.trim().to_string();
+
+    Ok(BxValue::new_ptr(vm.string_new(result)))
 }
