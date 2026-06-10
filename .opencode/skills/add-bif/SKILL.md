@@ -9,6 +9,39 @@ description: Add a new built-in function (BIF) to MatchBox using TDD. Use when i
 
 This skill guides you through adding a new built-in function (BIF) to MatchBox using test-driven development. Always reference the BoxLang JVM implementation for compatibility.
 
+## Two Implementation Approaches
+
+MatchBox supports two ways to implement BIFs:
+
+### 1. Native Rust BIFs (in `crates/matchbox-vm/src/bifs/`)
+
+Use this approach when:
+- The BIF requires direct access to VM internals (array manipulation, GC objects)
+- The BIF involves system operations (file I/O, HTTP, crypto)
+- Performance is critical
+- The BIF cannot be expressed in BoxLang itself
+
+### 2. Prelude BIFs (in `crates/matchbox-compiler/src/prelude.bxs`)
+
+Use this approach when:
+- The BIF can be composed from existing primitives
+- The BIF is a higher-order function (map, filter, reduce, each, etc.)
+- The implementation is simpler in BoxLang than Rust
+- The BIF iterates over collections using existing functions
+
+The prelude is written in BoxLang and gets tree-shaken during compilation (only used BIFs are included in output).
+
+### Decision Tree
+
+```
+Can it be implemented using existing MatchBox primitives?
+├── YES → Implement in prelude.bxs
+│   Examples: arrayMap, arrayFilter, structEach, arrayToList
+│
+└── NO → Implement as native Rust BIF
+    Examples: fileRead, http, hash, queryExecute
+```
+
 ## Prerequisites
 
 Before starting, ensure you have:
@@ -106,6 +139,47 @@ If the BIF is also a string method, register it in `crates/matchbox-vm/src/vm/mo
 // In resolve_member_method(), under GcObject::String(_) match arm:
 "<bif_name>" => Some("<bif_name>".to_string()),
 ```
+
+### Step 3b: Implement BIF in Prelude (Alternative to Rust)
+
+If the BIF can be implemented using existing primitives, add it to `crates/matchbox-compiler/src/prelude.bxs`:
+
+```boxlang
+/**
+ * Returns true if any element in the array satisfies the predicate.
+ */
+function arraySome(array, predicate) {
+    for (item in array) {
+        if (predicate(item)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Returns true if no elements in the array satisfy the predicate.
+ */
+function arrayNone(array, predicate) {
+    return !arraySome(array, predicate);
+}
+```
+
+**Prelude BIF guidelines:**
+- Include a JSDoc-style comment describing the function
+- Use existing BIFs and language constructs
+- Follow the naming conventions (camelCase for function names)
+- The function will be available globally (no module exports needed)
+- Tree-shaking ensures unused prelude BIFs don't bloat output
+
+**When to use prelude vs. Rust:**
+
+| Prelude (BoxLang) | Native (Rust) |
+|-------------------|---------------|
+| `arrayMap`, `arrayFilter`, `arrayReduce` | `arrayAppend`, `arrayDeleteAt` |
+| `structEach`, `structMap`, `structFilter` | `structKeyExists`, `structInsert` |
+| `arrayToList`, `arrayReverse`, `arraySlice` | `len`, `toString`, `duplicate` |
+| Composed from existing primitives | Direct VM/system access |
 
 Run the test again:
 
@@ -306,6 +380,7 @@ if ( result != "expected" ) { throw "multi-arg failed"; }
 Before submitting:
 
 - [ ] Researched BoxLang JVM implementation
+- [ ] Decided: prelude (BoxLang) vs native (Rust) implementation
 - [ ] Wrote comprehensive tests (basic, edge cases, method syntax)
 - [ ] Test fails before implementation (RED)
 - [ ] Implementation matches BoxLang behavior
@@ -314,9 +389,50 @@ Before submitting:
 - [ ] Built and tested locally with real script
 - [ ] Committed with descriptive message
 
+### Prelude-specific checklist:
+
+- [ ] Can be implemented using existing primitives (no VM internals needed)
+- [ ] Includes JSDoc-style documentation comment
+- [ ] Uses camelCase naming convention
+- [ ] Tested with tree-shaking enabled (default build)
+
 ## Examples from Recent Work
 
-### stringEndsWith
+### arrayMap (Prelude BIF)
+
+```bash
+# 1. Research in BoxLang
+cat ~/dev/ortus-boxlang/BoxLang/src/main/java/ortus/boxlang/runtime/bifs/global/array/ArrayMap.java
+
+# 2. Write test
+cat > tests/scripts/vm_array_map.bxs << 'EOF'
+var arr = [1, 2, 3];
+var doubled = arrayMap(arr, (x) => x * 2);
+if (doubled[1] != 2 || doubled[2] != 4 || doubled[3] != 6) {
+    throw "arrayMap failed";
+}
+println("arrayMap OK");
+EOF
+
+# 3. Implement in prelude.bxs (NOT in Rust)
+# Add to crates/matchbox-compiler/src/prelude.bxs:
+
+/**
+ * Maps an array to a new array using a callback function.
+ */
+function arrayMap(array, callback) {
+    var result = [];
+    for (item in array) {
+        arrayAppend(result, callback(item));
+    }
+    return result;
+}
+
+# 4. Test - no Rust compilation needed!
+cargo test vm_array_map
+```
+
+### stringEndsWith (Native Rust BIF)
 
 ```bash
 # 1. Research in BoxLang
@@ -386,6 +502,19 @@ fn val_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 ```
 
 ## Troubleshooting
+
+### Prelude BIF not found
+
+- Check spelling (must match exactly, camelCase)
+- Ensure function is at top level (not nested inside another function)
+- Verify `crates/matchbox-compiler/src/prelude.bxs` syntax is valid BoxLang
+- Run `cargo build` to recompile the prelude
+
+### Prelude BIF calls native BIF that doesn't exist
+
+- Prelude can only use BIFs that are already implemented in Rust
+- Check that all dependencies are registered in `register_all()`
+- Example: `arrayMap` uses `arrayAppend` - ensure `arrayAppend` exists
 
 ### Test fails with "Can only call functions"
 
