@@ -150,6 +150,8 @@ script_test!(vm_char, "vm_char.bxs");
 script_test!(vm_amp_equal, "vm_amp_equal.bxs");
 script_test!(vm_string_ends_with, "vm_string_ends_with.bxs");
 script_test!(vm_string_starts_with, "vm_string_starts_with.bxs");
+script_test!(vm_string_bifs_batch1, "vm_string_bifs_batch1.bxs");
+script_test!(vm_string_bifs_batch2, "vm_string_bifs_batch2.bxs");
 script_test!(vm_val, "vm_val.bxs");
 script_test!(vm_functional_bif, "vm_functional_bif.bxs");
 script_test!(vm_spread, "vm_spread.bxs");

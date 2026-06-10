@@ -188,6 +188,47 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
+    bifs.insert("ltrim".to_string(), ltrim_bif as BxNativeFunction);
+    bifs.insert("rtrim".to_string(), rtrim_bif as BxNativeFunction);
+    bifs.insert("compare".to_string(), compare_bif as BxNativeFunction);
+    bifs.insert(
+        "comparenocase".to_string(),
+        compare_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "removechars".to_string(),
+        remove_chars_bif as BxNativeFunction,
+    );
+    bifs.insert("stripcr".to_string(), strip_cr_bif as BxNativeFunction);
+    bifs.insert("ucfirst".to_string(), uc_first_bif as BxNativeFunction);
+    bifs.insert(
+        "replacenocase".to_string(),
+        replace_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "stringendswithnocase".to_string(),
+        string_ends_with_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "stringstartswithnocase".to_string(),
+        string_starts_with_no_case_bif as BxNativeFunction,
+    );
+    bifs.insert("ascii".to_string(), ascii_bif as BxNativeFunction);
+    bifs.insert("findoneof".to_string(), find_one_of_bif as BxNativeFunction);
+    bifs.insert("insert".to_string(), insert_bif as BxNativeFunction);
+    bifs.insert("reescape".to_string(), re_escape_bif as BxNativeFunction);
+    bifs.insert(
+        "yesnoformat".to_string(),
+        yes_no_format_bif as BxNativeFunction,
+    );
+    bifs.insert("snakecase".to_string(), snake_case_bif as BxNativeFunction);
+    bifs.insert("kebabcase".to_string(), kebab_case_bif as BxNativeFunction);
+    bifs.insert("camelcase".to_string(), camel_case_bif as BxNativeFunction);
+    bifs.insert("pascalcase".to_string(), pascal_case_bif as BxNativeFunction);
+    bifs.insert(
+        "replacelist".to_string(),
+        replace_list_bif as BxNativeFunction,
+    );
     bifs.insert("repeatstring".to_string(), repeat_string as BxNativeFunction);
     bifs.insert("find".to_string(), find_bif as BxNativeFunction);
     bifs.insert(
@@ -573,6 +614,399 @@ fn trim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let s = vm.to_string(args[0]).trim().to_string();
     Ok(BxValue::new_ptr(vm.string_new(s)))
+}
+
+fn ltrim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("ltrim() expects 1 or 2 arguments: (string, chars?)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+    let result = if args.len() == 2 {
+        let chars = vm.to_string(args[1]);
+        let chars_vec: Vec<char> = chars.chars().collect();
+        let start = input
+            .char_indices()
+            .find(|(_, c)| !chars_vec.contains(c))
+            .map(|(i, _)| i)
+            .unwrap_or(input.len());
+        input[start..].to_string()
+    } else {
+        input.trim_start().to_string()
+    };
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn rtrim_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || args.len() > 2 {
+        return Err("rtrim() expects 1 or 2 arguments: (string, chars?)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+    let result = if args.len() == 2 {
+        let chars = vm.to_string(args[1]);
+        let chars_vec: Vec<char> = chars.chars().collect();
+        let end = input
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !chars_vec.contains(c))
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(0);
+        input[..end].to_string()
+    } else {
+        input.trim_end().to_string()
+    };
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn compare_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("compare() expects exactly 2 arguments: (string1, string2)".to_string());
+    }
+    let s1 = vm.to_string(args[0]);
+    let s2 = vm.to_string(args[1]);
+    let result = match s1.cmp(&s2) {
+        Ordering::Less => -1.0,
+        Ordering::Equal => 0.0,
+        Ordering::Greater => 1.0,
+    };
+    Ok(BxValue::new_number(result))
+}
+
+fn compare_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("compareNoCase() expects exactly 2 arguments: (string1, string2)".to_string());
+    }
+    let s1 = vm.to_string(args[0]).to_lowercase();
+    let s2 = vm.to_string(args[1]).to_lowercase();
+    let result = match s1.cmp(&s2) {
+        Ordering::Less => -1.0,
+        Ordering::Equal => 0.0,
+        Ordering::Greater => 1.0,
+    };
+    Ok(BxValue::new_number(result))
+}
+
+fn remove_chars_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 3 {
+        return Err("removeChars() expects exactly 3 arguments: (string, start, count)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let start = args[1].as_number() as usize;
+    let count = args[2].as_number() as usize;
+    if start < 1 {
+        return Err("removeChars() start position must be >= 1".to_string());
+    }
+    let chars: Vec<char> = input.chars().collect();
+    let start_idx = start - 1;
+    let mut result = String::new();
+    for (i, c) in chars.iter().enumerate() {
+        if i < start_idx || i >= start_idx + count {
+            result.push(*c);
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn strip_cr_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("stripCR() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let result: String = input.chars().filter(|&c| c != '\r').collect();
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn uc_first_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || args.len() > 3 {
+        return Err("ucFirst() expects 1 to 3 arguments: (string, doAll?, doLowerIfAllUppercase?)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+    let do_all = if args.len() > 1 { args[1].as_bool() } else { false };
+    let do_lower = if args.len() > 2 { args[2].as_bool() } else { false };
+    let words: Vec<&str> = input.split_whitespace().collect();
+    let mut result_parts: Vec<String> = Vec::new();
+    for word in words {
+        let mut w = word.to_string();
+        if do_lower && w.chars().all(|c| c.is_uppercase() || !c.is_alphabetic()) {
+            w = w.to_lowercase();
+        }
+        if do_all || result_parts.is_empty() {
+            let mut chars = w.chars();
+            if let Some(first) = chars.next() {
+                w = first.to_uppercase().to_string() + chars.as_str();
+            }
+        }
+        result_parts.push(w);
+    }
+    let result = result_parts.join(" ");
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn replace_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("replaceNoCase() expects at least 3 arguments: (string, substring, replacement, scope?)".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let search = vm.to_string(args[1]);
+    let replacement = vm.to_string(args[2]);
+    let scope = if args.len() > 3 {
+        vm.to_string(args[3]).to_lowercase()
+    } else {
+        "one".to_string()
+    };
+    let input_lower = input.to_lowercase();
+    let search_lower = search.to_lowercase();
+    let result = if scope == "all" {
+        let mut result = String::new();
+        let mut i = 0;
+        let chars: Vec<char> = input.chars().collect();
+        let chars_lower: Vec<char> = input_lower.chars().collect();
+        let search_chars: Vec<char> = search_lower.chars().collect();
+        let search_len = search_chars.len();
+        while i < chars.len() {
+            if i + search_len <= chars.len()
+                && chars_lower[i..i + search_len] == search_chars[..]
+            {
+                result.push_str(&replacement);
+                i += search_len;
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+        result
+    } else {
+        if let Some(pos) = input_lower.find(&search_lower) {
+            format!("{}{}{}", &input[..pos], replacement, &input[pos + search.len()..])
+        } else {
+            input
+        }
+    };
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn string_ends_with_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("stringEndsWithNoCase() expects exactly 2 arguments: (string, suffix)".to_string());
+    }
+    let input = vm.to_string(args[0]).to_lowercase();
+    let suffix = vm.to_string(args[1]).to_lowercase();
+    Ok(BxValue::new_bool(input.ends_with(&suffix)))
+}
+
+fn string_starts_with_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("stringStartsWithNoCase() expects exactly 2 arguments: (string, prefix)".to_string());
+    }
+    let input = vm.to_string(args[0]).to_lowercase();
+    let prefix = vm.to_string(args[1]).to_lowercase();
+    Ok(BxValue::new_bool(input.starts_with(&prefix)))
+}
+
+fn ascii_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("ascii() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    if input.is_empty() {
+        return Err("ascii() requires a non-empty string".to_string());
+    }
+    let first_char = input.chars().next().unwrap();
+    Ok(BxValue::new_number(first_char as u32 as f64))
+}
+
+fn find_one_of_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("findOneOf() expects at least 2 arguments: (set, string, start?)".to_string());
+    }
+    let set = vm.to_string(args[0]);
+    let input = vm.to_string(args[1]);
+    let start = if args.len() > 2 {
+        args[2].as_number() as usize
+    } else {
+        1
+    };
+    let start = start.max(1);
+    let start_idx = start - 1;
+    let chars: Vec<char> = input.chars().collect();
+    let set_chars: Vec<char> = set.chars().collect();
+    for i in start_idx..chars.len() {
+        if set_chars.contains(&chars[i]) {
+            return Ok(BxValue::new_number((i + 1) as f64));
+        }
+    }
+    Ok(BxValue::new_number(0.0))
+}
+
+fn insert_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 3 {
+        return Err("insert() expects exactly 3 arguments: (substring, string, position)".to_string());
+    }
+    let substring = vm.to_string(args[0]);
+    let input = vm.to_string(args[1]);
+    let position = args[2].as_number() as usize;
+    if position > input.len() {
+        return Err(format!("insert() position {} is out of range", position));
+    }
+    let result = format!("{}{}{}", &input[..position], substring, &input[position..]);
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn re_escape_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("reEscape() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let special_chars = "\\.^$|()[]{}*+?";
+    let mut result = String::new();
+    for c in input.chars() {
+        if special_chars.contains(c) {
+            result.push('\\');
+        }
+        result.push(c);
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn yes_no_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("yesNoFormat() expects exactly 1 argument".to_string());
+    }
+    let val = args[0];
+    let is_true = if val.is_bool() {
+        val.as_bool()
+    } else if val.is_number() {
+        val.as_number() != 0.0
+    } else if val.is_int() {
+        val.as_int() != 0
+    } else if val.is_null() {
+        false
+    } else if let Some(id) = val.as_gc_id() {
+        let s = vm.to_string(val);
+        !s.is_empty() && s.to_lowercase() != "false"
+    } else {
+        false
+    };
+    Ok(BxValue::new_ptr(vm.string_new(if is_true { "Yes" } else { "No" }.to_string())))
+}
+
+fn snake_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("snakeCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let result = to_case(&input, '_');
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn kebab_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("kebabCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let result = to_case(&input, '-');
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn camel_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("camelCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let words = split_into_words(&input);
+    let mut result = String::new();
+    for (i, word) in words.iter().enumerate() {
+        if i == 0 {
+            result.push_str(&word.to_lowercase());
+        } else {
+            let mut chars = word.chars();
+            if let Some(first) = chars.next() {
+                result.push(first.to_uppercase().next().unwrap());
+                result.push_str(&chars.as_str().to_lowercase());
+            }
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn pascal_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("pascalCase() expects exactly 1 argument".to_string());
+    }
+    let input = vm.to_string(args[0]);
+    let words = split_into_words(&input);
+    let mut result = String::new();
+    for word in words {
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            result.push(first.to_uppercase().next().unwrap());
+            result.push_str(&chars.as_str().to_lowercase());
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+fn split_into_words(input: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut prev_was_lower = false;
+    for c in input.chars() {
+        if c == '_' || c == '-' || c == ' ' {
+            if !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+            prev_was_lower = false;
+        } else if c.is_uppercase() {
+            if prev_was_lower && !current.is_empty() {
+                words.push(current.clone());
+                current.clear();
+            }
+            current.push(c);
+            prev_was_lower = false;
+        } else {
+            current.push(c);
+            prev_was_lower = c.is_lowercase();
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn to_case(input: &str, separator: char) -> String {
+    let words = split_into_words(input);
+    words
+        .iter()
+        .map(|w| w.to_lowercase())
+        .collect::<Vec<_>>()
+        .join(&separator.to_string())
+}
+
+fn replace_list_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("replaceList() expects at least 3 arguments: (string, list1, list2)".to_string());
+    }
+    let mut input = vm.to_string(args[0]);
+    let list1 = vm.to_string(args[1]);
+    let list2 = vm.to_string(args[2]);
+    let items1: Vec<&str> = list1.split(',').collect();
+    let items2: Vec<&str> = list2.split(',').collect();
+    for (i, search) in items1.iter().enumerate() {
+        if let Some(replacement) = items2.get(i) {
+            input = input.replace(search, replacement);
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(input)))
 }
 
 fn repeat_string(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

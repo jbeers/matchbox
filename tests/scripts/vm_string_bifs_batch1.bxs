@@ -1,0 +1,198 @@
+// Test ltrim function
+var lt1 = ltrim( "  hello" );
+if ( lt1 != "hello" ) { throw "ltrim basic failed: got [" & lt1 & "]"; }
+
+var lt2 = ltrim( "hello" );
+if ( lt2 != "hello" ) { throw "ltrim no whitespace failed"; }
+
+var lt3 = ltrim( "" );
+if ( lt3 != "" ) { throw "ltrim empty failed"; }
+
+var lt4 = ltrim( "   " );
+if ( lt4 != "" ) { throw "ltrim all whitespace failed"; }
+
+var lt5 = ltrim( "00hello", "0" );
+if ( lt5 != "hello" ) { throw "ltrim custom chars failed: got [" & lt5 & "]"; }
+
+var lt6 = ltrim( "///path", "/" );
+if ( lt6 != "path" ) { throw "ltrim slash chars failed: got [" & lt6 & "]"; }
+
+// Test ltrim as method
+var ltStr = "  test  ";
+if ( ltStr.ltrim() != "test  " ) { throw "ltrim method failed"; }
+
+println( "ltrim OK" );
+
+// Test rtrim function
+var rt1 = rtrim( "hello  " );
+if ( rt1 != "hello" ) { throw "rtrim basic failed: got [" & rt1 & "]"; }
+
+var rt2 = rtrim( "hello" );
+if ( rt2 != "hello" ) { throw "rtrim no whitespace failed"; }
+
+var rt3 = rtrim( "" );
+if ( rt3 != "" ) { throw "rtrim empty failed"; }
+
+var rt4 = rtrim( "   " );
+if ( rt4 != "" ) { throw "rtrim all whitespace failed"; }
+
+var rt5 = rtrim( "hello00", "0" );
+if ( rt5 != "hello" ) { throw "rtrim custom chars failed: got [" & rt5 & "]"; }
+
+// Test rtrim as method
+var rtStr = "  test  ";
+if ( rtStr.rtrim() != "  test" ) { throw "rtrim method failed"; }
+
+println( "rtrim OK" );
+
+// Test compare function
+var c1 = compare( "abc", "abc" );
+if ( c1 != 0 ) { throw "compare equal failed: got " & c1; }
+
+var c2 = compare( "abc", "def" );
+if ( c2 != -1 ) { throw "compare less failed: got " & c2; }
+
+var c3 = compare( "def", "abc" );
+if ( c3 != 1 ) { throw "compare greater failed: got " & c3; }
+
+var c4 = compare( "ABC", "abc" );
+if ( c4 != -1 ) { throw "compare case sensitive failed: got " & c4; }
+
+var c5 = compare( "", "" );
+if ( c5 != 0 ) { throw "compare empty failed"; }
+
+// Test compare as method
+if ( "abc".compare( "def" ) != -1 ) { throw "compare method failed"; }
+
+println( "compare OK" );
+
+// Test compareNoCase function
+var cn1 = compareNoCase( "abc", "ABC" );
+if ( cn1 != 0 ) { throw "compareNoCase equal failed: got " & cn1; }
+
+var cn2 = compareNoCase( "abc", "DEF" );
+if ( cn2 != -1 ) { throw "compareNoCase less failed: got " & cn2; }
+
+var cn3 = compareNoCase( "DEF", "abc" );
+if ( cn3 != 1 ) { throw "compareNoCase greater failed: got " & cn3; }
+
+// Test compareNoCase as method
+if ( "ABC".compareNoCase( "abc" ) != 0 ) { throw "compareNoCase method failed"; }
+
+println( "compareNoCase OK" );
+
+// Test removeChars function
+var rc1 = removeChars( "hello world", 6, 6 );
+if ( rc1 != "hello" ) { throw "removeChars basic failed: got [" & rc1 & "]"; }
+
+var rc2 = removeChars( "abcdefgh", 3, 2 );
+if ( rc2 != "abefgh" ) { throw "removeChars middle failed: got [" & rc2 & "]"; }
+
+var rc3 = removeChars( "test", 1, 1 );
+if ( rc3 != "est" ) { throw "removeChars start failed: got [" & rc3 & "]"; }
+
+// Test removeChars as method
+if ( "hello world".removeChars( 1, 6 ) != "world" ) { throw "removeChars method failed"; }
+
+println( "removeChars OK" );
+
+// Test stripCR function
+var cr = chr(13);
+var lf = chr(10);
+var sc1 = stripCR( "hello" & cr & lf & "world" );
+if ( sc1 != "hello" & lf & "world" ) { throw "stripCR basic failed"; }
+
+var sc2 = stripCR( "no cr here" );
+if ( sc2 != "no cr here" ) { throw "stripCR no CR failed"; }
+
+var sc3 = stripCR( cr & lf & cr & lf );
+if ( sc3 != lf & lf ) { throw "stripCR only CR failed"; }
+
+var sc4 = stripCR( "" );
+if ( sc4 != "" ) { throw "stripCR empty failed"; }
+
+// Test stripCR as method
+if ( ( "a" & cr & lf & "b" ).stripCR() != "a" & lf & "b" ) { throw "stripCR method failed"; }
+
+println( "stripCR OK" );
+
+// Test ucFirst function
+var uf1 = ucFirst( "hello" );
+if ( uf1 != "Hello" ) { throw "ucFirst basic failed: got [" & uf1 & "]"; }
+
+var uf2 = ucFirst( "" );
+if ( uf2 != "" ) { throw "ucFirst empty failed"; }
+
+var uf3 = ucFirst( "h" );
+if ( uf3 != "H" ) { throw "ucFirst single char failed"; }
+
+var uf4 = ucFirst( "Hello" );
+if ( uf4 != "Hello" ) { throw "ucFirst already upper failed"; }
+
+// Test ucFirst with doAll
+var uf5 = ucFirst( "hello world", true );
+if ( uf5 != "Hello World" ) { throw "ucFirst doAll failed: got [" & uf5 & "]"; }
+
+// Test ucFirst as method
+if ( "test".ucFirst() != "Test" ) { throw "ucFirst method failed"; }
+
+println( "ucFirst OK" );
+
+// Test replaceNoCase function
+var rn1 = replaceNoCase( "Hello World", "hello", "Goodbye" );
+if ( rn1 != "Goodbye World" ) { throw "replaceNoCase basic failed: got [" & rn1 & "]"; }
+
+var rn2 = replaceNoCase( "Hello World", "WORLD", "Earth" );
+if ( rn2 != "Hello Earth" ) { throw "replaceNoCase suffix failed: got [" & rn2 & "]"; }
+
+var rn3 = replaceNoCase( "aaa", "A", "B", "all" );
+if ( rn3 != "bbb" ) { throw "replaceNoCase all failed: got [" & rn3 & "]"; }
+
+var rn4 = replaceNoCase( "aaa", "A", "B", "one" );
+if ( rn4 != "Baa" ) { throw "replaceNoCase one failed: got [" & rn4 & "]"; }
+
+var rn5 = replaceNoCase( "test", "xyz", "abc" );
+if ( rn5 != "test" ) { throw "replaceNoCase no match failed"; }
+
+// Test replaceNoCase as method
+if ( "Hello".replaceNoCase( "HELLO", "Bye" ) != "Bye" ) { throw "replaceNoCase method failed"; }
+
+println( "replaceNoCase OK" );
+
+// Test stringEndsWithNoCase function
+var en1 = stringEndsWithNoCase( "Hello World", "WORLD" );
+if ( en1 != true ) { throw "stringEndsWithNoCase basic failed"; }
+
+var en2 = stringEndsWithNoCase( "Hello World", "world" );
+if ( en2 != true ) { throw "stringEndsWithNoCase lower failed"; }
+
+var en3 = stringEndsWithNoCase( "test.txt", ".TXT" );
+if ( en3 != true ) { throw "stringEndsWithNoCase extension failed"; }
+
+var en4 = stringEndsWithNoCase( "hello", "world" );
+if ( en4 != false ) { throw "stringEndsWithNoCase negative failed"; }
+
+// Test stringEndsWithNoCase as method
+if ( !"Hello.EXT".endsWithNoCase( ".ext" ) ) { throw "endsWithNoCase method failed"; }
+
+println( "stringEndsWithNoCase OK" );
+
+// Test stringStartsWithNoCase function
+var sn1 = stringStartsWithNoCase( "Hello World", "HELLO" );
+if ( sn1 != true ) { throw "stringStartsWithNoCase basic failed"; }
+
+var sn2 = stringStartsWithNoCase( "Hello World", "hello" );
+if ( sn2 != true ) { throw "stringStartsWithNoCase lower failed"; }
+
+var sn3 = stringStartsWithNoCase( "test.txt", "TEST" );
+if ( sn3 != true ) { throw "stringStartsWithNoCase prefix failed"; }
+
+var sn4 = stringStartsWithNoCase( "hello", "world" );
+if ( sn4 != false ) { throw "stringStartsWithNoCase negative failed"; }
+
+// Test stringStartsWithNoCase as method
+if ( !"Hello".startsWithNoCase( "HELLO" ) ) { throw "startsWithNoCase method failed"; }
+
+println( "stringStartsWithNoCase OK" );
+
+println( "All string BIFs batch 1 OK" );

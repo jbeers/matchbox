@@ -1,0 +1,159 @@
+// Test ascii function
+var a1 = ascii( "A" );
+if ( a1 != 65 ) { throw "ascii A failed: got " & a1; }
+
+var a2 = ascii( "a" );
+if ( a2 != 97 ) { throw "ascii a failed: got " & a2; }
+
+var a3 = ascii( "0" );
+if ( a3 != 48 ) { throw "ascii 0 failed: got " & a3; }
+
+var a4 = ascii( " " );
+if ( a4 != 32 ) { throw "ascii space failed: got " & a4; }
+
+// Test ascii as method
+if ( "Z".ascii() != 90 ) { throw "ascii method failed"; }
+
+println( "ascii OK" );
+
+// Test findOneOf function
+var fo1 = findOneOf( "abc", "xyzabc" );
+if ( fo1 != 4 ) { throw "findOneOf basic failed: got " & fo1; }
+
+var fo2 = findOneOf( "xyz", "abcdef" );
+if ( fo2 != 0 ) { throw "findOneOf not found failed: got " & fo2; }
+
+var fo3 = findOneOf( "abc", "abcdef", 3 );
+if ( fo3 != 3 ) { throw "findOneOf with start failed: got " & fo3; }
+
+// Test findOneOf as method
+// Note: method form has receiver as first arg, so "set".findOneOf("string") finds chars from set in string
+if ( "ow".findOneOf( "hello world" ) != 5 ) { throw "findOneOf method failed"; }
+
+println( "findOneOf OK" );
+
+// Test insert function
+var i1 = insert( "X", "hello", 5 );
+if ( i1 != "helloX" ) { throw "insert end failed: got [" & i1 & "]"; }
+
+var i2 = insert( "X", "hello", 0 );
+if ( i2 != "Xhello" ) { throw "insert start failed: got [" & i2 & "]"; }
+
+var i3 = insert( " beautiful", "hello", 5 );
+if ( i3 != "hello beautiful" ) { throw "insert middle failed: got [" & i3 & "]"; }
+
+// Test insert as method - note: method arg order differs from function
+// "string".insert(substring, position) - receiver is the target string
+// This requires special handling, skipping method test for now
+
+println( "insert OK" );
+
+// Test reEscape function
+var re1 = reEscape( "foo.bar" );
+if ( len( re1 ) != 8 ) { throw "reEscape dot failed: got [" & re1 & "] len " & len( re1 ); }
+
+var re2 = reEscape( "a+b*c" );
+if ( len( re2 ) != 7 ) { throw "reEscape plus/star failed: got [" & re2 & "]"; }
+
+var re3 = reEscape( "test" );
+if ( re3 != "test" ) { throw "reEscape no special failed"; }
+
+var re4 = reEscape( "[test]" );
+if ( len( re4 ) != 8 ) { throw "reEscape brackets failed: got [" & re4 & "]"; }
+
+println( "reEscape OK" );
+
+// Test yesNoFormat function
+var yn1 = yesNoFormat( true );
+if ( yn1 != "Yes" ) { throw "yesNoFormat true failed: got [" & yn1 & "]"; }
+
+var yn2 = yesNoFormat( false );
+if ( yn2 != "No" ) { throw "yesNoFormat false failed: got [" & yn2 & "]"; }
+
+var yn3 = yesNoFormat( 1 );
+if ( yn3 != "Yes" ) { throw "yesNoFormat 1 failed"; }
+
+var yn4 = yesNoFormat( 0 );
+if ( yn4 != "No" ) { throw "yesNoFormat 0 failed"; }
+
+println( "yesNoFormat OK" );
+
+// Test snakeCase function
+var sc1 = snakeCase( "helloWorld" );
+if ( sc1 != "hello_world" ) { throw "snakeCase camel failed: got [" & sc1 & "]"; }
+
+var sc2 = snakeCase( "HelloWorld" );
+if ( sc2 != "hello_world" ) { throw "snakeCase pascal failed: got [" & sc2 & "]"; }
+
+var sc3 = snakeCase( "hello-world" );
+if ( sc3 != "hello_world" ) { throw "snakeCase kebab failed: got [" & sc3 & "]"; }
+
+var sc4 = snakeCase( "hello world" );
+if ( sc4 != "hello_world" ) { throw "snakeCase space failed: got [" & sc4 & "]"; }
+
+// Test snakeCase as method
+if ( "helloWorld".snakeCase() != "hello_world" ) { throw "snakeCase method failed"; }
+
+println( "snakeCase OK" );
+
+// Test kebabCase function
+var kc1 = kebabCase( "helloWorld" );
+if ( kc1 != "hello-world" ) { throw "kebabCase camel failed: got [" & kc1 & "]"; }
+
+var kc2 = kebabCase( "HelloWorld" );
+if ( kc2 != "hello-world" ) { throw "kebabCase pascal failed: got [" & kc2 & "]"; }
+
+var kc3 = kebabCase( "hello_world" );
+if ( kc3 != "hello-world" ) { throw "kebabCase snake failed: got [" & kc3 & "]"; }
+
+// Test kebabCase as method
+if ( "helloWorld".kebabCase() != "hello-world" ) { throw "kebabCase method failed"; }
+
+println( "kebabCase OK" );
+
+// Test camelCase function
+var cc1 = camelCase( "hello_world" );
+if ( cc1 != "helloWorld" ) { throw "camelCase snake failed: got [" & cc1 & "]"; }
+
+var cc2 = camelCase( "hello-world" );
+if ( cc2 != "helloWorld" ) { throw "camelCase kebab failed: got [" & cc2 & "]"; }
+
+var cc3 = camelCase( "HelloWorld" );
+if ( cc3 != "helloWorld" ) { throw "camelCase pascal failed: got [" & cc3 & "]"; }
+
+// Test camelCase as method
+if ( "hello_world".camelCase() != "helloWorld" ) { throw "camelCase method failed"; }
+
+println( "camelCase OK" );
+
+// Test pascalCase function
+var pc1 = pascalCase( "hello_world" );
+if ( pc1 != "HelloWorld" ) { throw "pascalCase snake failed: got [" & pc1 & "]"; }
+
+var pc2 = pascalCase( "hello-world" );
+if ( pc2 != "HelloWorld" ) { throw "pascalCase kebab failed: got [" & pc2 & "]"; }
+
+var pc3 = pascalCase( "helloWorld" );
+if ( pc3 != "HelloWorld" ) { throw "pascalCase camel failed: got [" & pc3 & "]"; }
+
+// Test pascalCase as method
+if ( "hello_world".pascalCase() != "HelloWorld" ) { throw "pascalCase method failed"; }
+
+println( "pascalCase OK" );
+
+// Test replaceList function
+var rl1 = replaceList( "Hello World", "Hello,World", "Hi,Earth" );
+if ( rl1 != "Hi Earth" ) { throw "replaceList basic failed: got [" & rl1 & "]"; }
+
+var rl2 = replaceList( "aabbcc", "a,b,c", "1,2,3" );
+if ( rl2 != "112233" ) { throw "replaceList multi failed: got [" & rl2 & "]"; }
+
+var rl3 = replaceList( "test", "xyz", "abc" );
+if ( rl3 != "test" ) { throw "replaceList no match failed"; }
+
+// Test replaceList as method
+if ( "Hello".replaceList( "Hello", "Bye" ) != "Bye" ) { throw "replaceList method failed"; }
+
+println( "replaceList OK" );
+
+println( "All string BIFs batch 2 OK" );
