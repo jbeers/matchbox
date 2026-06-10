@@ -28,6 +28,7 @@ mod jni {
         Err("Java interoperability is not enabled in this build.".to_string())
     }
 }
+mod binary;
 mod cli;
 mod crypto;
 #[cfg(feature = "bif-datasource")]
@@ -35,6 +36,14 @@ mod datasource;
 mod fs;
 mod http;
 mod json;
+mod conversion;
+mod list_query_extra;
+mod math_datetime;
+mod type_format;
+mod set;
+mod i18n;
+mod watcher;
+mod cache;
 mod zip;
 
 pub fn register_all() -> HashMap<String, BxNativeFunction> {
@@ -361,6 +370,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     {
         bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
         bifs.insert("hmac".to_string(), crypto::hmac_bif as BxNativeFunction);
+        bifs.insert("generatesecretkey".to_string(), crypto::generate_secret_key as BxNativeFunction);
+        bifs.insert("generatepbkdfkey".to_string(), crypto::generate_pbkdf_key as BxNativeFunction);
+        bifs.insert("encrypt".to_string(), crypto::encrypt_bif as BxNativeFunction);
+        bifs.insert("decrypt".to_string(), crypto::decrypt_bif as BxNativeFunction);
     }
 
     // System BIFs
@@ -379,6 +392,9 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     );
     bifs.insert("sleep".to_string(), sleep as BxNativeFunction);
     bifs.insert("yield".to_string(), bx_yield as BxNativeFunction);
+
+    // Extra Math & Date/Time BIFs
+    math_datetime::register_math_datetime_bifs(&mut bifs);
 
     // CLI BIFs
     #[cfg(feature = "bif-cli")]
@@ -446,6 +462,25 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             "fileappend".to_string(),
             fs::file_append as BxNativeFunction,
         );
+        bifs.insert("contractpath".to_string(), fs::contract_path as BxNativeFunction);
+        bifs.insert("createtempdirectory".to_string(), fs::create_temp_directory as BxNativeFunction);
+        bifs.insert("createtempfile".to_string(), fs::create_temp_file as BxNativeFunction);
+        bifs.insert("directorycopy".to_string(), fs::directory_copy as BxNativeFunction);
+        bifs.insert("directorymove".to_string(), fs::directory_move as BxNativeFunction);
+        bifs.insert("expandpath".to_string(), fs::expand_path as BxNativeFunction);
+        bifs.insert("fileclose".to_string(), fs::file_close as BxNativeFunction);
+        bifs.insert("filegetmimetype".to_string(), fs::file_get_mime_type as BxNativeFunction);
+        bifs.insert("fileiseof".to_string(), fs::file_is_eof as BxNativeFunction);
+        bifs.insert("fileopen".to_string(), fs::file_open as BxNativeFunction);
+        bifs.insert("filereadline".to_string(), fs::file_read_line as BxNativeFunction);
+        bifs.insert("fileseek".to_string(), fs::file_seek as BxNativeFunction);
+        bifs.insert("filesetaccessmode".to_string(), fs::file_set_access_mode as BxNativeFunction);
+        bifs.insert("filesetattribute".to_string(), fs::file_set_attribute as BxNativeFunction);
+        bifs.insert("filesetlastmodified".to_string(), fs::file_set_last_modified as BxNativeFunction);
+        bifs.insert("filewriteline".to_string(), fs::file_write_line as BxNativeFunction);
+        bifs.insert("getcanonicalpath".to_string(), fs::get_canonical_path as BxNativeFunction);
+        bifs.insert("getdirectoryfrompath".to_string(), fs::get_directory_from_path as BxNativeFunction);
+        bifs.insert("propertyfile".to_string(), fs::property_file as BxNativeFunction);
     }
 
     // HTTP BIFs
@@ -454,7 +489,11 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // ZIP BIFs
     #[cfg(feature = "bif-zip")]
-    bifs.insert("extract".to_string(), zip::zip_extract as BxNativeFunction);
+    {
+        bifs.insert("extract".to_string(), zip::zip_extract as BxNativeFunction);
+        bifs.insert("compress".to_string(), zip::zip_compress as BxNativeFunction);
+        bifs.insert("iszipfile".to_string(), zip::zip_is_zip_file as BxNativeFunction);
+    }
 
     // JSON BIFs
     bifs.insert(
@@ -478,6 +517,17 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         "loadproperties".to_string(),
         json::load_properties as BxNativeFunction,
     );
+
+    // Conversion BIFs
+    bifs.insert("datanavigate".to_string(), conversion::data_navigate as BxNativeFunction);
+    bifs.insert("jsonprettify".to_string(), conversion::json_prettify as BxNativeFunction);
+    bifs.insert("parsenumber".to_string(), conversion::parse_number as BxNativeFunction);
+    bifs.insert("tobase64".to_string(), conversion::to_base64 as BxNativeFunction);
+    bifs.insert("tobinary".to_string(), conversion::to_binary as BxNativeFunction);
+    bifs.insert("tomodifiable".to_string(), conversion::to_modifiable as BxNativeFunction);
+    bifs.insert("tonumeric".to_string(), conversion::to_numeric as BxNativeFunction);
+    bifs.insert("toscript".to_string(), conversion::to_script as BxNativeFunction);
+    bifs.insert("tounmodifiable".to_string(), conversion::to_unmodifiable as BxNativeFunction);
 
     // Datasource BIFs
     #[cfg(feature = "bif-datasource")]
@@ -603,6 +653,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             datasource::transaction_rollback as BxNativeFunction,
         );
     }
+
+    // Extra module registrations
+    list_query_extra::register_list_query_extra_bifs(&mut bifs);
+    type_format::register_type_format_bifs(&mut bifs);
+    binary::register_binary_bifs(&mut bifs);
+    set::register_set_bifs(&mut bifs);
+    i18n::register_i18n_bifs(&mut bifs);
+    watcher::register_watcher_bifs(&mut bifs);
+    cache::register_cache_bifs(&mut bifs);
 
     bifs
 }
@@ -1629,7 +1688,7 @@ fn list_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     ))
 }
 
-fn parse_list_items(
+pub(super) fn parse_list_items(
     list: &str,
     delimiter: String,
     include_empty: bool,
@@ -1669,7 +1728,7 @@ fn parse_list_items(
     items
 }
 
-fn join_list(items: &[String], delimiter: &str, multi: bool) -> String {
+pub(super) fn join_list(items: &[String], delimiter: &str, multi: bool) -> String {
     if items.is_empty() {
         return String::new();
     }
@@ -2275,7 +2334,7 @@ fn duplicate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     duplicate_value(vm, args[0], deep, &mut seen)
 }
 
-fn duplicate_value(
+pub(super) fn duplicate_value(
     vm: &mut dyn BxVM,
     value: BxValue,
     deep: bool,
@@ -3028,7 +3087,7 @@ fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
 
 // --- Date/Time BIFs ---
 
-fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
+pub(super) fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
     let tz = tz?.trim();
     if tz.is_empty()
         || tz.eq_ignore_ascii_case("utc")
@@ -3127,7 +3186,7 @@ fn translate_datetime_format(fmt: &str) -> String {
     out
 }
 
-fn format_datetime(
+pub(super) fn format_datetime(
     dt: DateTime<Utc>,
     format: Option<&str>,
     default_format: &str,
@@ -3242,7 +3301,7 @@ fn parse_datetime_with_format(
     }
 }
 
-fn parse_datetime_input(
+pub(super) fn parse_datetime_input(
     input: &str,
     format: Option<&str>,
     tz: Option<&str>,
@@ -3310,7 +3369,7 @@ fn parse_datetime_input(
     Err(format!("Unable to parse date '{}'", input))
 }
 
-fn datetime_from_parts(
+pub(super) fn datetime_from_parts(
     year: i32,
     month: u32,
     day: u32,
@@ -3333,7 +3392,7 @@ fn datetime_from_parts(
         .with_timezone(&Utc))
 }
 
-fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
+pub(super) fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
     let total_months = dt.year() * 12 + (dt.month() as i32 - 1) + months;
     let new_year = total_months.div_euclid(12);
     let new_month = total_months.rem_euclid(12) + 1;

@@ -1,0 +1,91 @@
+// ============================================================
+// jsonPrettify
+// ============================================================
+var ugly = '{"a":1,"b":[2,3]}';
+var pretty = jsonPrettify(ugly);
+if (len(pretty) <= len(ugly)) { throw "jsonPrettify should make string longer"; }
+
+// ============================================================
+// parseNumber
+// ============================================================
+var n = parseNumber("42");
+if (n != 42) { throw "parseNumber basic failed: got " & n; }
+
+n = parseNumber("3.14");
+if (n != 3.14) { throw "parseNumber float failed: got " & n; }
+
+n = parseNumber("ff", "hex");
+if (n != 255) { throw "parseNumber hex failed: got " & n; }
+
+n = parseNumber("1010", "bin");
+if (n != 10) { throw "parseNumber bin failed: got " & n; }
+
+n = parseNumber("17", "oct");
+if (n != 15) { throw "parseNumber oct failed: got " & n; }
+
+// ============================================================
+// toNumeric
+// ============================================================
+n = toNumeric("123");
+if (n != 123) { throw "toNumeric int failed: got " & n; }
+
+n = toNumeric("99.5");
+if (n != 99.5) { throw "toNumeric float failed: got " & n; }
+
+n = toNumeric(true);
+if (n != 1) { throw "toNumeric bool true failed: got " & n; }
+
+n = toNumeric(false);
+if (n != 0) { throw "toNumeric bool false failed: got " & n; }
+
+// ============================================================
+// toBase64
+// ============================================================
+var encoded = toBase64("Hello, World!");
+if (encoded != "SGVsbG8sIFdvcmxkIQ==") { throw "toBase64 failed: got '" & encoded & "'"; }
+
+// ============================================================
+// toBinary (base64 decode)
+// ============================================================
+var decoded = toBinary("SGVsbG8sIFdvcmxkIQ==");
+if (!isBinary(decoded)) { throw "toBinary should return binary"; }
+
+// ============================================================
+// toScript
+// ============================================================
+var script = toScript(42, "myVar");
+if (script != "myVar = 42;") { throw "toScript number failed: got '" & script & "'"; }
+
+script = toScript("hello", "x");
+if (script != "x = 'hello';") { throw "toScript string failed: got '" & script & "'"; }
+
+script = toScript(true, "flag");
+if (script != "flag = true;") { throw "toScript bool failed: got '" & script & "'"; }
+
+// ============================================================
+// dataNavigate
+// ============================================================
+var data = { "user": { "name": "Alice", "age": 30 } };
+var result = dataNavigate(data, "user.name");
+if (result != "Alice") { throw "dataNavigate nested failed: got '" & result & "'"; }
+
+result = dataNavigate(data, "user.age");
+if (result != 30) { throw "dataNavigate age failed: got " & result; }
+
+result = dataNavigate(data, "user.missing");
+if (!isNull(result)) { throw "dataNavigate missing should be null"; }
+
+// ============================================================
+// toModifiable
+// ============================================================
+var arr = [1, 2, 3];
+var copy = toModifiable(arr);
+if (len(copy) != 3) { throw "toModifiable array len failed"; }
+if (copy[1] != 1) { throw "toModifiable array value failed"; }
+
+// ============================================================
+// toUnmodifiable
+// ============================================================
+var val = [1, 2, 3];
+var unmod = toUnmodifiable(val);
+if (len(unmod) != 3) { throw "toUnmodifiable len failed"; }

@@ -1,0 +1,62 @@
+// Test List extra BIFs
+var list = "a,b,c,d,e";
+
+// listPrepend
+var r = listPrepend(list, "z");
+if (r != "z,a,b,c,d,e" ) { throw "listPrepend failed: " & r; }
+
+// listInsertAt
+r = listInsertAt(list, 3, "X");
+if (r != "a,b,X,c,d,e") { throw "listInsertAt failed: " & r; }
+
+// listSetAt
+r = listSetAt(list, 2, "B");
+if (r != "a,B,c,d,e") { throw "listSetAt failed: " & r; }
+
+// listChangeDelims
+r = listChangeDelims(list, ";");
+if (r != "a;b;c;d;e") { throw "listChangeDelims failed: " & r; }
+
+// listCompact
+r = listCompact("a,,b,,c");
+if (r != "a,b,c") { throw "listCompact failed: " & r; }
+
+// listItemTrim
+r = listItemTrim(" a , b , c ");
+if (r != "a,b,c") { throw "listItemTrim failed: " & r; }
+
+// listAvg
+r = listAvg("1,2,3,4,5");
+if (r != 3) { throw "listAvg failed: " & r; }
+
+// listValueCount
+r = listValueCount("a,b,a,c,a", "a");
+if (r != 3) { throw "listValueCount failed: " & r; }
+
+// listRemoveDuplicates
+r = listRemoveDuplicates("a,b,a,c,b");
+if (r != "a,b,c") { throw "listRemoveDuplicates failed: " & r; }
+
+// listQualify
+r = listQualify("a,b,c", "'");
+if (r != "'a','b','c'") { throw "listQualify failed: " & r; }
+
+// listIndexExists
+r = listIndexExists(list, 3);
+if (!r) { throw "listIndexExists failed"; }
+r = listIndexExists(list, 10);
+if (r) { throw "listIndexExists out of range failed"; }
+
+// listGetEndings
+r = listGetEndings("a,b,c");
+if (isNull(r)) { throw "listGetEndings failed"; }
+
+// getToken
+r = getToken("hello world foo", 2);
+if (r != "world") { throw "getToken failed: " & r; }
+
+// listMap
+r = listMap("1,2,3", function(item) { return val(item) * 2; });
+if (r != "2,4,6") { throw "listMap failed: " & r; }
+
+println("List extra BIFs OK");

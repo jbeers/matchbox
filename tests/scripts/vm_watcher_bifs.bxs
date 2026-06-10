@@ -1,0 +1,21 @@
+// Test Watcher BIFs (stubs)
+
+// watcherExists
+var r = watcherExists("test");
+if (r) { throw "watcherExists should return false"; }
+
+// watcherList
+var list = watcherList();
+if (!isArray(list)) { throw "watcherList should return array"; }
+
+// watcherGetAll
+var all = watcherGetAll();
+if (!isArray(all)) { throw "watcherGetAll should return array"; }
+
+// watcherStopAll (no-op)
+watcherStopAll();
+
+// watcherShutdownAll (no-op)
+watcherShutdownAll();
+
+println("Watcher BIFs OK");

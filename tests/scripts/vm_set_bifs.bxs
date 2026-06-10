@@ -1,0 +1,88 @@
+// Test Set BIFs
+
+// setNew
+var s = setNew();
+if (!boxSetIsEmpty(s)) { throw "setNew/isEmpty failed"; }
+
+// boxSetAdd
+boxSetAdd(s, "a");
+boxSetAdd(s, "b");
+boxSetAdd(s, "c");
+if (boxSetIsEmpty(s)) { throw "boxSetAdd failed"; }
+
+// boxSetContains
+if (!boxSetContains(s, "a")) { throw "boxSetContains failed"; }
+if (boxSetContains(s, "z")) { throw "boxSetContains negative failed"; }
+
+// boxSetAdd (duplicate)
+boxSetAdd(s, "a");
+var arr = boxSetToArray(s);
+if (arrayLen(arr) != 3) { throw "boxSetAdd duplicate failed: " & arrayLen(arr); }
+
+// setOf
+var s2 = setOf("x", "y", "z");
+if (!boxSetContains(s2, "x")) { throw "setOf failed"; }
+
+// boxSetEquals
+var s3 = setOf("a", "b", "c");
+if (!boxSetEquals(s, s3)) { throw "boxSetEquals failed"; }
+
+// boxSetUnion
+var u = boxSetUnion(s, s2);
+if (!boxSetContains(u, "a")) { throw "boxSetUnion a failed"; }
+if (!boxSetContains(u, "x")) { throw "boxSetUnion x failed"; }
+
+// boxSetIntersection
+var s4 = setOf("b", "c", "d");
+var inter = boxSetIntersection(s, s4);
+if (!boxSetContains(inter, "b")) { throw "boxSetIntersection b failed"; }
+if (boxSetContains(inter, "a")) { throw "boxSetIntersection a failed"; }
+
+// boxSetDifference
+var diff = boxSetDifference(s, s4);
+if (!boxSetContains(diff, "a")) { throw "boxSetDifference a failed"; }
+if (boxSetContains(diff, "b")) { throw "boxSetDifference b failed"; }
+
+// boxSetIsSubsetOf
+var s5 = setOf("a", "b");
+if (!boxSetIsSubsetOf(s5, s)) { throw "boxSetIsSubsetOf failed"; }
+
+// boxSetIsSupersetOf
+if (!boxSetIsSupersetOf(s, s5)) { throw "boxSetIsSupersetOf failed"; }
+
+// boxSetRemove
+boxSetRemove(s, "c");
+if (boxSetContains(s, "c")) { throw "boxSetRemove failed"; }
+
+// boxSetToArray
+var arr2 = boxSetToArray(s);
+if (arrayLen(arr2) != 2) { throw "boxSetToArray failed: " & arrayLen(arr2); }
+
+// boxSetToList
+var list = boxSetToList(s);
+if (isNull(list)) { throw "boxSetToList failed"; }
+
+// boxSetEach
+var count = 0;
+boxSetEach(s, function(item) { count = count + 1; });
+if (count != 2) { throw "boxSetEach failed: " & count; }
+
+// boxSetToArray round-trip
+var arr3 = boxSetToArray(s);
+if (arrayLen(arr3) != 2) { throw "boxSetToArray round-trip failed"; }
+
+// boxSetToList
+var list = boxSetToList(s);
+if (isNull(list)) { throw "boxSetToList failed"; }
+
+// structKeySet
+var st = { "a": 1, "b": 2, "c": 3 };
+var ks = structKeySet(st);
+if (!boxSetContains(ks, "a")) { throw "structKeySet failed"; }
+
+// toSet
+var arr3 = ["x", "y", "x", "z"];
+var s6 = toSet(arr3);
+if (arrayLen(boxSetToArray(s6)) != 3) { throw "toSet failed"; }
+
+println("Set BIFs OK");

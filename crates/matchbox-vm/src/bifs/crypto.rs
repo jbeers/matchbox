@@ -7,6 +7,8 @@ use hmac::{Hmac, Mac};
 #[cfg(feature = "bif-crypto")]
 use md5::Md5;
 #[cfg(feature = "bif-crypto")]
+use rand::RngExt;
+#[cfg(feature = "bif-crypto")]
 use sha1::Sha1;
 #[cfg(feature = "bif-crypto")]
 use sha2::{Sha224, Sha256, Sha384, Sha512};
@@ -404,4 +406,248 @@ fn hmac_sha512(key: &[u8], message: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to create HMAC: {}", e))?;
     mac.update(message);
     Ok(mac.finalize().into_bytes().to_vec())
+}
+
+#[cfg(feature = "bif-crypto")]
+const DEFAULT_ENCRYPTION_ALGORITHM: &str = "AES";
+#[cfg(feature = "bif-crypto")]
+const DEFAULT_ENCRYPTION_ENCODING: &str = "UU";
+#[cfg(feature = "bif-crypto")]
+const DEFAULT_ENCRYPTION_KEY_SIZE: usize = 256;
+#[cfg(feature = "bif-crypto")]
+const DEFAULT_ENCRYPTION_ITERATIONS: usize = 1000;
+
+#[cfg(feature = "bif-crypto")]
+fn default_key_size_for_algorithm(algorithm: &str) -> usize {
+    match normalize_algorithm_name(algorithm).as_str() {
+        "aes" => 256,
+        "des" => 56,
+        "desede" | "tripledes" => 168,
+        "blowfish" => 128,
+        "arcfour" | "rc4" => 128,
+        "hmacmd5" => 128,
+        "hmacsha1" => 160,
+        "hmacsha224" => 224,
+        "hmacsha256" => 256,
+        "hmacsha384" => 384,
+        "hmacsha512" => 512,
+        _ => DEFAULT_ENCRYPTION_KEY_SIZE,
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+pub fn generate_secret_key(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let algorithm = args
+        .first()
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| DEFAULT_ENCRYPTION_ALGORITHM.to_string());
+    let key_size_bits = args
+        .get(1)
+        .map(|v| v.as_number() as usize)
+        .unwrap_or_else(|| default_key_size_for_algorithm(&algorithm));
+
+    let key_size_bytes = (key_size_bits + 7) / 8;
+    let mut key_bytes = vec![0u8; key_size_bytes];
+    let mut rng = rand::rng();
+    for byte in key_bytes.iter_mut() {
+        *byte = rng.random();
+    }
+
+    Ok(BxValue::new_ptr(vm.string_new(base64_encode_bytes(&key_bytes))))
+}
+
+#[cfg(feature = "bif-crypto")]
+pub fn generate_pbkdf_key(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("generatePBKDFKey() expects at least 3 arguments: (algorithm, passphrase, salt)".to_string());
+    }
+
+    let algorithm = vm.to_string(args[0]);
+    let passphrase = vm.to_string(args[1]);
+    let salt = vm.to_string(args[2]);
+    let iterations = args
+        .get(3)
+        .map(|v| v.as_number() as usize)
+        .unwrap_or(DEFAULT_ENCRYPTION_ITERATIONS)
+        .max(1);
+    let key_size_bits = args
+        .get(4)
+        .map(|v| v.as_number() as usize)
+        .unwrap_or(DEFAULT_ENCRYPTION_KEY_SIZE);
+
+    let normalized = normalize_algorithm_name(&algorithm);
+    let normalized = match normalized.as_str() {
+        "pbkdf2withsha1" => "pbkdf2withhmacsha1".to_string(),
+        "pbkdf2withsha224" => "pbkdf2withhmacsha224".to_string(),
+        "pbkdf2withsha256" => "pbkdf2withhmacsha256".to_string(),
+        "pbkdf2withsha384" => "pbkdf2withhmacsha384".to_string(),
+        "pbkdf2withsha512" => "pbkdf2withhmacsha512".to_string(),
+        other => other.to_string(),
+    };
+
+    let key_bytes = pbkdf2_derive(&normalized, passphrase.as_bytes(), salt.as_bytes(), iterations, key_size_bits)?;
+
+    Ok(BxValue::new_ptr(vm.string_new(base64_encode_bytes(&key_bytes))))
+}
+
+#[cfg(feature = "bif-crypto")]
+pub fn encrypt_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("encrypt() expects at least 2 arguments: (string, key)".to_string());
+    }
+    let _object = vm.to_string(args[0]);
+    let _key = vm.to_string(args[1]);
+    let algorithm = args
+        .get(2)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| DEFAULT_ENCRYPTION_ALGORITHM.to_string());
+    let _encoding = args
+        .get(3)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| DEFAULT_ENCRYPTION_ENCODING.to_string());
+
+    Err(format!(
+        "encrypt() with algorithm '{}' is not yet supported. Cipher implementations (AES, DES, etc.) require additional crates.",
+        algorithm
+    ))
+}
+
+#[cfg(feature = "bif-crypto")]
+pub fn decrypt_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("decrypt() expects at least 2 arguments: (string, key)".to_string());
+    }
+    let _encrypted = vm.to_string(args[0]);
+    let _key = vm.to_string(args[1]);
+    let algorithm = args
+        .get(2)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| DEFAULT_ENCRYPTION_ALGORITHM.to_string());
+
+    Err(format!(
+        "decrypt() with algorithm '{}' is not yet supported. Cipher implementations (AES, DES, etc.) require additional crates.",
+        algorithm
+    ))
+}
+
+#[cfg(feature = "bif-crypto")]
+fn pbkdf2_derive(
+    algorithm: &str,
+    password: &[u8],
+    salt: &[u8],
+    iterations: usize,
+    key_size_bits: usize,
+) -> Result<Vec<u8>, String> {
+    let hash_len = match algorithm {
+        "pbkdf2withhmacsha1" => 20,
+        "pbkdf2withhmacsha224" => 28,
+        "pbkdf2withhmacsha256" => 32,
+        "pbkdf2withhmacsha384" => 48,
+        "pbkdf2withhmacsha512" => 64,
+        _ => {
+            return Err(format!(
+                "Unsupported PBKDF2 algorithm: {}. Supported: PBKDF2WithHmacSHA1, PBKDF2WithHmacSHA224, PBKDF2WithHmacSHA256, PBKDF2WithHmacSHA384, PBKDF2WithHmacSHA512",
+                algorithm
+            ));
+        }
+    };
+
+    let key_size_bytes = (key_size_bits + 7) / 8;
+    let num_blocks = (key_size_bytes + hash_len - 1) / hash_len;
+    let mut dk = Vec::with_capacity(num_blocks * hash_len);
+
+    for block_num in 1..=num_blocks {
+        let u = pbkdf2_f(password, salt, iterations, block_num as u32, algorithm)?;
+        let mut t = u.clone();
+        dk.append(&mut t);
+    }
+
+    dk.truncate(key_size_bytes);
+    Ok(dk)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn pbkdf2_f(
+    password: &[u8],
+    salt: &[u8],
+    iterations: usize,
+    block_num: u32,
+    algorithm: &str,
+) -> Result<Vec<u8>, String> {
+    let mut salt_with_index = salt.to_vec();
+    salt_with_index.extend_from_slice(&block_num.to_be_bytes());
+
+    let mut u = pbkdf2_hmac(password, &salt_with_index, algorithm)?;
+    let mut result = u.clone();
+
+    for _ in 1..iterations {
+        u = pbkdf2_hmac(password, &u, algorithm)?;
+        for (r, u_byte) in result.iter_mut().zip(u.iter()) {
+            *r ^= u_byte;
+        }
+    }
+
+    Ok(result)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn pbkdf2_hmac(key: &[u8], data: &[u8], algorithm: &str) -> Result<Vec<u8>, String> {
+    match algorithm {
+        "pbkdf2withhmacsha1" => {
+            type H = Hmac<Sha1>;
+            let mut mac = H::new_from_slice(key).map_err(|e| format!("HMAC error: {}", e))?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        "pbkdf2withhmacsha224" => {
+            type H = Hmac<Sha224>;
+            let mut mac = H::new_from_slice(key).map_err(|e| format!("HMAC error: {}", e))?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        "pbkdf2withhmacsha256" => {
+            type H = Hmac<Sha256>;
+            let mut mac = H::new_from_slice(key).map_err(|e| format!("HMAC error: {}", e))?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        "pbkdf2withhmacsha384" => {
+            type H = Hmac<Sha384>;
+            let mut mac = H::new_from_slice(key).map_err(|e| format!("HMAC error: {}", e))?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        "pbkdf2withhmacsha512" => {
+            type H = Hmac<Sha512>;
+            let mut mac = H::new_from_slice(key).map_err(|e| format!("HMAC error: {}", e))?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }
+        _ => Err(format!("Unsupported PBKDF2 HMAC algorithm: {}", algorithm)),
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn base64_encode_bytes(data: &[u8]) -> String {
+    const CHARS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }

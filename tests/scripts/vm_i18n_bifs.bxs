@@ -1,0 +1,34 @@
+// Test i18n/Locale BIFs
+
+// getLocale (default)
+var locale = getLocale();
+if (isNull(locale)) { throw "getLocale failed"; }
+
+// setLocale
+setLocale("fr_FR");
+var loc2 = getLocale();
+if (loc2 != "fr_FR") { throw "setLocale failed: " & loc2; }
+
+// clearLocale
+clearLocale();
+
+// currencyFormat
+var cur = currencyFormat(1234.56);
+if (isNull(cur)) { throw "currencyFormat failed"; }
+
+// isCurrency
+if (!isCurrency("$10.00")) { throw "isCurrency failed"; }
+
+// parseCurrency
+var num = parseCurrency("$1,234.56");
+if (num != 1234.56) { throw "parseCurrency failed: " & num; }
+
+// getLocaleInfo
+var info = getLocaleInfo("en_US");
+if (isNull(info)) { throw "getLocaleInfo failed"; }
+
+// getLocaleDisplayName
+var name = getLocaleDisplayName("en_US");
+if (isNull(name)) { throw "getLocaleDisplayName failed"; }
+
+println("i18n/Locale BIFs OK");

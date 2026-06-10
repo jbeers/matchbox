@@ -1,0 +1,51 @@
+// Test Binary/Bitwise BIFs
+
+// bitAnd
+var r = bitAnd(12, 10);
+if (r != 8) { throw "bitAnd failed: " & r; }
+
+// bitOr
+r = bitOr(12, 10);
+if (r != 14) { throw "bitOr failed: " & r; }
+
+// bitXor
+r = bitXor(12, 10);
+if (r != 6) { throw "bitXor failed: " & r; }
+
+// bitNot
+r = bitNot(0);
+if (r != -1) { throw "bitNot failed: " & r; }
+
+// bitSh (left shift)
+r = bitSh(1, 3);
+if (r != 8) { throw "bitSh left failed: " & r; }
+
+// bitSh (right shift)
+r = bitSh(16, -2);
+if (r != 4) { throw "bitSh right failed: " & r; }
+
+// bitMaskClear
+r = bitMaskClear(15, 0, 2);
+if (r != 12) { throw "bitMaskClear failed: " & r; }
+
+// bitMaskRead
+r = bitMaskRead(14, 1, 2);
+if (r != 3) { throw "bitMaskRead failed: " & r; }
+
+// bitMaskSet
+r = bitMaskSet(0, 3, 0, 2);
+if (r != 3) { throw "bitMaskSet failed: " & r; }
+
+// binaryDecode / binaryEncode (hex)
+var bin = binaryDecode("48656C6C6F", "hex");
+if (isNull(bin)) { throw "binaryDecode hex failed"; }
+var hex = binaryEncode(bin, "hex");
+if (hex != "48656c6c6f" && hex != "48656C6C6F") { throw "binaryEncode hex failed: " & hex; }
+
+// binaryDecode / binaryEncode (base64)
+var bin2 = binaryDecode("SGVsbG8=", "base64");
+if (isNull(bin2)) { throw "binaryDecode base64 failed"; }
+var b64 = binaryEncode(bin2, "base64");
+if (b64 != "SGVsbG8=") { throw "binaryEncode base64 failed: " & b64; }
+
+println("Binary/Bitwise BIFs OK");

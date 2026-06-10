@@ -1,0 +1,117 @@
+// ============================================================
+// Math BIFs
+// ============================================================
+
+// incrementValue
+if (incrementValue(5) != 6) { throw "incrementValue(5) failed"; }
+if (incrementValue(0) != 1) { throw "incrementValue(0) failed"; }
+if (incrementValue(-3) != -2) { throw "incrementValue(-3) failed"; }
+if (incrementValue(2.5) != 3.5) { throw "incrementValue(2.5) failed"; }
+
+// decrementValue
+if (decrementValue(5) != 4) { throw "decrementValue(5) failed"; }
+if (decrementValue(0) != -1) { throw "decrementValue(0) failed"; }
+if (decrementValue(-3) != -4) { throw "decrementValue(-3) failed"; }
+if (decrementValue(2.5) != 1.5) { throw "decrementValue(2.5) failed"; }
+
+// fix
+if (fix(3.7) != 3) { throw "fix(3.7) failed: got " & fix(3.7); }
+if (fix(-3.7) != -3) { throw "fix(-3.7) failed: got " & fix(-3.7); }
+if (fix(0) != 0) { throw "fix(0) failed"; }
+if (fix(0.99) != 0) { throw "fix(0.99) failed"; }
+
+// sgn
+if (sgn(10) != 1) { throw "sgn(10) failed"; }
+if (sgn(-5) != -1) { throw "sgn(-5) failed"; }
+if (sgn(0) != 0) { throw "sgn(0) failed"; }
+
+// sqr
+if (sqr(9) != 3) { throw "sqr(9) failed"; }
+if (sqr(0) != 0) { throw "sqr(0) failed"; }
+var sqrResult = sqr(2);
+if (sqrResult < 1.414 || sqrResult > 1.415) { throw "sqr(2) failed: got " & sqrResult; }
+
+// formatBaseN
+if (formatBaseN(255, 16) != "ff") { throw "formatBaseN(255,16) failed: got " & formatBaseN(255, 16); }
+if (formatBaseN(10, 2) != "1010") { throw "formatBaseN(10,2) failed: got " & formatBaseN(10, 2); }
+if (formatBaseN(0, 8) != "0") { throw "formatBaseN(0,8) failed"; }
+if (formatBaseN(35, 36) != "z") { throw "formatBaseN(35,36) failed: got " & formatBaseN(35, 36); }
+
+// inputBaseN
+if (inputBaseN("ff", 16) != 255) { throw "inputBaseN('ff',16) failed: got " & inputBaseN("ff", 16); }
+if (inputBaseN("1010", 2) != 10) { throw "inputBaseN('1010',2) failed"; }
+if (inputBaseN("0", 8) != 0) { throw "inputBaseN('0',8) failed"; }
+
+// precisionEvaluate (basic stub)
+if (precisionEvaluate("42") != 42) { throw "precisionEvaluate('42') failed"; }
+
+// ============================================================
+// Date/Time BIFs
+// ============================================================
+
+// createTime
+var t = createTime(14, 30, 0);
+if (timeUnits("hour", t) != 14) { throw "createTime hour failed: got " & timeUnits("hour", t); }
+if (timeUnits("minute", t) != 30) { throw "createTime minute failed"; }
+
+// createTimeSpan
+var span = createTimeSpan(1, 2, 30, 0);
+var baseDate = createDate(2025, 1, 1);
+var added = dateAdd("s", span, baseDate);
+var diffSec = dateDiff("s", added, baseDate);
+if (diffSec != 95400) { throw "createTimeSpan failed: diff=" & diffSec; }
+
+// datePart
+var dt = createDateTime(2025, 6, 15, 10, 30, 45, 0);
+if (datePart("yyyy", dt) != 2025) { throw "datePart year failed: got " & datePart("yyyy", dt); }
+if (datePart("m", dt) != 6) { throw "datePart month failed: got " & datePart("m", dt); }
+if (datePart("d", dt) != 15) { throw "datePart day failed: got " & datePart("d", dt); }
+if (datePart("h", dt) != 10) { throw "datePart hour failed: got " & datePart("h", dt); }
+if (datePart("n", dt) != 30) { throw "datePart minute failed: got " & datePart("n", dt); }
+if (datePart("s", dt) != 45) { throw "datePart second failed: got " & datePart("s", dt); }
+if (datePart("q", dt) != 2) { throw "datePart quarter failed: got " & datePart("q", dt); }
+
+// dateCompare
+var d1 = createDateTime(2025, 1, 1, 0, 0, 0, 0);
+var d2 = createDateTime(2025, 6, 1, 0, 0, 0, 0);
+if (dateCompare(d1, d2) != -1) { throw "dateCompare d1 < d2 failed: got " & dateCompare(d1, d2); }
+if (dateCompare(d2, d1) != 1) { throw "dateCompare d2 > d1 failed"; }
+if (dateCompare(d1, d1) != 0) { throw "dateCompare d1 == d1 failed"; }
+if (dateCompare(d1, d2, "yyyy") != 0) { throw "dateCompare same year failed: got " & dateCompare(d1, d2, "yyyy"); }
+if (dateCompare(d1, d2, "m") != -1) { throw "dateCompare month diff failed"; }
+
+// dateConvert (utc2local / local2utc)
+var utcDate = createDateTime(2025, 6, 15, 12, 0, 0, 0);
+var localDate = dateConvert("utc2Local", utcDate);
+var backToUtc = dateConvert("local2Utc", localDate);
+if (dateCompare(utcDate, backToUtc, "s") != 0) { throw "dateConvert round-trip failed"; }
+
+// getTimezoneInfo
+var tzInfo = getTimezoneInfo();
+if (!structKeyExists(tzInfo, "offset")) { throw "getTimezoneInfo missing offset"; }
+if (!structKeyExists(tzInfo, "utcHourOffset")) { throw "getTimezoneInfo missing utcHourOffset"; }
+if (!structKeyExists(tzInfo, "id")) { throw "getTimezoneInfo missing id"; }
+
+// setTimezone / clearTimezone
+setTimezone("UTC");
+clearTimezone();
+
+// createODBCDateTime
+var odbc = createODBCDateTime(createDateTime(2025, 6, 15, 10, 30, 45, 0));
+if (!find("2025-06-15", odbc)) { throw "createODBCDateTime date failed: got " & odbc; }
+if (!find("10:30:45", odbc)) { throw "createODBCDateTime time failed: got " & odbc; }
+
+// timeUnits
+var tuDate = createDateTime(2025, 3, 15, 14, 30, 0, 0);
+if (timeUnits("year", tuDate) != 2025) { throw "timeUnits year failed"; }
+if (timeUnits("month", tuDate) != 3) { throw "timeUnits month failed"; }
+if (timeUnits("day", tuDate) != 15) { throw "timeUnits day failed"; }
+if (timeUnits("hour", tuDate) != 14) { throw "timeUnits hour failed"; }
+if (timeUnits("minute", tuDate) != 30) { throw "timeUnits minute failed"; }
+if (timeUnits("quarter", tuDate) != 1) { throw "timeUnits quarter failed"; }
+if (timeUnits("daysInMonth", tuDate) != 31) { throw "timeUnits daysInMonth failed: got " & timeUnits("daysInMonth", tuDate); }
+if (timeUnits("daysInYear", tuDate) != 365) { throw "timeUnits daysInYear failed"; }
+if (timeUnits("monthAsString", tuDate) != "March") { throw "timeUnits monthAsString failed: got " & timeUnits("monthAsString", tuDate); }
+if (timeUnits("dayOfWeekAsString", tuDate) != "Saturday") { throw "timeUnits dayOfWeekAsString failed: got " & timeUnits("dayOfWeekAsString", tuDate); }
+
+println("All math_datetime BIF tests passed!");

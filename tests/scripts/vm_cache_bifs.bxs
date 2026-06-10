@@ -1,0 +1,15 @@
+// Test Cache BIFs (stubs)
+
+// cacheNames
+var names = cacheNames();
+if (!isArray(names)) { throw "cacheNames should return array"; }
+
+// cacheProviders
+var providers = cacheProviders();
+if (!isArray(providers)) { throw "cacheProviders should return array"; }
+
+// cacheFilter
+var filtered = cacheFilter(function(item) { return true; });
+if (!isArray(filtered)) { throw "cacheFilter should return array"; }
+
+println("Cache BIFs OK");
