@@ -1,0 +1,35 @@
+// Test structEquals BIF
+var s1 = { name: "John", age: 30 };
+var s2 = { name: "John", age: 30 };
+var s3 = { name: "Jane", age: 30 };
+var s4 = { name: "John", age: 30, city: "Chicago" };
+
+// Test equal structs
+var result1 = structEquals( s1, s2 );
+if ( result1 != true ) { throw "structEquals should return true for equal structs"; }
+
+// Test unequal structs (different values)
+var result2 = structEquals( s1, s3 );
+if ( result2 != false ) { throw "structEquals should return false for different values"; }
+
+// Test unequal structs (different keys)
+var result3 = structEquals( s1, s4 );
+if ( result3 != false ) { throw "structEquals should return false for different keys"; }
+
+// Test as method
+var result4 = s1.equals( s2 );
+if ( result4 != true ) { throw "equals() method should return true for equal structs"; }
+
+// Test with empty structs
+var e1 = {};
+var e2 = {};
+if ( structEquals( e1, e2 ) != true ) { throw "empty structs should be equal"; }
+
+// Test nested structs
+var n1 = { person: { name: "John" } };
+var n2 = { person: { name: "John" } };
+var n3 = { person: { name: "Jane" } };
+if ( structEquals( n1, n2 ) != true ) { throw "nested equal structs should be equal"; }
+if ( structEquals( n1, n3 ) != false ) { throw "nested unequal structs should not be equal"; }
+
+println( "structEquals OK" );

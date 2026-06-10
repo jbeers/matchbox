@@ -129,6 +129,38 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         struct_is_empty_bif as BxNativeFunction,
     );
     bifs.insert("structcount".to_string(), len as BxNativeFunction);
+    bifs.insert(
+        "structiscasesensitive".to_string(),
+        struct_is_case_sensitive_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structisordered".to_string(),
+        struct_is_ordered_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structequals".to_string(),
+        struct_equals_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structgetmetadata".to_string(),
+        struct_get_metadata_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structtoquerystring".to_string(),
+        struct_to_query_string_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structtosorted".to_string(),
+        struct_to_sorted_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structkeytranslate".to_string(),
+        struct_key_translate_bif as BxNativeFunction,
+    );
+    bifs.insert(
+        "structfindkey".to_string(),
+        struct_find_key_bif as BxNativeFunction,
+    );
 
     // Core BIFs
     bifs.insert("len".to_string(), len as BxNativeFunction);
@@ -2210,6 +2242,325 @@ fn struct_is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
     } else {
         Err("structIsEmpty() expects a struct".to_string())
     }
+}
+
+fn struct_is_case_sensitive_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structIsCaseSensitive() expects 1 argument".to_string());
+    }
+    if args[0].as_gc_id().is_some() {
+        Ok(BxValue::new_bool(false))
+    } else {
+        Err("structIsCaseSensitive() expects a struct".to_string())
+    }
+}
+
+fn struct_is_ordered_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structIsOrdered() expects 1 argument".to_string());
+    }
+    if args[0].as_gc_id().is_some() {
+        Ok(BxValue::new_bool(true))
+    } else {
+        Err("structIsOrdered() expects a struct".to_string())
+    }
+}
+
+fn struct_equals_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("structEquals() expects 2 arguments: (struct1, struct2)".to_string());
+    }
+    let id1 = args[0]
+        .as_gc_id()
+        .ok_or("structEquals() expects a struct as the first argument")?;
+    let id2 = args[1]
+        .as_gc_id()
+        .ok_or("structEquals() expects a struct as the second argument")?;
+    let len1 = vm.struct_len(id1);
+    let len2 = vm.struct_len(id2);
+    if len1 != len2 {
+        return Ok(BxValue::new_bool(false));
+    }
+    let keys1 = vm.struct_key_array(id1);
+    for key in &keys1 {
+        if !vm.struct_key_exists(id2, key) {
+            return Ok(BxValue::new_bool(false));
+        }
+        let v1 = vm.struct_get(id1, key);
+        let v2 = vm.struct_get(id2, key);
+        if !values_equal(vm, v1, v2) {
+            return Ok(BxValue::new_bool(false));
+        }
+    }
+    Ok(BxValue::new_bool(true))
+}
+
+fn values_equal(vm: &mut dyn BxVM, a: BxValue, b: BxValue) -> bool {
+    if a.is_ptr() && b.is_ptr() {
+        let id_a = a.as_gc_id().unwrap();
+        let id_b = b.as_gc_id().unwrap();
+        if vm.is_struct_value(a) && vm.is_struct_value(b) {
+            let len_a = vm.struct_len(id_a);
+            let len_b = vm.struct_len(id_b);
+            if len_a != len_b {
+                return false;
+            }
+            let keys = vm.struct_key_array(id_a);
+            for key in &keys {
+                if !vm.struct_key_exists(id_b, key) {
+                    return false;
+                }
+                let va = vm.struct_get(id_a, key);
+                let vb = vm.struct_get(id_b, key);
+                if !values_equal(vm, va, vb) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if vm.is_array_value(a) && vm.is_array_value(b) {
+            let len_a = vm.array_len(id_a);
+            let len_b = vm.array_len(id_b);
+            if len_a != len_b {
+                return false;
+            }
+            for i in 0..len_a {
+                let va = vm.array_get(id_a, i);
+                let vb = vm.array_get(id_b, i);
+                if !values_equal(vm, va, vb) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    a == b
+}
+
+fn struct_get_metadata_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structGetMetadata() expects 1 argument".to_string());
+    }
+    if args[0].as_gc_id().is_none() {
+        return Err("structGetMetadata() expects a struct".to_string());
+    }
+    let meta_id = vm.struct_new();
+    vm.struct_set(meta_id, "casesensitive", BxValue::new_bool(false));
+    vm.struct_set(meta_id, "ordered", BxValue::new_bool(true));
+    vm.struct_set(meta_id, "unmodifiable", BxValue::new_bool(false));
+    vm.struct_set(meta_id, "soft", BxValue::new_bool(false));
+    let type_str = vm.string_new("linked".to_string());
+    vm.struct_set(meta_id, "type", BxValue::new_ptr(type_str));
+    Ok(BxValue::new_ptr(meta_id))
+}
+
+fn percent_encode(s: &str) -> String {
+    let mut result = String::new();
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(b as char);
+            }
+            _ => {
+                result.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    result
+}
+
+fn struct_to_query_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structToQueryString() expects at least 1 argument".to_string());
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or("structToQueryString() expects a struct as the first argument")?;
+    let delimiter = if args.len() >= 2 {
+        vm.to_string(args[1])
+    } else {
+        "&".to_string()
+    };
+    let keys = vm.struct_key_array(id);
+    let mut parts = Vec::new();
+    for key in &keys {
+        let val = vm.struct_get(id, key);
+        let val_str = vm.to_string(val);
+        parts.push(format!("{}={}", percent_encode(key), percent_encode(&val_str)));
+    }
+    let qs = parts.join(&delimiter);
+    let qs_id = vm.string_new(qs);
+    Ok(BxValue::new_ptr(qs_id))
+}
+
+fn struct_to_sorted_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structToSorted() expects at least 1 argument".to_string());
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or("structToSorted() expects a struct as the first argument")?;
+    let sort_order_desc = if args.len() >= 3 {
+        let order = vm.to_string(args[2]);
+        order.eq_ignore_ascii_case("desc")
+    } else {
+        false
+    };
+    let keys = vm.struct_key_array(id);
+    let mut sorted_keys: Vec<(String, usize)> = keys
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (k.to_lowercase(), i))
+        .collect();
+    sorted_keys.sort_by(|a, b| a.0.cmp(&b.0));
+    if sort_order_desc {
+        sorted_keys.reverse();
+    }
+    let new_id = vm.struct_new();
+    for (_, orig_idx) in &sorted_keys {
+        let key = &keys[*orig_idx];
+        let val = vm.struct_get(id, key);
+        vm.struct_set(new_id, key, val);
+    }
+    Ok(BxValue::new_ptr(new_id))
+}
+
+fn struct_key_translate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("structKeyTranslate() expects at least 1 argument".to_string());
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or("structKeyTranslate() expects a struct as the first argument")?;
+    let _deep = args.len() >= 2 && args[1] == BxValue::new_bool(true);
+    let retain_keys = args.len() >= 3 && args[2] == BxValue::new_bool(true);
+    let keys = vm.struct_key_array(id);
+    let dot_keys: Vec<String> = keys.iter().filter(|k| k.contains('.')).cloned().collect();
+    for dot_key in &dot_keys {
+        let val = vm.struct_get(id, dot_key);
+        let parts: Vec<&str> = dot_key.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            let parent_key = parts[0];
+            let child_key = parts[1];
+            let parent_val = vm.struct_get(id, parent_key);
+            if parent_val.is_null() {
+                let new_parent = vm.struct_new();
+                vm.struct_set(new_parent, child_key, val);
+                vm.struct_set(id, parent_key, BxValue::new_ptr(new_parent));
+            } else if let Some(parent_id) = parent_val.as_gc_id() {
+                if vm.is_struct_value(parent_val) {
+                    vm.struct_set(parent_id, child_key, val);
+                }
+            }
+            if !retain_keys {
+                vm.struct_delete(id, dot_key);
+            }
+        }
+    }
+    Ok(args[0])
+}
+
+fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("structFindKey() expects at least 2 arguments: (struct, key)".to_string());
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or("structFindKey() expects a struct as the first argument")?;
+    let search_key = vm.to_string(args[1]);
+    let scope_all = args.len() >= 3 && vm.to_string(args[2]).eq_ignore_ascii_case("all");
+    let results_id = vm.array_new();
+    if search_key.contains('.') {
+        let parts: Vec<&str> = search_key.splitn(2, '.').collect();
+        let first_key = parts[0];
+        let rest_key = parts[1];
+        let val = vm.struct_get(id, first_key);
+        if !val.is_null() {
+            if let Some(nested_id) = val.as_gc_id() {
+                if vm.is_struct_value(val) {
+                    let rest_str = BxValue::new_ptr(vm.string_new(rest_key.to_string()));
+                    let scope_str = BxValue::new_ptr(vm.string_new(
+                        if scope_all { "all" } else { "one" }.to_string(),
+                    ));
+                    let nested_args = vec![BxValue::new_ptr(nested_id), rest_str, scope_str];
+                    let nested_result = struct_find_key_bif(vm, &nested_args)?;
+                    if let Some(nested_arr_id) = nested_result.as_gc_id() {
+                        let nested_len = vm.array_len(nested_arr_id);
+                        for i in 0..nested_len {
+                            let item = vm.array_get(nested_arr_id, i);
+                            if let Some(item_id) = item.as_gc_id() {
+                                if vm.is_struct_value(item) {
+                                    let path = vm.struct_get(item_id, "path");
+                                    let path_str = vm.to_string(path);
+                                    let new_path =
+                                        vm.string_new(format!("{}.{}", first_key, path_str));
+                                    vm.struct_set(item_id, "path", BxValue::new_ptr(new_path));
+                                }
+                            }
+                            vm.array_push(results_id, item);
+                            if !scope_all {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        let keys = vm.struct_key_array(id);
+        for key in &keys {
+            if key.eq_ignore_ascii_case(&search_key) {
+                let val = vm.struct_get(id, key);
+                let entry_id = vm.struct_new();
+                vm.struct_set(entry_id, "owner", BxValue::new_ptr(id));
+                let path_str = vm.string_new(key.clone());
+                vm.struct_set(entry_id, "path", BxValue::new_ptr(path_str));
+                vm.struct_set(entry_id, "value", val);
+                vm.array_push(results_id, BxValue::new_ptr(entry_id));
+                if !scope_all {
+                    break;
+                }
+            }
+            let val = vm.struct_get(id, key);
+            if !scope_all && vm.array_len(results_id) > 0 {
+                break;
+            }
+            if let Some(nested_id) = val.as_gc_id() {
+                if vm.is_struct_value(val) {
+                    let rest_str = BxValue::new_ptr(vm.string_new(search_key.clone()));
+                    let scope_str = BxValue::new_ptr(vm.string_new(
+                        if scope_all { "all" } else { "one" }.to_string(),
+                    ));
+                    let nested_args = vec![BxValue::new_ptr(nested_id), rest_str, scope_str];
+                    let nested_result = struct_find_key_bif(vm, &nested_args)?;
+                    if let Some(nested_arr_id) = nested_result.as_gc_id() {
+                        let nested_len = vm.array_len(nested_arr_id);
+                        for i in 0..nested_len {
+                            let item = vm.array_get(nested_arr_id, i);
+                            if let Some(item_id) = item.as_gc_id() {
+                                if vm.is_struct_value(item) {
+                                    let path = vm.struct_get(item_id, "path");
+                                    let path_str = vm.to_string(path);
+                                    let new_path =
+                                        vm.string_new(format!("{}.{}", key, path_str));
+                                    vm.struct_set(item_id, "path", BxValue::new_ptr(new_path));
+                                    vm.struct_set(item_id, "owner", BxValue::new_ptr(nested_id));
+                                }
+                            }
+                            vm.array_push(results_id, item);
+                            if !scope_all {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if !scope_all && vm.array_len(results_id) > 0 {
+                break;
+            }
+        }
+    }
+    Ok(BxValue::new_ptr(results_id))
 }
 
 // --- Date/Time BIFs ---

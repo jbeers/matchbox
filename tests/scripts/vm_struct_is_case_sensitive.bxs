@@ -1,0 +1,16 @@
+// Test structIsCaseSensitive BIF
+var s1 = { name: "John", age: 30 };
+
+// MatchBox structs are always case-insensitive
+var result1 = structIsCaseSensitive( s1 );
+if ( result1 != false ) { throw "structIsCaseSensitive should return false, got: " & result1; }
+
+// Test as method
+var result2 = s1.isCaseSensitive();
+if ( result2 != false ) { throw "isCaseSensitive() method should return false, got: " & result2; }
+
+// Test with empty struct
+var empty = {};
+if ( structIsCaseSensitive( empty ) != false ) { throw "empty struct should not be case sensitive"; }
+
+println( "structIsCaseSensitive OK" );

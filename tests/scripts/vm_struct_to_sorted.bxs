@@ -1,0 +1,35 @@
+// Test structToSorted BIF
+var s1 = { zena: "warrior", foo: "bar", bar: "foo", alpha: "test" };
+
+var sorted = structToSorted( s1 );
+
+// Should return a struct
+if ( !isStruct( sorted ) ) { throw "structToSorted should return a struct"; }
+
+// Keys should be sorted alphabetically
+var keys = structKeyArray( sorted );
+if ( keys[ 1 ] != "alpha" ) { throw "first key should be 'alpha', got: " & keys[ 1 ]; }
+if ( keys[ 2 ] != "bar" ) { throw "second key should be 'bar', got: " & keys[ 2 ]; }
+if ( keys[ 3 ] != "foo" ) { throw "third key should be 'foo', got: " & keys[ 3 ]; }
+if ( keys[ 4 ] != "zena" ) { throw "fourth key should be 'zena', got: " & keys[ 4 ]; }
+
+// Values should be preserved
+if ( sorted.alpha != "test" ) { throw "values should be preserved"; }
+if ( sorted.zena != "warrior" ) { throw "values should be preserved"; }
+
+// Test descending order
+var sortedDesc = structToSorted( s1, "text", "desc" );
+var keysDesc = structKeyArray( sortedDesc );
+if ( keysDesc[ 1 ] != "zena" ) { throw "desc: first key should be 'zena', got: " & keysDesc[ 1 ]; }
+if ( keysDesc[ 4 ] != "alpha" ) { throw "desc: last key should be 'alpha', got: " & keysDesc[ 4 ]; }
+
+// Test as method
+var sorted2 = s1.toSorted();
+var keys2 = structKeyArray( sorted2 );
+if ( keys2[ 1 ] != "alpha" ) { throw "method: first key should be 'alpha', got: " & keys2[ 1 ]; }
+
+// Test that original struct is not modified
+var origKeys = structKeyArray( s1 );
+if ( origKeys[ 1 ] != "zena" ) { throw "original struct should not be modified"; }
+
+println( "structToSorted OK" );

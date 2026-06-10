@@ -1,0 +1,39 @@
+// Test structKeyTranslate BIF
+var s1 = {
+    cow: { noise: "moo", size: "large" },
+    "bird.noise": "chirp",
+    "bird.size": "small"
+};
+
+structKeyTranslate( s1 );
+
+// Should have unflattened the dot-notated keys
+if ( !structKeyExists( s1, "cow" ) ) { throw "should still have 'cow' key"; }
+if ( !structKeyExists( s1, "bird" ) ) { throw "should have 'bird' key after unflattening"; }
+if ( structKeyExists( s1, "bird.noise" ) ) { throw "should not have 'bird.noise' key after unflattening"; }
+if ( structKeyExists( s1, "bird.size" ) ) { throw "should not have 'bird.size' key after unflattening"; }
+
+// The bird struct should have the unflattened keys
+var bird = s1.bird;
+if ( bird.noise != "chirp" ) { throw "bird.noise should be 'chirp', got: " & bird.noise; }
+if ( bird.size != "small" ) { throw "bird.size should be 'small', got: " & bird.size; }
+
+// Test with retainKeys option
+var s2 = {
+    "bird.noise": "chirp",
+    "bird.size": "small"
+};
+structKeyTranslate( s2, false, true );
+if ( !structKeyExists( s2, "bird" ) ) { throw "should have 'bird' key"; }
+if ( !structKeyExists( s2, "bird.noise" ) ) { throw "should retain 'bird.noise' key when retainKeys=true"; }
+
+// Test as method
+var s3 = {
+    "cat.meow": "loud",
+    "cat.purr": "soft"
+};
+s3.keyTranslate();
+if ( !structKeyExists( s3, "cat" ) ) { throw "method: should have 'cat' key"; }
+if ( s3.cat.meow != "loud" ) { throw "method: cat.meow should be 'loud'"; }
+
+println( "structKeyTranslate OK" );

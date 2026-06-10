@@ -1,0 +1,23 @@
+// Test structGetMetadata BIF
+var s1 = { name: "John", age: 30 };
+
+var meta = structGetMetadata( s1 );
+
+// Should return a struct
+if ( !isStruct( meta ) ) { throw "structGetMetadata should return a struct"; }
+
+// Should contain expected keys
+if ( !structKeyExists( meta, "casesensitive" ) ) { throw "metadata should have 'casesensitive' key"; }
+if ( !structKeyExists( meta, "ordered" ) ) { throw "metadata should have 'ordered' key"; }
+if ( !structKeyExists( meta, "type" ) ) { throw "metadata should have 'type' key"; }
+
+// MatchBox structs are always case-insensitive and ordered
+if ( meta.casesensitive != false ) { throw "casesensitive should be false"; }
+if ( meta.ordered != true ) { throw "ordered should be true"; }
+
+// Test as method
+var meta2 = s1.getMetadata();
+if ( !isStruct( meta2 ) ) { throw "getMetadata() method should return a struct"; }
+if ( meta2.casesensitive != false ) { throw "method: casesensitive should be false"; }
+
+println( "structGetMetadata OK" );

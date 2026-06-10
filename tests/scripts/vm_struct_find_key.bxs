@@ -1,0 +1,36 @@
+// Test structFindKey BIF
+var myStruct = {
+    cow: { total: 12 },
+    pig: { total: 5 },
+    cat: { total: 3 }
+};
+
+// Test finding a key that exists in multiple nested structs (scope "one" - default)
+var result = structFindKey( myStruct, "total" );
+if ( !isArray( result ) ) { throw "structFindKey should return an array"; }
+if ( arrayLen( result ) != 1 ) { throw "should find 1 result with scope 'one', got: " & arrayLen( result ); }
+
+// The result should be a struct with owner, path, value
+var first = result[ 1 ];
+if ( !structKeyExists( first, "owner" ) ) { throw "result should have 'owner' key"; }
+if ( !structKeyExists( first, "path" ) ) { throw "result should have 'path' key"; }
+if ( !structKeyExists( first, "value" ) ) { throw "result should have 'value' key"; }
+
+// Test with scope "all"
+var resultAll = structFindKey( myStruct, "total", "all" );
+if ( arrayLen( resultAll ) != 3 ) { throw "should find 3 results with scope 'all', got: " & arrayLen( resultAll ); }
+
+// Test finding a key that doesn't exist
+var resultEmpty = structFindKey( myStruct, "nonexistent" );
+if ( arrayLen( resultEmpty ) != 0 ) { throw "should find 0 results for nonexistent key"; }
+
+// Test with dot-notated path
+var resultPath = structFindKey( myStruct, "pig.total" );
+if ( arrayLen( resultPath ) != 1 ) { throw "should find 1 result for dot-notated path"; }
+if ( resultPath[ 1 ].value != 5 ) { throw "pig.total value should be 5, got: " & resultPath[ 1 ].value; }
+
+// Test as method
+var resultMethod = myStruct.findKey( "total", "all" );
+if ( arrayLen( resultMethod ) != 3 ) { throw "method: should find 3 results"; }
+
+println( "structFindKey OK" );

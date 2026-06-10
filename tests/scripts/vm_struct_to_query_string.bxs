@@ -1,0 +1,31 @@
+// Test structToQueryString BIF
+var s1 = { name: "John", age: 30, city: "Chicago" };
+
+var qs = structToQueryString( s1 );
+// Should return a string
+if ( !isString( qs ) ) { throw "structToQueryString should return a string"; }
+// Should contain key=value pairs
+if ( !findNoCase( "name=John", qs ) ) { throw "should contain name=John, got: " & qs; }
+if ( !findNoCase( "age=30", qs ) ) { throw "should contain age=30, got: " & qs; }
+if ( !findNoCase( "city=Chicago", qs ) ) { throw "should contain city=Chicago, got: " & qs; }
+
+// Test with custom delimiter
+var qs2 = structToQueryString( s1, ";" );
+if ( !findNoCase( ";", qs2 ) ) { throw "should use custom delimiter"; }
+
+// Test as method
+var qs3 = s1.toQueryString();
+if ( !isString( qs3 ) ) { throw "toQueryString() method should return a string"; }
+
+// Test with empty struct
+var empty = {};
+var qsEmpty = structToQueryString( empty );
+if ( qsEmpty != "" ) { throw "empty struct should produce empty string, got: " & qsEmpty; }
+
+// Test with special characters that need URL encoding
+var s2 = { q: "hello world", url: "https://example.com/path?a=1&b=2" };
+var qs4 = structToQueryString( s2 );
+// Values should be URL-encoded
+if ( findNoCase( " ", qs4 ) ) { throw "spaces should be URL-encoded"; }
+
+println( "structToQueryString OK" );
