@@ -1,32 +1,36 @@
 pub mod chunk;
-pub mod opcode;
 pub mod gc;
-pub mod shape;
 pub mod intern;
 #[cfg(feature = "jit")]
 pub mod jit;
+pub mod opcode;
+pub mod shape;
 
 #[cfg(all(test, target_arch = "wasm32", feature = "js"))]
 mod interop_tests;
 
-use crate::types::{BxValue, BxCompiledFunction, BxClass, BxInterface, BxInstance, BxFuture, FutureStatus, Constant, BxVM, BxStruct, BxRange, BxNativeObject, BxNativeFunction, NativeFutureHandle, NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString};
+use self::chunk::{Chunk, IcEntry};
+use self::gc::{GCConfig, GcId, GcObject, Heap};
+use self::intern::StringInterner;
+use self::opcode::op;
+use self::shape::ShapeRegistry;
+use crate::types::{
+    BxClass, BxCompiledFunction, BxFuture, BxInstance, BxInterface, BxNativeFunction,
+    BxNativeObject, BxRange, BxStruct, BxVM, BxValue, Constant, FutureStatus, NativeFutureHandle,
+    NativeFutureMessage, NativeFutureValue, Tracer, box_string::BoxString,
+};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
-use chrono::{DateTime, SecondsFormat, Utc};
-use self::chunk::{Chunk, IcEntry};
-use self::opcode::op;
-use self::gc::{Heap, GcObject, GcId, GCConfig};
-use self::shape::ShapeRegistry;
-use self::intern::StringInterner;
 use anyhow::{Result, bail};
-use std::collections::{HashMap, VecDeque};
+use chrono::{DateTime, SecondsFormat, Utc};
+use std::cell::RefCell;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use std::collections::HashSet;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
-use std::cell::RefCell;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{Instant, Duration};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
 use std::vec;
 
 pub static INTERRUPT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -59,20 +63,29 @@ fn browser_js_root() -> Option<JsValue> {
             Reflect::get(&win_for_get, &prop).unwrap_or(JsValue::UNDEFINED)
         },
     );
-    Reflect::set(&handler, &JsValue::from_str("get"), get_fn.as_ref().unchecked_ref()).ok()?;
+    Reflect::set(
+        &handler,
+        &JsValue::from_str("get"),
+        get_fn.as_ref().unchecked_ref(),
+    )
+    .ok()?;
     get_fn.forget();
 
     // --- has trap: delegate to window so resolve_js_property works ---
     let win_for_has = window_js.clone();
-    let has_fn = Closure::<dyn Fn(JsValue, JsValue) -> bool>::new(
-        move |target: JsValue, prop: JsValue| {
+    let has_fn =
+        Closure::<dyn Fn(JsValue, JsValue) -> bool>::new(move |target: JsValue, prop: JsValue| {
             if Reflect::has(&target, &prop).unwrap_or(false) {
                 return true;
             }
             Reflect::has(&win_for_has, &prop).unwrap_or(false)
-        },
-    );
-    Reflect::set(&handler, &JsValue::from_str("has"), has_fn.as_ref().unchecked_ref()).ok()?;
+        });
+    Reflect::set(
+        &handler,
+        &JsValue::from_str("has"),
+        has_fn.as_ref().unchecked_ref(),
+    )
+    .ok()?;
     has_fn.forget();
 
     // --- getOwnPropertyDescriptor trap: bridge to window for case-insensitive enumeration ---
@@ -86,31 +99,39 @@ fn browser_js_root() -> Option<JsValue> {
             Object::get_own_property_descriptor(&Object::from(win_for_desc.clone()), &prop)
         },
     );
-    Reflect::set(&handler, &JsValue::from_str("getOwnPropertyDescriptor"), desc_fn.as_ref().unchecked_ref()).ok()?;
+    Reflect::set(
+        &handler,
+        &JsValue::from_str("getOwnPropertyDescriptor"),
+        desc_fn.as_ref().unchecked_ref(),
+    )
+    .ok()?;
     desc_fn.forget();
 
     // --- ownKeys trap: merge target keys + window keys for enumeration ---
     let win_for_keys = window_js.clone();
-    let keys_fn = Closure::<dyn Fn(JsValue) -> JsValue>::new(
-        move |target: JsValue| {
-            let result = Array::new();
-            // Add target's own keys first
-            let target_keys = Reflect::own_keys(&target).unwrap_or_else(|_| Array::new());
-            for k in target_keys.iter() {
-                result.push(&k);
-            }
-            // Add window's own keys (skip duplicates)
-            if let Ok(win_keys) = Reflect::own_keys(&win_for_keys) {
-                for k in win_keys.iter() {
-                    if !Reflect::has(&target, &k).unwrap_or(false) {
-                        result.push(&k);
-                    }
+    let keys_fn = Closure::<dyn Fn(JsValue) -> JsValue>::new(move |target: JsValue| {
+        let result = Array::new();
+        // Add target's own keys first
+        let target_keys = Reflect::own_keys(&target).unwrap_or_else(|_| Array::new());
+        for k in target_keys.iter() {
+            result.push(&k);
+        }
+        // Add window's own keys (skip duplicates)
+        if let Ok(win_keys) = Reflect::own_keys(&win_for_keys) {
+            for k in win_keys.iter() {
+                if !Reflect::has(&target, &k).unwrap_or(false) {
+                    result.push(&k);
                 }
             }
-            result.into()
-        },
-    );
-    Reflect::set(&handler, &JsValue::from_str("ownKeys"), keys_fn.as_ref().unchecked_ref()).ok()?;
+        }
+        result.into()
+    });
+    Reflect::set(
+        &handler,
+        &JsValue::from_str("ownKeys"),
+        keys_fn.as_ref().unchecked_ref(),
+    )
+    .ok()?;
     keys_fn.forget();
 
     let proxy = Proxy::new(&target, &handler);
@@ -157,8 +178,8 @@ fn unwrap_matchbox_js_proxy(value: &JsValue) -> JsValue {
     let mut current = value.clone();
     for _ in 0..JS_INTEROP_MAX_DEPTH {
         let global = js_sys::global();
-        let matchbox = Reflect::get(&global, &JsValue::from_str("MatchBox"))
-            .unwrap_or(JsValue::UNDEFINED);
+        let matchbox =
+            Reflect::get(&global, &JsValue::from_str("MatchBox")).unwrap_or(JsValue::UNDEFINED);
         if matchbox.is_undefined() || matchbox.is_null() {
             break;
         }
@@ -169,14 +190,13 @@ fn unwrap_matchbox_js_proxy(value: &JsValue) -> JsValue {
             break;
         }
 
-        let has_fn = Reflect::get(&proxy_targets, &JsValue::from_str("has"))
-            .unwrap_or(JsValue::UNDEFINED);
-        let get_fn = Reflect::get(&proxy_targets, &JsValue::from_str("get"))
-            .unwrap_or(JsValue::UNDEFINED);
-        let (Ok(has_fn), Ok(get_fn)) = (
-            has_fn.dyn_into::<Function>(),
-            get_fn.dyn_into::<Function>(),
-        ) else {
+        let has_fn =
+            Reflect::get(&proxy_targets, &JsValue::from_str("has")).unwrap_or(JsValue::UNDEFINED);
+        let get_fn =
+            Reflect::get(&proxy_targets, &JsValue::from_str("get")).unwrap_or(JsValue::UNDEFINED);
+        let (Ok(has_fn), Ok(get_fn)) =
+            (has_fn.dyn_into::<Function>(), get_fn.dyn_into::<Function>())
+        else {
             break;
         };
 
@@ -273,10 +293,18 @@ impl BxNativeObject for VariablesScopeProxy {
     }
 
     fn set_property(&mut self, name: &str, value: BxValue) {
-        self.variables.borrow_mut().insert(name.to_lowercase(), value);
+        self.variables
+            .borrow_mut()
+            .insert(name.to_lowercase(), value);
     }
 
-    fn call_method(&mut self, _vm: &mut dyn BxVM, _id: usize, name: &str, _args: &[BxValue]) -> Result<BxValue, String> {
+    fn call_method(
+        &mut self,
+        _vm: &mut dyn BxVM,
+        _id: usize,
+        name: &str,
+        _args: &[BxValue],
+    ) -> Result<BxValue, String> {
         Err(format!("Method {} not found on variables scope.", name))
     }
 
@@ -288,17 +316,17 @@ impl BxNativeObject for VariablesScopeProxy {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
-use wasm_bindgen::prelude::*;
+use js_sys::Object;
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
+use js_sys::{Array, Function, Promise, Proxy, Reflect};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use wasm_bindgen::JsCast;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
-use js_sys::{Array, Function, Reflect, Proxy, Promise};
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
-use js_sys::Object;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
 use wasm_bindgen::closure::Closure;
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
-use wasm_bindgen_futures::{future_to_promise, JsFuture};
+use wasm_bindgen::prelude::*;
+#[cfg(all(target_arch = "wasm32", feature = "js"))]
+use wasm_bindgen_futures::{JsFuture, future_to_promise};
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 use web_sys::window;
 
@@ -306,20 +334,39 @@ use web_sys::window;
 #[link(wasm_import_module = "matchbox_js_host")]
 unsafe extern "C" {
     fn bx_js_get_prop(
-        obj_id: u32, key_ptr: *const u8, key_len: usize,
-        str_buf: *mut u8, str_buf_len: usize, out_str_len: *mut usize,
-        out_num: *mut f64, out_bool: *mut i32, out_obj: *mut u32,
+        obj_id: u32,
+        key_ptr: *const u8,
+        key_len: usize,
+        str_buf: *mut u8,
+        str_buf_len: usize,
+        out_str_len: *mut usize,
+        out_num: *mut f64,
+        out_bool: *mut i32,
+        out_obj: *mut u32,
     ) -> i32;
     fn bx_js_set_prop_null(obj_id: u32, key_ptr: *const u8, key_len: usize);
     fn bx_js_set_prop_bool(obj_id: u32, key_ptr: *const u8, key_len: usize, val: i32);
     fn bx_js_set_prop_num(obj_id: u32, key_ptr: *const u8, key_len: usize, val: f64);
-    fn bx_js_set_prop_str(obj_id: u32, key_ptr: *const u8, key_len: usize, val_ptr: *const u8, val_len: usize);
+    fn bx_js_set_prop_str(
+        obj_id: u32,
+        key_ptr: *const u8,
+        key_len: usize,
+        val_ptr: *const u8,
+        val_len: usize,
+    );
     fn bx_js_set_prop_obj(obj_id: u32, key_ptr: *const u8, key_len: usize, val_id: u32);
     fn bx_js_call_method(
-        obj_id: u32, method_ptr: *const u8, method_len: usize,
-        args_json_ptr: *const u8, args_json_len: usize,
-        str_buf: *mut u8, str_buf_len: usize, out_str_len: *mut usize,
-        out_num: *mut f64, out_bool: *mut i32, out_obj: *mut u32,
+        obj_id: u32,
+        method_ptr: *const u8,
+        method_len: usize,
+        args_json_ptr: *const u8,
+        args_json_len: usize,
+        str_buf: *mut u8,
+        str_buf_len: usize,
+        out_str_len: *mut usize,
+        out_num: *mut f64,
+        out_bool: *mut i32,
+        out_obj: *mut u32,
     ) -> i32;
 }
 
@@ -491,12 +538,24 @@ impl BxVM for VM {
         self.interpret(chunk).map_err(|e| e.to_string())
     }
 
-    fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>, priority: u8, _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> BxValue {
+    fn spawn(
+        &mut self,
+        func: Rc<BxCompiledFunction>,
+        args: Vec<BxValue>,
+        priority: u8,
+        _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    ) -> BxValue {
         let dummy = Rc::new(RefCell::new(Chunk::default()));
         self.spawn(func, args, priority, dummy, None)
     }
 
-    fn spawn_by_value(&mut self, func: &BxValue, args: Vec<BxValue>, priority: u8, _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> Result<BxValue, String> {
+    fn spawn_by_value(
+        &mut self,
+        func: &BxValue,
+        args: Vec<BxValue>,
+        priority: u8,
+        _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    ) -> Result<BxValue, String> {
         if let Some(id) = func.as_gc_id() {
             let obj = self.heap.get(id);
             if let GcObject::CompiledFunction(f) = obj {
@@ -511,8 +570,14 @@ impl BxVM for VM {
         }
     }
 
-    fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> Result<BxValue, String> {
-        self.call_function_value(*func, args, Some(chunk)).map_err(|e| e.to_string())
+    fn call_function_by_value(
+        &mut self,
+        func: &BxValue,
+        args: Vec<BxValue>,
+        chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    ) -> Result<BxValue, String> {
+        self.call_function_value(*func, args, Some(chunk))
+            .map_err(|e| e.to_string())
     }
 
     fn yield_fiber(&mut self) {
@@ -657,7 +722,10 @@ impl BxVM for VM {
         if class_name.eq_ignore_ascii_case(type_name) {
             return true;
         }
-        if implements.iter().any(|iface| iface.eq_ignore_ascii_case(type_name)) {
+        if implements
+            .iter()
+            .any(|iface| iface.eq_ignore_ascii_case(type_name))
+        {
             return true;
         }
         if let Some(parent_name) = extends {
@@ -676,23 +744,61 @@ impl BxVM for VM {
         match lower.as_str() {
             "any" | "object" => !val.is_null(),
             "null" | "void" => val.is_null(),
-            "string" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::String(_))).unwrap_or(false),
+            "string" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::String(_)))
+                .unwrap_or(false),
             "numeric" | "number" | "double" | "float" | "bigdecimal" => val.is_number(),
             "integer" | "int" | "long" | "short" | "byte" => val.is_int(),
             "boolean" | "bool" => val.is_bool(),
-            "array" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Array(_))).unwrap_or(false),
-            "datetime" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::DateTime(_))).unwrap_or(false),
-            "range" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Range(_))).unwrap_or(false),
-            "struct" | "componentstruct" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Struct(_))).unwrap_or(false),
-            "function" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_))).unwrap_or(false),
-            "class" | "component" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Class(_) | GcObject::Instance(_))).unwrap_or(false),
-            "interface" => val.as_gc_id().map(|id| matches!(self.heap.get(id), GcObject::Interface(_))).unwrap_or(false),
+            "array" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::Array(_)))
+                .unwrap_or(false),
+            "datetime" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::DateTime(_)))
+                .unwrap_or(false),
+            "range" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::Range(_)))
+                .unwrap_or(false),
+            "struct" | "componentstruct" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::Struct(_)))
+                .unwrap_or(false),
+            "function" => val
+                .as_gc_id()
+                .map(|id| {
+                    matches!(
+                        self.heap.get(id),
+                        GcObject::CompiledFunction(_) | GcObject::NativeFunction(_)
+                    )
+                })
+                .unwrap_or(false),
+            "class" | "component" => val
+                .as_gc_id()
+                .map(|id| {
+                    matches!(
+                        self.heap.get(id),
+                        GcObject::Class(_) | GcObject::Instance(_)
+                    )
+                })
+                .unwrap_or(false),
+            "interface" => val
+                .as_gc_id()
+                .map(|id| matches!(self.heap.get(id), GcObject::Interface(_)))
+                .unwrap_or(false),
             _ => {
                 if let Some(class) = self.find_global_class_by_name(type_name) {
                     match val.as_gc_id() {
                         Some(id) => match self.heap.get(id) {
-                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &class.borrow().name),
-                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &class.borrow().name),
+                            GcObject::Class(target_class) => {
+                                self.class_matches_type_name(target_class, &class.borrow().name)
+                            }
+                            GcObject::Instance(inst) => {
+                                self.class_matches_type_name(&inst.class, &class.borrow().name)
+                            }
                             _ => false,
                         },
                         None => false,
@@ -701,9 +807,15 @@ impl BxVM for VM {
                     let interface_name = interface.borrow().name.clone();
                     match val.as_gc_id() {
                         Some(id) => match self.heap.get(id) {
-                            GcObject::Class(target_class) => self.class_matches_type_name(target_class, &interface_name),
-                            GcObject::Instance(inst) => self.class_matches_type_name(&inst.class, &interface_name),
-                            GcObject::Interface(existing) => existing.borrow().name.eq_ignore_ascii_case(&interface_name),
+                            GcObject::Class(target_class) => {
+                                self.class_matches_type_name(target_class, &interface_name)
+                            }
+                            GcObject::Instance(inst) => {
+                                self.class_matches_type_name(&inst.class, &interface_name)
+                            }
+                            GcObject::Interface(existing) => {
+                                existing.borrow().name.eq_ignore_ascii_case(&interface_name)
+                            }
                             _ => false,
                         },
                         None => false,
@@ -723,7 +835,11 @@ impl BxVM for VM {
                 if val.is_null() {
                     Ok(BxValue::new_null())
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "string" => {
@@ -751,7 +867,11 @@ impl BxVM for VM {
                         Ok(BxValue::new_number(num))
                     }
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "integer" | "int" | "long" | "short" | "byte" => {
@@ -773,7 +893,11 @@ impl BxVM for VM {
                 if let Some(num) = parsed {
                     Ok(BxValue::new_int(num))
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "boolean" | "bool" => {
@@ -787,39 +911,66 @@ impl BxVM for VM {
                 if self.is_array_value(val) {
                     Ok(val)
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "struct" | "componentstruct" => {
                 if self.is_struct_value(val) {
                     Ok(val)
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "function" => {
                 if let Some(id) = val.as_gc_id() {
-                    if matches!(self.heap.get(id), GcObject::CompiledFunction(_) | GcObject::NativeFunction(_)) {
+                    if matches!(
+                        self.heap.get(id),
+                        GcObject::CompiledFunction(_) | GcObject::NativeFunction(_)
+                    ) {
                         Ok(val)
                     } else {
-                        Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                        Err(format!(
+                            "Could not cast object [{}] to type [{}]",
+                            self.to_string(val),
+                            type_name
+                        ))
                     }
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             "class" | "component" | "interface" => {
                 if self.value_matches_type_name(val, type_name) {
                     Ok(val)
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
             _ => {
                 if self.value_matches_type_name(val, type_name) {
                     Ok(val)
                 } else {
-                    Err(format!("Could not cast object [{}] to type [{}]", self.to_string(val), type_name))
+                    Err(format!(
+                        "Could not cast object [{}] to type [{}]",
+                        self.to_string(val),
+                        type_name
+                    ))
                 }
             }
         }
@@ -873,7 +1024,9 @@ impl BxVM for VM {
     fn array_len(&self, id: usize) -> usize {
         if let GcObject::Array(arr) = self.heap.get(id) {
             arr.len()
-        } else { 0 }
+        } else {
+            0
+        }
     }
 
     fn array_push(&mut self, id: usize, val: BxValue) {
@@ -893,7 +1046,9 @@ impl BxVM for VM {
     fn array_get(&self, id: usize, idx: usize) -> BxValue {
         if let GcObject::Array(arr) = self.heap.get(id) {
             arr.get(idx).copied().unwrap_or(BxValue::new_null())
-        } else { BxValue::new_null() }
+        } else {
+            BxValue::new_null()
+        }
     }
 
     fn array_set(&mut self, id: usize, idx: usize, val: BxValue) -> Result<(), String> {
@@ -901,7 +1056,8 @@ impl BxVM for VM {
             if idx < arr.len() {
                 arr[idx] = val;
                 Ok(())
-            } else if idx < 100_000 { // Reasonable limit for sparse expansion
+            } else if idx < 100_000 {
+                // Reasonable limit for sparse expansion
                 arr.resize(idx + 1, BxValue::new_null());
                 arr[idx] = val;
                 Ok(())
@@ -958,7 +1114,9 @@ impl BxVM for VM {
     fn struct_len(&self, id: usize) -> usize {
         if let GcObject::Struct(s) = self.heap.get(id) {
             s.properties.len()
-        } else { 0 }
+        } else {
+            0
+        }
     }
 
     fn struct_new(&mut self) -> usize {
@@ -1003,8 +1161,8 @@ impl BxVM for VM {
                         entries.push((fid, s.properties[fidx as usize]));
                     }
                 }
-                
-                // Sort by index to maintain some consistency if possible, 
+
+                // Sort by index to maintain some consistency if possible,
                 // but really we just want a shape that has these fields.
                 // For simplicity, we'll build a new shape chain from root.
                 let mut new_shape_id = self.shapes.get_root();
@@ -1013,7 +1171,7 @@ impl BxVM for VM {
                     new_shape_id = self.shapes.transition(new_shape_id, fid);
                     new_properties.push(val);
                 }
-                
+
                 s.shape_id = new_shape_id;
                 s.properties = new_properties;
                 return true;
@@ -1052,7 +1210,9 @@ impl BxVM for VM {
     fn struct_get_shape(&self, id: usize) -> u32 {
         if let GcObject::Struct(s) = self.heap.get(id) {
             s.shape_id
-        } else { 0 }
+        } else {
+            0
+        }
     }
 
     fn future_new(&mut self) -> BxValue {
@@ -1064,7 +1224,9 @@ impl BxVM for VM {
     }
 
     fn future_resolve(&mut self, future: BxValue, value: BxValue) -> Result<(), String> {
-        let id = future.as_gc_id().ok_or_else(|| "Value is not a future".to_string())?;
+        let id = future
+            .as_gc_id()
+            .ok_or_else(|| "Value is not a future".to_string())?;
         if let GcObject::Future(f) = self.heap.get_mut(id) {
             if !matches!(f.status, FutureStatus::Pending) {
                 return Err("Future is already settled".to_string());
@@ -1078,7 +1240,9 @@ impl BxVM for VM {
     }
 
     fn future_reject(&mut self, future: BxValue, error: BxValue) -> Result<(), String> {
-        let id = future.as_gc_id().ok_or_else(|| "Value is not a future".to_string())?;
+        let id = future
+            .as_gc_id()
+            .ok_or_else(|| "Value is not a future".to_string())?;
         if let GcObject::Future(f) = self.heap.get_mut(id) {
             if !matches!(f.status, FutureStatus::Pending) {
                 return Err("Future is already settled".to_string());
@@ -1091,9 +1255,12 @@ impl BxVM for VM {
     }
 
     fn future_schedule_resolve(&mut self, future: BxValue, value: BxValue) -> Result<(), String> {
-        let id = future.as_gc_id().ok_or_else(|| "Value is not a future".to_string())?;
+        let id = future
+            .as_gc_id()
+            .ok_or_else(|| "Value is not a future".to_string())?;
         if matches!(self.heap.get(id), GcObject::Future(_)) {
-            self.native_completions.push_back(NativeCompletion::Resolve { future, value });
+            self.native_completions
+                .push_back(NativeCompletion::Resolve { future, value });
             Ok(())
         } else {
             Err("Value is not a future".to_string())
@@ -1101,9 +1268,12 @@ impl BxVM for VM {
     }
 
     fn future_schedule_reject(&mut self, future: BxValue, error: BxValue) -> Result<(), String> {
-        let id = future.as_gc_id().ok_or_else(|| "Value is not a future".to_string())?;
+        let id = future
+            .as_gc_id()
+            .ok_or_else(|| "Value is not a future".to_string())?;
         if matches!(self.heap.get(id), GcObject::Future(_)) {
-            self.native_completions.push_back(NativeCompletion::Reject { future, error });
+            self.native_completions
+                .push_back(NativeCompletion::Reject { future, error });
             Ok(())
         } else {
             Err("Value is not a future".to_string())
@@ -1128,7 +1298,12 @@ impl BxVM for VM {
         self.heap.alloc(GcObject::NativeObject(obj))
     }
 
-    fn native_object_call_method(&mut self, id: usize, name: &str, args: &[BxValue]) -> Result<BxValue, String> {
+    fn native_object_call_method(
+        &mut self,
+        id: usize,
+        name: &str,
+        args: &[BxValue],
+    ) -> Result<BxValue, String> {
         self.gc_suspended = true;
         // Clone the Rc to release the heap borrow immediately
         let obj_rc = if let GcObject::NativeObject(obj) = self.heap.get_mut(id) {
@@ -1137,32 +1312,39 @@ impl BxVM for VM {
             self.gc_suspended = false;
             return Err(format!("Value at id {} is not a native object", id));
         };
-        
+
         let res = obj_rc.borrow_mut().call_method(self, id, name, args);
         self.gc_suspended = false;
         res
     }
 
-    fn construct_native_class(&mut self, class_name: &str, args: &[BxValue]) -> Result<BxValue, String> {
+    fn construct_native_class(
+        &mut self,
+        class_name: &str,
+        args: &[BxValue],
+    ) -> Result<BxValue, String> {
         let class_lower = class_name.to_lowercase();
         // Since we need to borrow `self` mutably in the function call, we must clone the function pointer first
-        let func = {
-            self.native_classes.get(&class_lower).copied()
-        };
+        let func = { self.native_classes.get(&class_lower).copied() };
 
         if let Some(constructor) = func {
             constructor(self, args)
         } else {
-            Err(format!("Native class '{}' not found. Ensure it is registered.", class_name))
+            Err(format!(
+                "Native class '{}' not found. Ensure it is registered.",
+                class_name
+            ))
         }
     }
 
     fn instance_class_name(&self, receiver: BxValue) -> Result<String, String> {
-        self.instance_class_name(receiver).map_err(|e| e.to_string())
+        self.instance_class_name(receiver)
+            .map_err(|e| e.to_string())
     }
 
     fn instance_variables_json(&self, receiver: BxValue) -> Result<serde_json::Value, String> {
-        self.instance_variables_json(receiver).map_err(|e| e.to_string())
+        self.instance_variables_json(receiver)
+            .map_err(|e| e.to_string())
     }
 
     fn datetime_new(&mut self, dt: DateTime<Utc>) -> usize {
@@ -1233,7 +1415,10 @@ impl BxVM for VM {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn native_object_query_result(&self, id: usize) -> Option<crate::datasource::traits::QueryResult> {
+    fn native_object_query_result(
+        &self,
+        id: usize,
+    ) -> Option<crate::datasource::traits::QueryResult> {
         match self.heap.get_opt(id) {
             Some(GcObject::NativeObject(obj)) => obj.borrow().query_result(),
             _ => None,
@@ -1241,7 +1426,10 @@ impl BxVM for VM {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn native_object_query_columns(&self, id: usize) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
+    fn native_object_query_columns(
+        &self,
+        id: usize,
+    ) -> Option<Vec<crate::datasource::traits::QueryColumn>> {
         match self.heap.get_opt(id) {
             Some(GcObject::NativeObject(obj)) => obj.borrow().query_columns(),
             _ => None,
@@ -1257,7 +1445,12 @@ impl BxVM for VM {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue> {
+    fn native_object_query_cell(
+        &self,
+        id: usize,
+        row_idx: usize,
+        col_idx: usize,
+    ) -> Option<crate::datasource::traits::SqlValue> {
         match self.heap.get_opt(id) {
             Some(GcObject::NativeObject(obj)) => obj.borrow().query_cell(row_idx, col_idx),
             _ => None,
@@ -1333,13 +1526,15 @@ impl VM {
             } else {
                 bail!(
                     "Cannot spread value of type [{}] into an array literal.",
-                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                    self.type_name_from_value(val)
+                        .unwrap_or_else(|| "unknown".to_string())
                 )
             }
         } else {
             bail!(
                 "Cannot spread value of type [{}] into an array literal.",
-                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                self.type_name_from_value(val)
+                    .unwrap_or_else(|| "unknown".to_string())
             )
         }
     }
@@ -1364,13 +1559,15 @@ impl VM {
                 }
                 _ => bail!(
                     "Cannot spread value of type [{}] into a struct literal.",
-                    self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                    self.type_name_from_value(val)
+                        .unwrap_or_else(|| "unknown".to_string())
                 ),
             }
         } else {
             bail!(
                 "Cannot spread value of type [{}] into a struct literal.",
-                self.type_name_from_value(val).unwrap_or_else(|| "unknown".to_string())
+                self.type_name_from_value(val)
+                    .unwrap_or_else(|| "unknown".to_string())
             )
         }
     }
@@ -1420,7 +1617,13 @@ impl VM {
             chunk: chunk_for_func,
         });
 
-        let future = self.spawn(function, Vec::new(), 0, Rc::new(RefCell::new(Chunk::default())), None);
+        let future = self.spawn(
+            function,
+            Vec::new(),
+            0,
+            Rc::new(RefCell::new(Chunk::default())),
+            None,
+        );
         self.run_future_to_completion(future)
     }
 
@@ -1430,9 +1633,11 @@ impl VM {
         function: Rc<BxCompiledFunction>,
         args: Vec<BxValue>,
         priority: u8,
-        receiver: Option<BxValue>
+        receiver: Option<BxValue>,
     ) -> BxValue {
-        let receiver = receiver.or(function.captured_receiver).or(self.current_receiver());
+        let receiver = receiver
+            .or(function.captured_receiver)
+            .or(self.current_receiver());
         let future_id = self.heap.alloc(GcObject::Future(BxFuture {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
@@ -1526,7 +1731,8 @@ impl VM {
                             let _ = self.future_resolve(future, value);
                         }
                         Err(message) => {
-                            let error = self.native_future_value_to_bx(NativeFutureValue::Error { message });
+                            let error = self
+                                .native_future_value_to_bx(NativeFutureValue::Error { message });
                             let _ = self.future_reject(future, error);
                         }
                     }
@@ -1584,7 +1790,9 @@ impl VM {
     }
 
     fn is_equal(&self, a: BxValue, b: BxValue) -> bool {
-        if a == b { return true; }
+        if a == b {
+            return true;
+        }
         if let (Some(id_a), Some(id_b)) = (a.as_gc_id(), b.as_gc_id()) {
             match (self.heap.get(id_a), self.heap.get(id_b)) {
                 (GcObject::String(s1), GcObject::String(s2)) => {
@@ -1617,7 +1825,10 @@ impl VM {
         vm
     }
 
-    pub fn new_with_bifs(external_bifs: HashMap<String, BxNativeFunction>, native_classes: HashMap<String, BxNativeFunction>) -> Self {
+    pub fn new_with_bifs(
+        external_bifs: HashMap<String, BxNativeFunction>,
+        native_classes: HashMap<String, BxNativeFunction>,
+    ) -> Self {
         let (native_future_tx, native_future_rx) = mpsc::channel();
         let mut vm = VM {
             fibers: Vec::new(),
@@ -1628,7 +1839,10 @@ impl VM {
             shapes: ShapeRegistry::new(),
             heap: Heap::new(),
             config: GCConfig::default(),
-            native_classes: native_classes.into_iter().map(|(k, v)| (k.to_lowercase(), v)).collect(),
+            native_classes: native_classes
+                .into_iter()
+                .map(|(k, v)| (k.to_lowercase(), v))
+                .collect(),
             interner: StringInterner::new(),
             cli_args: Vec::new(),
             output_buffer: None,
@@ -1748,9 +1962,16 @@ impl VM {
     }
 
     #[cfg(all(target_arch = "wasm32", feature = "js"))]
-    fn js_to_bx_with_seen(&mut self, val: JsValue, seen: &mut Vec<JsValue>, depth: usize) -> BxValue {
+    fn js_to_bx_with_seen(
+        &mut self,
+        val: JsValue,
+        seen: &mut Vec<JsValue>,
+        depth: usize,
+    ) -> BxValue {
         if val.is_string() {
-            let id = self.heap.alloc(GcObject::String(BoxString::new(&val.as_string().unwrap())));
+            let id = self
+                .heap
+                .alloc(GcObject::String(BoxString::new(&val.as_string().unwrap())));
             return BxValue::new_ptr(id);
         }
 
@@ -1782,7 +2003,8 @@ impl VM {
         let future_for_resolve = future;
         let sender_for_resolve = self.native_future_tx.clone();
         let resolve_cb = Closure::wrap(Box::new(move |res: JsValue| {
-            let thunk_id = register_wasm_future_thunk(Box::new(move |vm| Ok(vm.js_to_bx_wasm(res))));
+            let thunk_id =
+                register_wasm_future_thunk(Box::new(move |vm| Ok(vm.js_to_bx_wasm(res))));
             let _ = sender_for_resolve.send(NativeFutureMessage::ResolveWasmThunk {
                 future: future_for_resolve,
                 thunk_id,
@@ -1825,7 +2047,7 @@ impl VM {
 
     fn init_server_scope(&mut self) {
         use crate::types::BxStruct;
-        
+
         let mut os_struct = BxStruct {
             shape_id: self.shapes.get_root(),
             properties: Vec::new(),
@@ -1865,10 +2087,10 @@ impl VM {
         // Manual struct property insertion (since we don't have BxStruct::set yet)
         let name_idx = self.interner.intern("name");
         let arch_idx = self.interner.intern("arch");
-        
+
         os_struct.shape_id = self.shapes.transition(os_struct.shape_id, name_idx);
         os_struct.properties.push(BxValue::new_ptr(os_name_id));
-        
+
         os_struct.shape_id = self.shapes.transition(os_struct.shape_id, arch_idx);
         os_struct.properties.push(BxValue::new_ptr(os_arch_id));
 
@@ -1898,7 +2120,11 @@ impl VM {
         value
     }
 
-    pub fn get_global_struct_member(&self, global_name: &str, member_name: &str) -> Option<BxValue> {
+    pub fn get_global_struct_member(
+        &self,
+        global_name: &str,
+        member_name: &str,
+    ) -> Option<BxValue> {
         let global = self.get_global(global_name)?;
         let id = global.as_gc_id()?;
         Some(self.struct_get(id, member_name))
@@ -1916,12 +2142,13 @@ impl VM {
 
     pub fn get_global(&self, name: &str) -> Option<BxValue> {
         if let Some(name_id) = self.interner.get_id(name) {
-            self.global_names.get(&name_id).map(|&idx| self.global_values[idx])
+            self.global_names
+                .get(&name_id)
+                .map(|&idx| self.global_values[idx])
         } else {
             None
         }
     }
-
 
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
         let name = method_name.to_ascii_lowercase();
@@ -2078,14 +2305,22 @@ impl VM {
         }
     }
 
-    fn resolve_method(&self, class: Rc<RefCell<BxClass>>, method_name: &str) -> Option<Rc<BxCompiledFunction>> {
+    fn resolve_method(
+        &self,
+        class: Rc<RefCell<BxClass>>,
+        method_name: &str,
+    ) -> Option<Rc<BxCompiledFunction>> {
         let mut current_class = class;
         loop {
             let class_ref = current_class.borrow();
-            if let Some((_, method)) = class_ref.methods.iter().find(|(name, _)| name.eq_ignore_ascii_case(method_name)) {
+            if let Some((_, method)) = class_ref
+                .methods
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(method_name))
+            {
                 return Some(Rc::new(method.clone()));
             }
-            
+
             if let Some(parent_name) = &class_ref.extends {
                 if let Some(val) = self.get_global(parent_name) {
                     if let Some(id) = val.as_gc_id() {
@@ -2225,7 +2460,11 @@ impl VM {
         result
     }
 
-    pub fn start_call_function_value(&mut self, func: BxValue, args: Vec<BxValue>) -> Result<BxValue> {
+    pub fn start_call_function_value(
+        &mut self,
+        func: BxValue,
+        args: Vec<BxValue>,
+    ) -> Result<BxValue> {
         self.start_call_function_value_with_receiver(func, args, None)
     }
 
@@ -2240,7 +2479,12 @@ impl VM {
                 GcObject::CompiledFunction(f) => {
                     let f = Rc::clone(f);
                     if args.len() < f.min_arity as usize || args.len() > f.arity as usize {
-                        anyhow::bail!("Expected {}-{} arguments but got {}", f.min_arity, f.arity, args.len());
+                        anyhow::bail!(
+                            "Expected {}-{} arguments but got {}",
+                            f.min_arity,
+                            f.arity,
+                            args.len()
+                        );
                     }
                     Ok(self.enqueue_function_call(func, f, args, 0, receiver))
                 }
@@ -2505,7 +2749,9 @@ impl VM {
     }
 
     pub fn future_state(&self, future: BxValue) -> Result<HostFutureState> {
-        let id = future.as_gc_id().ok_or_else(|| anyhow::anyhow!("Value is not a future"))?;
+        let id = future
+            .as_gc_id()
+            .ok_or_else(|| anyhow::anyhow!("Value is not a future"))?;
         match self.heap.get(id) {
             GcObject::Future(f) => match &f.status {
                 FutureStatus::Pending => Ok(HostFutureState::Pending),
@@ -2538,7 +2784,9 @@ impl VM {
         _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
         receiver: Option<BxValue>,
     ) -> BxValue {
-        let receiver = receiver.or(func.captured_receiver).or(self.current_receiver());
+        let receiver = receiver
+            .or(func.captured_receiver)
+            .or(self.current_receiver());
         let future_id = self.heap.alloc(GcObject::Future(BxFuture {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
@@ -2546,7 +2794,10 @@ impl VM {
         }));
 
         let mut stack = Vec::with_capacity(func.arity as usize + 1);
-        let func_val = BxValue::new_ptr(self.heap.alloc(GcObject::CompiledFunction(Rc::clone(&func))));
+        let func_val = BxValue::new_ptr(
+            self.heap
+                .alloc(GcObject::CompiledFunction(Rc::clone(&func))),
+        );
         stack.push(func_val); // function itself at base
         for arg in args {
             stack.push(arg);
@@ -2581,13 +2832,13 @@ impl VM {
 
     fn run_all(&mut self) -> Result<BxValue> {
         let mut last_result = BxValue::new_null();
-        
+
         while !self.fibers.is_empty() {
             self.drain_native_completions();
             let mut i = 0;
             let mut all_waiting = true;
             let mut earliest_wait: Option<Instant> = None;
-            
+
             // 1. Find the highest priority among non-waiting fibers
             let mut max_priority = 0;
             let now = Instant::now();
@@ -2615,7 +2866,7 @@ impl VM {
                         self.fibers[i].wait_until = None;
                     }
                 }
-                
+
                 // Only run fibers with the current maximum priority to avoid starvation of I/O/callbacks
                 if self.fibers[i].priority < max_priority {
                     i += 1;
@@ -2649,12 +2900,15 @@ impl VM {
                     Err(e) => {
                         let fiber = self.fibers.swap_remove(i);
                         let mut handler = None;
-                        let err_val = BxValue::new_ptr(self.heap.alloc(GcObject::String(BoxString::new(&e.to_string()))));
+                        let err_val = BxValue::new_ptr(
+                            self.heap
+                                .alloc(GcObject::String(BoxString::new(&e.to_string()))),
+                        );
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
                             f.status = FutureStatus::Failed(err_val);
                             handler = f.error_handler;
                         }
-                        
+
                         if let Some(h) = handler {
                             self.spawn_error_handler(h, err_val);
                             // Since we spawned a new fiber, it will be at the end of the list.
@@ -2670,7 +2924,7 @@ impl VM {
                 }
                 self.current_fiber_idx = None;
             }
-            
+
             if all_waiting && !self.fibers.is_empty() {
                 if let Some(until) = earliest_wait {
                     let now = Instant::now();
@@ -2688,7 +2942,7 @@ impl VM {
                 self.collect_garbage();
             }
         }
-        
+
         Ok(last_result)
     }
 
@@ -2726,7 +2980,8 @@ impl VM {
                 Err(e) => {
                     let fiber = self.fibers.swap_remove(fiber_idx);
                     let err_val = BxValue::new_ptr(
-                        self.heap.alloc(GcObject::String(BoxString::new(&e.to_string()))),
+                        self.heap
+                            .alloc(GcObject::String(BoxString::new(&e.to_string()))),
                     );
                     if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
                         f.status = FutureStatus::Failed(err_val);
@@ -2742,20 +2997,24 @@ impl VM {
         }
     }
 
-    fn run_fiber(&mut self, fiber_idx: usize, timeslice_end: Option<Instant>) -> Result<Option<BxValue>> {
+    fn run_fiber(
+        &mut self,
+        fiber_idx: usize,
+        timeslice_end: Option<Instant>,
+    ) -> Result<Option<BxValue>> {
         // Persistent state across dispatch iterations. Refreshed only when
         // `frame_changed` is true (after CALL/RETURN/THROW/NEW/etc.).
         // In tight loops there are no frame changes, so these are loaded just once.
-        let mut frame_changed  = true;
-        let mut ip:           usize                     = 0;
-        let mut stack_base:   usize                     = 0;
-        let mut code_ptr:     *const u32                = std::ptr::null();
-        let mut code_len:     usize                     = 0;
+        let mut frame_changed = true;
+        let mut ip: usize = 0;
+        let mut stack_base: usize = 0;
+        let mut code_ptr: *const u32 = std::ptr::null();
+        let mut code_len: usize = 0;
         let mut promoted_ptr: *mut Vec<Option<BxValue>> = std::ptr::null_mut();
         // Pointer to the base of the current frame's locals on the value stack.
         // Refreshed whenever frame_changed is true. Avoids the double pointer
         // chase (fibers[idx] → stack Vec → slot) in hot opcode arms.
-        let mut locals_ptr:   *mut BxValue              = std::ptr::null_mut();
+        let mut locals_ptr: *mut BxValue = std::ptr::null_mut();
         // Counter used to throttle Instant::now() at safe points.
         // We only call the (expensive) system clock every 1024 backward branches
         // to avoid the ~20–50ns syscall cost on every loop iteration.
@@ -2767,9 +3026,9 @@ impl VM {
         // HashMap overhead.  Only a single local counter is hot; the JitState's
         // HashMap is consulted at most twice (once to compile, once to cache here).
         #[cfg(feature = "jit")]
-        let mut jit_hot_ip: usize = usize::MAX;   // ip_at_start of the loop being counted
+        let mut jit_hot_ip: usize = usize::MAX; // ip_at_start of the loop being counted
         #[cfg(feature = "jit")]
-        let mut jit_hot_count: u64 = 0;           // consecutive iterations of that loop
+        let mut jit_hot_count: u64 = 0; // consecutive iterations of that loop
         // Once compiled, we cache the fn pointer locally so subsequent invocations
         // don't need a HashMap lookup either.
         #[cfg(feature = "jit")]
@@ -2804,17 +3063,15 @@ impl VM {
                 ip = self.fibers[fiber_idx].frames.last().unwrap().ip;
                 stack_base = self.fibers[fiber_idx].frames.last().unwrap().stack_base;
                 if ip == 0 {
-                    let chunk_rc = Rc::clone(
-                        &self.fibers[fiber_idx].frames.last().unwrap().chunk,
-                    );
+                    let chunk_rc = Rc::clone(&self.fibers[fiber_idx].frames.last().unwrap().chunk);
                     chunk_rc.borrow_mut().ensure_caches();
                 }
                 // SAFETY: code/promoted_constants never mutated; Rc keeps them alive.
                 unsafe {
                     let frame = self.fibers[fiber_idx].frames.last_mut().unwrap();
                     let chunk_ptr = frame.chunk.as_ptr();
-                    code_ptr     = (*chunk_ptr).code.as_ptr();
-                    code_len     = (*chunk_ptr).code.len();
+                    code_ptr = (*chunk_ptr).code.as_ptr();
+                    code_len = (*chunk_ptr).code.len();
                     promoted_ptr = &mut frame.promoted_constants as *mut _;
                 }
                 // Reserve headroom so that push() within this frame's execution
@@ -2826,9 +3083,7 @@ impl VM {
                 // (CALL / RETURN / THROW / NEW) sets frame_changed = true, which
                 // refreshes locals_ptr on the next iteration before any access.
                 unsafe {
-                    locals_ptr = self.fibers[fiber_idx].stack
-                        .as_mut_ptr()
-                        .add(stack_base);
+                    locals_ptr = self.fibers[fiber_idx].stack.as_mut_ptr().add(stack_base);
                 }
             }
 
@@ -2895,20 +3150,32 @@ impl VM {
 
             if trace {
                 let stack = &self.fibers[fiber_idx].stack;
-                let stack_display: Vec<String> = stack.iter().map(|v| {
-                    if v.is_null() { "null".to_string() }
-                    else if v.is_bool() { format!("bool({})", v.as_bool()) }
-                    else if v.is_int() { format!("int({})", v.as_int()) }
-                    else if v.is_number() { format!("num({})", v.as_number()) }
-                    else if v.is_ptr() { format!("ptr({:?})", v.as_gc_id()) }
-                    else { "?".to_string() }
-                }).collect();
-                eprintln!("[TRACE] ip={:04} sb={} op={} op0={} stack=[{}]",
+                let stack_display: Vec<String> = stack
+                    .iter()
+                    .map(|v| {
+                        if v.is_null() {
+                            "null".to_string()
+                        } else if v.is_bool() {
+                            format!("bool({})", v.as_bool())
+                        } else if v.is_int() {
+                            format!("int({})", v.as_int())
+                        } else if v.is_number() {
+                            format!("num({})", v.as_number())
+                        } else if v.is_ptr() {
+                            format!("ptr({:?})", v.as_gc_id())
+                        } else {
+                            "?".to_string()
+                        }
+                    })
+                    .collect();
+                eprintln!(
+                    "[TRACE] ip={:04} sb={} op={} op0={} stack=[{}]",
                     ip_at_start,
                     stack_base,
                     crate::vm::opcode::opcode_name(opcode),
                     op0,
-                    stack_display.join(", "));
+                    stack_display.join(", ")
+                );
             }
 
             // Flush ip to frame before frame changes or throws.
@@ -2954,13 +3221,19 @@ impl VM {
                     let slot = op0;
                     let val = unsafe { *locals_ptr.add(slot as usize) };
                     if val.is_number() {
-                        unsafe { *locals_ptr.add(slot as usize) = BxValue::new_number(val.as_number() + 1.0) };
+                        unsafe {
+                            *locals_ptr.add(slot as usize) =
+                                BxValue::new_number(val.as_number() + 1.0)
+                        };
                     } else if val.is_int() {
-                        unsafe { *locals_ptr.add(slot as usize) = BxValue::new_int(val.as_int() + 1) };
+                        unsafe {
+                            *locals_ptr.add(slot as usize) = BxValue::new_int(val.as_int() + 1)
+                        };
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::LOCAL_COMPARE_JUMP => {
@@ -2969,17 +3242,22 @@ impl VM {
                     let offset = next_word!();
                     let val = unsafe { *locals_ptr.add(slot as usize) };
                     let limit: BxValue = {
-                        let already = unsafe {
-                            (&*promoted_ptr).get(const_idx as usize).copied().flatten()
-                        };
-                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize)? }
+                        let already =
+                            unsafe { (&*promoted_ptr).get(const_idx as usize).copied().flatten() };
+                        if let Some(v) = already {
+                            v
+                        } else {
+                            self.read_constant(fiber_idx, const_idx as usize)?
+                        }
                     };
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
                             if let Some(end) = timeslice_end {
                                 safe_point_count = safe_point_count.wrapping_add(1);
-                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                                    break 'quantum;
+                                }
                             }
                         }
                     } else if val.is_int() && limit.is_int() {
@@ -2987,7 +3265,9 @@ impl VM {
                             ip -= offset as usize;
                             if let Some(end) = timeslice_end {
                                 safe_point_count = safe_point_count.wrapping_add(1);
-                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                                    break 'quantum;
+                                }
                             }
                         }
                     }
@@ -3011,8 +3291,13 @@ impl VM {
                     // SAFETY: single-threaded VM; the code_ptr borrow has already dropped;
                     // no concurrent mutable access to promoted_constants is possible here.
                     let limit: BxValue = {
-                        let already = unsafe { (&*promoted_ptr).get(const_idx as usize).copied().flatten() };
-                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize)? }
+                        let already =
+                            unsafe { (&*promoted_ptr).get(const_idx as usize).copied().flatten() };
+                        if let Some(v) = already {
+                            v
+                        } else {
+                            self.read_constant(fiber_idx, const_idx as usize)?
+                        }
                     };
                     let should_loop = if next_val.is_int() && limit.is_int() {
                         next_val.as_int() < limit.as_int()
@@ -3051,14 +3336,16 @@ impl VM {
                                             let fn_id = code_ptr as usize;
                                             if let Some(ref mut jit) = self.jit {
                                                 jit.profile_loop(fn_id, ip_at_start, jit_hot_count);
-                                                if let Some(f) = jit.get_compiled_loop(fn_id, ip_at_start) {
+                                                if let Some(f) =
+                                                    jit.get_compiled_loop(fn_id, ip_at_start)
+                                                {
                                                     jit_active = Some((ip_at_start, f));
                                                 }
                                             }
                                             jit_hot_count = 0;
                                         }
                                     } else {
-                                        jit_hot_ip    = ip_at_start;
+                                        jit_hot_ip = ip_at_start;
                                         jit_hot_count = 1;
                                     }
                                     ip -= offset as usize;
@@ -3081,7 +3368,9 @@ impl VM {
                                     // ── OSR check: already compiled (possibly prior quantum) ──
                                     if jit_body_active.is_none() {
                                         if let Some(ref mut jit) = self.jit {
-                                            if let Some(f) = jit.get_compiled_generic(fn_id, ip_at_start) {
+                                            if let Some(f) =
+                                                jit.get_compiled_generic(fn_id, ip_at_start)
+                                            {
                                                 jit_body_active = Some((ip_at_start, f));
                                                 continue 't2; // re-enter to call via active path
                                             }
@@ -3091,10 +3380,22 @@ impl VM {
                                     // ── Active path: call the compiled native loop ────────────
                                     if let Some((active_ip, compiled)) = jit_body_active {
                                         if active_ip == ip_at_start {
-                                            eprintln!("[JIT] calling compiled loop at ip={}!", ip_at_start);
-                                            let deopt = unsafe { compiled(locals_ptr as *mut u64, &self.heap as *const _ as *const std::ffi::c_void) };
+                                            eprintln!(
+                                                "[JIT] calling compiled loop at ip={}!",
+                                                ip_at_start
+                                            );
+                                            let deopt = unsafe {
+                                                compiled(
+                                                    locals_ptr as *mut u64,
+                                                    &self.heap as *const _
+                                                        as *const std::ffi::c_void,
+                                                )
+                                            };
                                             if deopt == 1 {
-                                                eprintln!("[JIT] deoptimizing loop at ip={} (type mismatch)!", ip_at_start);
+                                                eprintln!(
+                                                    "[JIT] deoptimizing loop at ip={} (type mismatch)!",
+                                                    ip_at_start
+                                                );
                                                 // JIT bailed out — resume at start of this iteration.
                                                 ip -= offset as usize;
                                                 jit_body_active = None;
@@ -3104,8 +3405,11 @@ impl VM {
                                                 jit_body_active = None;
                                                 jit_active = None;
                                                 if let Some(end) = timeslice_end {
-                                                    safe_point_count = safe_point_count.wrapping_add(1);
-                                                    if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                                                    safe_point_count =
+                                                        safe_point_count.wrapping_add(1);
+                                                    if safe_point_count & 1023 == 0
+                                                        && Instant::now() >= end
+                                                    {
                                                         break 'quantum;
                                                     }
                                                 }
@@ -3132,23 +3436,27 @@ impl VM {
                                         let fn_id = code_ptr as usize;
                                         // Copy body bytes (offset - 3 words before FOR_LOOP_STEP).
                                         let body_start = ip - offset as usize;
-                                        let body_len   = offset as usize - 3;
+                                        let body_len = offset as usize - 3;
                                         let body_code: Vec<u32> = unsafe {
                                             std::slice::from_raw_parts(
-                                                code_ptr.add(body_start), body_len,
-                                            ).to_vec()
+                                                code_ptr.add(body_start),
+                                                body_len,
+                                            )
+                                            .to_vec()
                                         };
                                         // Extract numeric constants referenced in the body.
                                         let mut const_map: HashMap<u32, f64> = HashMap::new();
                                         let ic_entries = {
-                                            let frame = self.fibers[fiber_idx].frames.last().unwrap();
+                                            let frame =
+                                                self.fibers[fiber_idx].frames.last().unwrap();
                                             let c = frame.chunk.borrow();
-                                            c.caches[body_start .. body_start + body_len].to_vec()
+                                            c.caches[body_start..body_start + body_len].to_vec()
                                         };
                                         for &word in &body_code {
                                             if (word & 0xFF) as u8 == op::CONSTANT {
                                                 let cidx = word >> 8;
-                                                let cv = self.read_constant(fiber_idx, cidx as usize)?;
+                                                let cv =
+                                                    self.read_constant(fiber_idx, cidx as usize)?;
                                                 if cv.is_number() {
                                                     const_map.insert(cidx, cv.as_number());
                                                 }
@@ -3156,7 +3464,8 @@ impl VM {
                                         }
                                         if let Some(ref mut jit) = self.jit {
                                             jit.profile_generic(
-                                                fn_id, ip_at_start,
+                                                fn_id,
+                                                ip_at_start,
                                                 JIT_BODY_THRESHOLD,
                                                 &body_code,
                                                 &ic_entries,
@@ -3164,7 +3473,9 @@ impl VM {
                                                 limit.as_number(),
                                                 &const_map,
                                             );
-                                            if let Some(f) = jit.get_compiled_generic(fn_id, ip_at_start) {
+                                            if let Some(f) =
+                                                jit.get_compiled_generic(fn_id, ip_at_start)
+                                            {
                                                 jit_body_active = Some((ip_at_start, f));
                                                 continue 't2; // immediately run the freshly compiled fn
                                             }
@@ -3235,7 +3546,8 @@ impl VM {
                         } else {
                             flush_ip!();
                             self.throw_error(fiber_idx, "Operand of increment must be a number")?;
-                            frame_changed = true; continue 'quantum;
+                            frame_changed = true;
+                            continue 'quantum;
                         }
                     } else {
                         // Slow path: resolve global and update IC
@@ -3243,20 +3555,27 @@ impl VM {
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             let val = self.global_values[global_idx];
                             if val.is_number() {
-                                self.global_values[global_idx] = BxValue::new_number(val.as_number() + 1.0);
+                                self.global_values[global_idx] =
+                                    BxValue::new_number(val.as_number() + 1.0);
                                 let frame = self.fibers[fiber_idx].frames.last().unwrap();
                                 let mut chunk = frame.chunk.borrow_mut();
-                                chunk.caches[ip_at_start] = Some(IcEntry::Global { index: global_idx });
+                                chunk.caches[ip_at_start] =
+                                    Some(IcEntry::Global { index: global_idx });
                             } else {
                                 flush_ip!();
-                                self.throw_error(fiber_idx, "Operand of increment must be a number")?;
-                                frame_changed = true; continue 'quantum;
+                                self.throw_error(
+                                    fiber_idx,
+                                    "Operand of increment must be a number",
+                                )?;
+                                frame_changed = true;
+                                continue 'quantum;
                             }
                         } else {
                             let name = self.interner.resolve(name_id).to_string();
                             flush_ip!();
                             self.throw_error(fiber_idx, &format!("Global {} not found", name))?;
-                            frame_changed = true; continue 'quantum;
+                            frame_changed = true;
+                            continue 'quantum;
                         }
                     }
                 }
@@ -3291,7 +3610,9 @@ impl VM {
                             ip -= offset as usize;
                             if let Some(end) = timeslice_end {
                                 safe_point_count = safe_point_count.wrapping_add(1);
-                                if safe_point_count & 1023 == 0 && Instant::now() >= end { break 'quantum; }
+                                if safe_point_count & 1023 == 0 && Instant::now() >= end {
+                                    break 'quantum;
+                                }
                             }
                         }
                     }
@@ -3321,22 +3642,36 @@ impl VM {
                 op::ADD_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 + b.as_number() as i32));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_int(
+                        a.as_number() as i32 + b.as_number() as i32,
+                    ));
                 }
                 op::ADD_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() + b.as_number()));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_number(a.as_number() + b.as_number()));
                 }
                 op::ADD => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    
-                    let a_num = if a.is_number() { Some(a.as_number()) } else { self.to_string(a).parse::<f64>().ok() };
-                    let b_num = if b.is_number() { Some(b.as_number()) } else { self.to_string(b).parse::<f64>().ok() };
+
+                    let a_num = if a.is_number() {
+                        Some(a.as_number())
+                    } else {
+                        self.to_string(a).parse::<f64>().ok()
+                    };
+                    let b_num = if b.is_number() {
+                        Some(b.as_number())
+                    } else {
+                        self.to_string(b).parse::<f64>().ok()
+                    };
 
                     if let (Some(na), Some(nb)) = (a_num, b_num) {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(na + nb));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(na + nb));
                     } else {
                         let a_s = self.to_box_string(a);
                         let b_s = self.to_box_string(b);
@@ -3348,73 +3683,107 @@ impl VM {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() - b.as_number()));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(a.as_number() - b.as_number()));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::SUB_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 - b.as_number() as i32));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_int(
+                        a.as_number() as i32 - b.as_number() as i32,
+                    ));
                 }
                 op::SUB_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() - b.as_number()));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_number(a.as_number() - b.as_number()));
                 }
                 op::MULTIPLY => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() * b.as_number()));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(a.as_number() * b.as_number()));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::MUL_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(a.as_number() as i32 * b.as_number() as i32));
+                    self.fibers[fiber_idx].stack.push(BxValue::new_int(
+                        a.as_number() as i32 * b.as_number() as i32,
+                    ));
                 }
                 op::MUL_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() * b.as_number()));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_number(a.as_number() * b.as_number()));
                 }
                 op::DIVIDE => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let b_n = b.as_number();
-                        if b_n == 0.0 { flush_ip!(); self.throw_error(fiber_idx, "Division by zero")?; frame_changed = true; continue 'quantum; }
-                        else { self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() / b_n)); }
+                        if b_n == 0.0 {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Division by zero")?;
+                            frame_changed = true;
+                            continue 'quantum;
+                        } else {
+                            self.fibers[fiber_idx]
+                                .stack
+                                .push(BxValue::new_number(a.as_number() / b_n));
+                        }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::DIV_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() / b.as_number()));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_number(a.as_number() / b.as_number()));
                 }
                 op::MODULO => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let b_n = b.as_number();
-                        if b_n == 0.0 { flush_ip!(); self.throw_error(fiber_idx, "Division by zero (modulo)")?; frame_changed = true; continue 'quantum; }
-                        else { self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number() % b_n)); }
+                        if b_n == 0.0 {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Division by zero (modulo)")?;
+                            frame_changed = true;
+                            continue 'quantum;
+                        } else {
+                            self.fibers[fiber_idx]
+                                .stack
+                                .push(BxValue::new_number(a.as_number() % b_n));
+                        }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers for modulo.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_OR => {
@@ -3422,11 +3791,17 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as i64) | (b.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise OR.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise OR.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_AND => {
@@ -3434,11 +3809,17 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as i64) & (b.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise AND.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise AND.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_XOR => {
@@ -3446,22 +3827,31 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as i64) ^ (b.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise XOR.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise XOR.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_NOT => {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() {
                         let result = !(a.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operand must be a number for bitwise NOT.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_SHL => {
@@ -3469,11 +3859,17 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as i64) << (b.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift left.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise shift left.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_SHR => {
@@ -3481,11 +3877,17 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as i64) >> (b.as_number() as i64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise shift right.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise shift right.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::BIT_USHR => {
@@ -3493,22 +3895,31 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
                         let result = (a.as_number() as u64) >> (b.as_number() as u64);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(result as f64));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(result as f64));
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Operands must be two numbers for bitwise unsigned shift right.")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Operands must be two numbers for bitwise unsigned shift right.",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::POW => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(a.as_number().powf(b.as_number())));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(a.as_number().powf(b.as_number())));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers for power.")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::XOR_OP => {
@@ -3516,14 +3927,18 @@ impl VM {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a_true = self.is_truthy(a);
                     let b_true = self.is_truthy(b);
-                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true != b_true));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(a_true != b_true));
                 }
                 op::EQV_OP => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a_true = self.is_truthy(a);
                     let b_true = self.is_truthy(b);
-                    self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_true == b_true));
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(a_true == b_true));
                 }
                 op::RANGE => {
                     let right_excl_val = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -3537,16 +3952,14 @@ impl VM {
                     if !start_val.is_number() || !end_val.is_number() {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Range bounds must be numbers")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
 
                     let start = start_val.as_number() as i64;
                     let end = end_val.as_number() as i64;
                     let id = self.heap.alloc(GcObject::Range(BxRange::from_bounds(
-                        start,
-                        end,
-                        left_excl,
-                        right_excl,
+                        start, end, left_excl, right_excl,
                     )));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
@@ -3590,13 +4003,13 @@ impl VM {
                     } else {
                         BxValue::new_null()
                     };
-                    
+
                     if fiber.frames.is_empty() {
                         return Ok(Some(result));
                     }
-                    
+
                     fiber.stack.truncate(frame.stack_base);
-                    
+
                     if frame.function.name.ends_with(".constructor") {
                         let instance = fiber.stack.pop().unwrap();
                         fiber.stack.push(instance);
@@ -3663,7 +4076,8 @@ impl VM {
                             if let Some(&global_idx) = self.global_names.get(&name_id) {
                                 let frame = self.fibers[fiber_idx].frames.last().unwrap();
                                 let mut chunk = frame.chunk.borrow_mut();
-                                chunk.caches[ip_at_start] = Some(IcEntry::Global { index: global_idx });
+                                chunk.caches[ip_at_start] =
+                                    Some(IcEntry::Global { index: global_idx });
                             }
                         }
                     }
@@ -3693,7 +4107,8 @@ impl VM {
                             if let Some(&global_idx) = self.global_names.get(&name_id) {
                                 let frame = self.fibers[fiber_idx].frames.last().unwrap();
                                 let mut chunk = frame.chunk.borrow_mut();
-                                chunk.caches[ip_at_start] = Some(IcEntry::Global { index: global_idx });
+                                chunk.caches[ip_at_start] =
+                                    Some(IcEntry::Global { index: global_idx });
                             }
                         }
                     }
@@ -3710,7 +4125,9 @@ impl VM {
                     let name = self.interner.resolve(name_id).to_string().to_lowercase();
                     let val = {
                         let mut found = None;
-                        if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
+                        if let Some(receiver) =
+                            self.fibers[fiber_idx].frames.last().unwrap().receiver
+                        {
                             if name == "this" {
                                 found = Some(receiver);
                             } else if let Some(id) = self.receiver_instance_gc_id(receiver) {
@@ -3719,9 +4136,9 @@ impl VM {
                                         let proxy = VariablesScopeProxy {
                                             variables: Rc::clone(&inst.variables),
                                         };
-                                        found = Some(BxValue::new_ptr(
-                                            self.heap.alloc(GcObject::NativeObject(Rc::new(RefCell::new(proxy))))
-                                        ));
+                                        found = Some(BxValue::new_ptr(self.heap.alloc(
+                                            GcObject::NativeObject(Rc::new(RefCell::new(proxy))),
+                                        )));
                                     }
                                 } else if let GcObject::Instance(inst) = self.heap.get(id) {
                                     found = inst.variables.borrow().get(&name).copied();
@@ -3734,10 +4151,11 @@ impl VM {
                                 variables: Rc::clone(&self.fibers[fiber_idx].variables),
                             };
                             found = Some(BxValue::new_ptr(
-                                self.heap.alloc(GcObject::NativeObject(Rc::new(RefCell::new(proxy))))
+                                self.heap
+                                    .alloc(GcObject::NativeObject(Rc::new(RefCell::new(proxy)))),
                             ));
                         }
-                        
+
                         if found.is_none() {
                             found = self.get_global(&name);
                         }
@@ -3748,8 +4166,12 @@ impl VM {
                         self.fibers[fiber_idx].stack.push(v);
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, &format!("Variable '{}' not found in class or global scope.", name))?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            &format!("Variable '{}' not found in class or global scope.", name),
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::SET_PRIVATE => {
@@ -3764,7 +4186,10 @@ impl VM {
                             }
                         }
                     } else {
-                        self.fibers[fiber_idx].variables.borrow_mut().insert(name, val);
+                        self.fibers[fiber_idx]
+                            .variables
+                            .borrow_mut()
+                            .insert(name, val);
                     }
                 }
 
@@ -3786,25 +4211,35 @@ impl VM {
                 op::INC => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if val.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() + 1.0));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(val.as_number() + 1.0));
                     } else if val.is_int() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() + 1));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_int(val.as_int() + 1));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::DEC => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if val.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_number(val.as_number() - 1.0));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number(val.as_number() - 1.0));
                     } else if val.is_int() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_int(val.as_int() - 1));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_int(val.as_int() - 1));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Decrement operand must be a number")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
 
@@ -3846,12 +4281,17 @@ impl VM {
                         let marker = self.fibers[fiber_idx].stack.pop().unwrap();
                         if !marker.is_bool() {
                             flush_ip!();
-                            self.throw_error(fiber_idx, "Internal error: struct spread marker must be boolean")?;
-                            frame_changed = true; continue 'quantum;
+                            self.throw_error(
+                                fiber_idx,
+                                "Internal error: struct spread marker must be boolean",
+                            )?;
+                            frame_changed = true;
+                            continue 'quantum;
                         }
                         if marker.as_bool() {
                             let spread_val = self.fibers[fiber_idx].stack.pop().unwrap();
-                            let mut spread_entries = self.flatten_spread_struct_entries(spread_val)?;
+                            let mut spread_entries =
+                                self.flatten_spread_struct_entries(spread_val)?;
                             spread_entries.reverse();
                             resolved.extend(spread_entries);
                         } else {
@@ -3868,7 +4308,10 @@ impl VM {
                         shape_id = self.shapes.transition(shape_id, key_id);
                         props.push(value);
                     }
-                    let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
+                    let id = self.heap.alloc(GcObject::Struct(BxStruct {
+                        shape_id,
+                        properties: props,
+                    }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
                 op::STRUCT => {
@@ -3891,7 +4334,10 @@ impl VM {
                         props.push(value);
                     }
 
-                    let id = self.heap.alloc(GcObject::Struct(BxStruct { shape_id, properties: props }));
+                    let id = self.heap.alloc(GcObject::Struct(BxStruct {
+                        shape_id,
+                        properties: props,
+                    }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
                 op::INDEX => {
@@ -3922,7 +4368,11 @@ impl VM {
                         match self.heap.get(id) {
                             GcObject::Array(arr) => {
                                 if index_val.is_number() || index_val.is_int() {
-                                    let idx = if index_val.is_int() { index_val.as_int() as usize } else { index_val.as_number() as usize };
+                                    let idx = if index_val.is_int() {
+                                        index_val.as_int() as usize
+                                    } else {
+                                        index_val.as_number() as usize
+                                    };
                                     if idx < 1 || idx > arr.len() {
                                         // Out-of-bounds reads return null (sparse array semantics)
                                         self.fibers[fiber_idx].stack.push(BxValue::new_null());
@@ -3932,24 +4382,39 @@ impl VM {
                                 } else {
                                     flush_ip!();
                                     self.throw_error(fiber_idx, "Array index must be a number")?;
-                                    frame_changed = true; continue 'quantum;
+                                    frame_changed = true;
+                                    continue 'quantum;
                                 }
                             }
                             GcObject::Struct(s) => {
                                 let key_str = self.to_string(index_val);
                                 let key_id = self.interner.intern(&key_str);
                                 if let Some(idx) = self.shapes.get_index(s.shape_id, key_id) {
-                                    self.fibers[fiber_idx].stack.push(s.properties[idx as usize]);
+                                    self.fibers[fiber_idx]
+                                        .stack
+                                        .push(s.properties[idx as usize]);
                                 } else {
                                     self.fibers[fiber_idx].stack.push(BxValue::new_null());
                                 }
                             }
-                            _ => { flush_ip!(); self.throw_error(fiber_idx, "Invalid access: base must be array or struct")?; frame_changed = true; continue 'quantum; }
+                            _ => {
+                                flush_ip!();
+                                self.throw_error(
+                                    fiber_idx,
+                                    "Invalid access: base must be array or struct",
+                                )?;
+                                frame_changed = true;
+                                continue 'quantum;
+                            }
                         }
                     } else {
                         flush_ip!();
-                        self.throw_error(fiber_idx, "Invalid access: base must be array or struct")?;
-                        frame_changed = true; continue 'quantum;
+                        self.throw_error(
+                            fiber_idx,
+                            "Invalid access: base must be array or struct",
+                        )?;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::SET_INDEX => {
@@ -3983,7 +4448,10 @@ impl VM {
                                     }
                                     Err(e) => {
                                         flush_ip!();
-                                        self.throw_error(fiber_idx, &format!("JS set error: {:?}", e))?;
+                                        self.throw_error(
+                                            fiber_idx,
+                                            &format!("JS set error: {:?}", e),
+                                        )?;
                                         frame_changed = true;
                                         continue 'quantum;
                                     }
@@ -3996,11 +4464,19 @@ impl VM {
                         match self.heap.get_mut(id) {
                             GcObject::Array(arr) => {
                                 if index_val.is_number() || index_val.is_int() {
-                                    let idx = if index_val.is_int() { index_val.as_int() as usize } else { index_val.as_number() as usize };
+                                    let idx = if index_val.is_int() {
+                                        index_val.as_int() as usize
+                                    } else {
+                                        index_val.as_number() as usize
+                                    };
                                     if idx < 1 {
                                         flush_ip!();
-                                        self.throw_error(fiber_idx, &format!("Array index out of bounds: {}", idx))?;
-                                        frame_changed = true; continue 'quantum;
+                                        self.throw_error(
+                                            fiber_idx,
+                                            &format!("Array index out of bounds: {}", idx),
+                                        )?;
+                                        frame_changed = true;
+                                        continue 'quantum;
                                     } else if idx > arr.len() {
                                         // Auto-grow: fill gaps with null
                                         arr.resize(idx, BxValue::new_null());
@@ -4013,7 +4489,8 @@ impl VM {
                                 } else {
                                     flush_ip!();
                                     self.throw_error(fiber_idx, "Array index must be a number")?;
-                                    frame_changed = true; continue 'quantum;
+                                    frame_changed = true;
+                                    continue 'quantum;
                                 }
                             }
                             GcObject::Struct(s) => {
@@ -4036,12 +4513,18 @@ impl VM {
                                 }
                                 self.fibers[fiber_idx].stack.push(val);
                             }
-                            _ => { flush_ip!(); self.throw_error(fiber_idx, "Invalid indexed assignment")?; frame_changed = true; continue 'quantum; }
+                            _ => {
+                                flush_ip!();
+                                self.throw_error(fiber_idx, "Invalid indexed assignment")?;
+                                frame_changed = true;
+                                continue 'quantum;
+                            }
                         }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Invalid indexed assignment")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::MEMBER => {
@@ -4066,9 +4549,17 @@ impl VM {
                             continue 'quantum;
                         }
 
-                        #[cfg(all(target_arch = "wasm32", feature = "js-host-abi", not(feature = "js")))]
+                        #[cfg(all(
+                            target_arch = "wasm32",
+                            feature = "js-host-abi",
+                            not(feature = "js")
+                        ))]
                         {
-                            let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(id) { Some(*h) } else { None };
+                            let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(id) {
+                                Some(*h)
+                            } else {
+                                None
+                            };
                             if let Some(handle) = maybe_handle {
                                 let name = self.interner.resolve(name_id);
                                 let key_bytes = name.as_bytes();
@@ -4079,12 +4570,25 @@ impl VM {
                                 let mut out_obj: u32 = 0;
                                 let rtype = unsafe {
                                     bx_js_get_prop(
-                                        handle, key_bytes.as_ptr(), key_bytes.len(),
-                                        str_buf.as_mut_ptr(), 4096, &mut out_str_len,
-                                        &mut out_num, &mut out_bool, &mut out_obj,
+                                        handle,
+                                        key_bytes.as_ptr(),
+                                        key_bytes.len(),
+                                        str_buf.as_mut_ptr(),
+                                        4096,
+                                        &mut out_str_len,
+                                        &mut out_num,
+                                        &mut out_bool,
+                                        &mut out_obj,
                                     )
                                 };
-                                let bx_val = self.js_result_to_bx(rtype, &str_buf, out_str_len, out_num, out_bool, out_obj);
+                                let bx_val = self.js_result_to_bx(
+                                    rtype,
+                                    &str_buf,
+                                    out_str_len,
+                                    out_num,
+                                    out_bool,
+                                    out_obj,
+                                );
                                 self.fibers[fiber_idx].stack.push(bx_val);
                                 flush_ip!();
                                 continue 'quantum;
@@ -4104,7 +4608,10 @@ impl VM {
                                 };
 
                                 match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
                                         if cached_shape == shape_id as usize {
                                             let val = unsafe { &*properties_ptr }[index as usize];
                                             self.fibers[fiber_idx].stack.push(val);
@@ -4132,20 +4639,36 @@ impl VM {
                                         let mut chunk = frame.chunk.borrow_mut();
                                         match chunk.caches[ip_at_start] {
                                             None => {
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Monomorphic {
+                                                        shape_id: shape_id as usize,
+                                                        index: idx as usize,
+                                                    });
                                             }
-                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                            Some(IcEntry::Monomorphic {
+                                                shape_id: s,
+                                                index: i,
+                                            }) => {
                                                 let mut entries = [(0, 0); 4];
                                                 entries[0] = (s, i);
                                                 entries[1] = (shape_id as usize, idx as usize);
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Polymorphic {
+                                                        entries,
+                                                        count: 2,
+                                                    });
                                             }
-                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                            Some(IcEntry::Polymorphic {
+                                                ref mut entries,
+                                                ref mut count,
+                                            }) => {
                                                 if *count < 4 {
-                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    entries[*count] =
+                                                        (shape_id as usize, idx as usize);
                                                     *count += 1;
                                                 } else {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Megamorphic);
                                                 }
                                             }
                                             _ => {}
@@ -4170,7 +4693,10 @@ impl VM {
                                 };
 
                                 match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
                                         if cached_shape == shape_id as usize {
                                             let val = unsafe { &*properties_ptr }[index as usize];
                                             self.fibers[fiber_idx].stack.push(val);
@@ -4198,20 +4724,36 @@ impl VM {
                                         let mut chunk = frame.chunk.borrow_mut();
                                         match chunk.caches[ip_at_start] {
                                             None => {
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Monomorphic {
+                                                        shape_id: shape_id as usize,
+                                                        index: idx as usize,
+                                                    });
                                             }
-                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                            Some(IcEntry::Monomorphic {
+                                                shape_id: s,
+                                                index: i,
+                                            }) => {
                                                 let mut entries = [(0, 0); 4];
                                                 entries[0] = (s, i);
                                                 entries[1] = (shape_id as usize, idx as usize);
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Polymorphic {
+                                                        entries,
+                                                        count: 2,
+                                                    });
                                             }
-                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                            Some(IcEntry::Polymorphic {
+                                                ref mut entries,
+                                                ref mut count,
+                                            }) => {
                                                 if *count < 4 {
-                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    entries[*count] =
+                                                        (shape_id as usize, idx as usize);
                                                     *count += 1;
                                                 } else {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Megamorphic);
                                                 }
                                             }
                                             _ => {}
@@ -4221,8 +4763,11 @@ impl VM {
                                     self.fibers[fiber_idx].stack.push(val);
                                 } else {
                                     let name = self.interner.resolve(name_id).to_string();
-                                    if let Some(method) = self.resolve_method(Rc::clone(&class), &name) {
-                                        let m_id = self.heap.alloc(GcObject::CompiledFunction(method));
+                                    if let Some(method) =
+                                        self.resolve_method(Rc::clone(&class), &name)
+                                    {
+                                        let m_id =
+                                            self.heap.alloc(GcObject::CompiledFunction(method));
                                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(m_id));
                                     } else {
                                         self.fibers[fiber_idx].stack.push(BxValue::new_null());
@@ -4230,16 +4775,23 @@ impl VM {
                                 }
                             }
                             GcObject::NativeObject(obj) => {
-                                let name = self.interner.resolve(name_id).to_string().to_lowercase();
+                                let name =
+                                    self.interner.resolve(name_id).to_string().to_lowercase();
                                 let val = obj.borrow().get_property(&name);
                                 self.fibers[fiber_idx].stack.push(val);
                             }
-                            _ => { flush_ip!(); self.throw_error(fiber_idx, "Member access only supported on structs, instances, JS objects, and native objects")?; frame_changed = true; continue 'quantum; }
+                            _ => {
+                                flush_ip!();
+                                self.throw_error(fiber_idx, "Member access only supported on structs, instances, JS objects, and native objects")?;
+                                frame_changed = true;
+                                continue 'quantum;
+                            }
                         }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Member access only supported on structs, instances, JS objects, and native objects")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::SET_MEMBER => {
@@ -4261,36 +4813,104 @@ impl VM {
                             continue 'quantum;
                         }
 
-                        #[cfg(all(target_arch = "wasm32", feature = "js-host-abi", not(feature = "js")))]
+                        #[cfg(all(
+                            target_arch = "wasm32",
+                            feature = "js-host-abi",
+                            not(feature = "js")
+                        ))]
                         {
-                            let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(id) { Some(*h) } else { None };
+                            let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(id) {
+                                Some(*h)
+                            } else {
+                                None
+                            };
                             if let Some(handle) = maybe_handle {
                                 let name = self.interner.resolve(name_id);
                                 let key_bytes = name.as_bytes();
                                 if val.is_null() {
-                                    unsafe { bx_js_set_prop_null(handle, key_bytes.as_ptr(), key_bytes.len()); }
+                                    unsafe {
+                                        bx_js_set_prop_null(
+                                            handle,
+                                            key_bytes.as_ptr(),
+                                            key_bytes.len(),
+                                        );
+                                    }
                                 } else if val.is_bool() {
-                                    unsafe { bx_js_set_prop_bool(handle, key_bytes.as_ptr(), key_bytes.len(), if val.as_bool() { 1 } else { 0 }); }
+                                    unsafe {
+                                        bx_js_set_prop_bool(
+                                            handle,
+                                            key_bytes.as_ptr(),
+                                            key_bytes.len(),
+                                            if val.as_bool() { 1 } else { 0 },
+                                        );
+                                    }
                                 } else if val.is_number() {
-                                    unsafe { bx_js_set_prop_num(handle, key_bytes.as_ptr(), key_bytes.len(), val.as_number()); }
+                                    unsafe {
+                                        bx_js_set_prop_num(
+                                            handle,
+                                            key_bytes.as_ptr(),
+                                            key_bytes.len(),
+                                            val.as_number(),
+                                        );
+                                    }
                                 } else if val.is_int() {
-                                    unsafe { bx_js_set_prop_num(handle, key_bytes.as_ptr(), key_bytes.len(), val.as_int() as f64); }
+                                    unsafe {
+                                        bx_js_set_prop_num(
+                                            handle,
+                                            key_bytes.as_ptr(),
+                                            key_bytes.len(),
+                                            val.as_int() as f64,
+                                        );
+                                    }
                                 } else if let Some(val_gc_id) = val.as_gc_id() {
-                                    let maybe_str_bytes: Option<Vec<u8>> = if let GcObject::String(s) = self.heap.get(val_gc_id) {
-                                        Some(s.to_string().into_bytes())
-                                    } else { None };
-                                    let maybe_val_handle: Option<u32> = if let GcObject::JsHandle(h) = self.heap.get(val_gc_id) {
-                                        Some(*h)
-                                    } else { None };
+                                    let maybe_str_bytes: Option<Vec<u8>> =
+                                        if let GcObject::String(s) = self.heap.get(val_gc_id) {
+                                            Some(s.to_string().into_bytes())
+                                        } else {
+                                            None
+                                        };
+                                    let maybe_val_handle: Option<u32> =
+                                        if let GcObject::JsHandle(h) = self.heap.get(val_gc_id) {
+                                            Some(*h)
+                                        } else {
+                                            None
+                                        };
                                     if let Some(str_bytes) = maybe_str_bytes {
-                                        unsafe { bx_js_set_prop_str(handle, key_bytes.as_ptr(), key_bytes.len(), str_bytes.as_ptr(), str_bytes.len()); }
+                                        unsafe {
+                                            bx_js_set_prop_str(
+                                                handle,
+                                                key_bytes.as_ptr(),
+                                                key_bytes.len(),
+                                                str_bytes.as_ptr(),
+                                                str_bytes.len(),
+                                            );
+                                        }
                                     } else if let Some(val_handle) = maybe_val_handle {
-                                        unsafe { bx_js_set_prop_obj(handle, key_bytes.as_ptr(), key_bytes.len(), val_handle); }
+                                        unsafe {
+                                            bx_js_set_prop_obj(
+                                                handle,
+                                                key_bytes.as_ptr(),
+                                                key_bytes.len(),
+                                                val_handle,
+                                            );
+                                        }
                                     } else {
-                                        unsafe { bx_js_set_prop_null(handle, key_bytes.as_ptr(), key_bytes.len()); }
+                                        unsafe {
+                                            bx_js_set_prop_null(
+                                                handle,
+                                                key_bytes.as_ptr(),
+                                                key_bytes.len(),
+                                            );
+                                        }
                                     }
                                 } else {
-                                    unsafe { bx_js_set_prop_null(handle, key_bytes.as_ptr(), key_bytes.len()); }
+                                    unsafe {
+                                        bx_js_set_prop_null(
+                                            handle,
+                                            key_bytes.as_ptr(),
+                                            key_bytes.len(),
+                                        );
+                                    }
                                 }
                                 self.fibers[fiber_idx].stack.push(val);
                                 flush_ip!();
@@ -4309,7 +4929,10 @@ impl VM {
                                 };
 
                                 match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
                                         if cached_shape == shape_id as usize {
                                             s.properties[index as usize] = val;
                                             self.fibers[fiber_idx].stack.push(val);
@@ -4337,20 +4960,36 @@ impl VM {
                                         let mut chunk = frame.chunk.borrow_mut();
                                         match chunk.caches[ip_at_start] {
                                             None => {
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Monomorphic {
+                                                        shape_id: shape_id as usize,
+                                                        index: idx as usize,
+                                                    });
                                             }
-                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                            Some(IcEntry::Monomorphic {
+                                                shape_id: s,
+                                                index: i,
+                                            }) => {
                                                 let mut entries = [(0, 0); 4];
                                                 entries[0] = (s, i);
                                                 entries[1] = (shape_id as usize, idx as usize);
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Polymorphic {
+                                                        entries,
+                                                        count: 2,
+                                                    });
                                             }
-                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                            Some(IcEntry::Polymorphic {
+                                                ref mut entries,
+                                                ref mut count,
+                                            }) => {
                                                 if *count < 4 {
-                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    entries[*count] =
+                                                        (shape_id as usize, idx as usize);
                                                     *count += 1;
                                                 } else {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Megamorphic);
                                                 }
                                             }
                                             _ => {}
@@ -4373,7 +5012,10 @@ impl VM {
                                 };
 
                                 match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
                                         if cached_shape == shape_id as usize {
                                             inst.properties[index as usize] = val;
                                             self.fibers[fiber_idx].stack.push(val);
@@ -4401,20 +5043,36 @@ impl VM {
                                         let mut chunk = frame.chunk.borrow_mut();
                                         match chunk.caches[ip_at_start] {
                                             None => {
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Monomorphic {
+                                                        shape_id: shape_id as usize,
+                                                        index: idx as usize,
+                                                    });
                                             }
-                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                            Some(IcEntry::Monomorphic {
+                                                shape_id: s,
+                                                index: i,
+                                            }) => {
                                                 let mut entries = [(0, 0); 4];
                                                 entries[0] = (s, i);
                                                 entries[1] = (shape_id as usize, idx as usize);
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Polymorphic {
+                                                        entries,
+                                                        count: 2,
+                                                    });
                                             }
-                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                            Some(IcEntry::Polymorphic {
+                                                ref mut entries,
+                                                ref mut count,
+                                            }) => {
                                                 if *count < 4 {
-                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    entries[*count] =
+                                                        (shape_id as usize, idx as usize);
                                                     *count += 1;
                                                 } else {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Megamorphic);
                                                 }
                                             }
                                             _ => {}
@@ -4428,16 +5086,23 @@ impl VM {
                                 self.fibers[fiber_idx].stack.push(val);
                             }
                             GcObject::NativeObject(obj) => {
-                                let name = self.interner.resolve(name_id).to_string().to_lowercase();
+                                let name =
+                                    self.interner.resolve(name_id).to_string().to_lowercase();
                                 obj.borrow_mut().set_property(&name, val);
                                 self.fibers[fiber_idx].stack.push(val);
                             }
-                            _ => { flush_ip!(); self.throw_error(fiber_idx, "Member assignment only supported on structs, instances, JS objects, and native objects")?; frame_changed = true; continue 'quantum; }
+                            _ => {
+                                flush_ip!();
+                                self.throw_error(fiber_idx, "Member assignment only supported on structs, instances, JS objects, and native objects")?;
+                                frame_changed = true;
+                                continue 'quantum;
+                            }
                         }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Member assignment only supported on structs, instances, JS objects, and native objects")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::INC_MEMBER => {
@@ -4457,8 +5122,15 @@ impl VM {
                                 };
 
                                 let index = match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
-                                        if cached_shape == shape_id as usize { Some(index as usize) } else { None }
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
+                                        if cached_shape == shape_id as usize {
+                                            Some(index as usize)
+                                        } else {
+                                            None
+                                        }
                                     }
                                     Some(IcEntry::Polymorphic { entries, count }) => {
                                         let mut found = None;
@@ -4473,33 +5145,52 @@ impl VM {
                                     _ => None,
                                 };
 
-                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, name_id).map(|i| i as usize)) {
+                                if let Some(idx) = index.or_else(|| {
+                                    self.shapes.get_index(shape_id, name_id).map(|i| i as usize)
+                                }) {
                                     let old_val = s.properties[idx];
                                     if old_val.is_number() {
-                                        let new_val = BxValue::new_number(old_val.as_number() + 1.0);
+                                        let new_val =
+                                            BxValue::new_number(old_val.as_number() + 1.0);
                                         s.properties[idx] = new_val;
                                         self.fibers[fiber_idx].stack.push(new_val);
-                                        
+
                                         if index.is_none() {
                                             let fiber = &self.fibers[fiber_idx];
                                             let frame = fiber.frames.last().unwrap();
                                             let mut chunk = frame.chunk.borrow_mut();
                                             match chunk.caches[ip_at_start] {
                                                 None => {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Monomorphic {
+                                                            shape_id: shape_id as usize,
+                                                            index: idx as usize,
+                                                        });
                                                 }
-                                                Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                Some(IcEntry::Monomorphic {
+                                                    shape_id: s,
+                                                    index: i,
+                                                }) => {
                                                     let mut entries = [(0, 0); 4];
                                                     entries[0] = (s, i);
                                                     entries[1] = (shape_id as usize, idx as usize);
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Polymorphic {
+                                                            entries,
+                                                            count: 2,
+                                                        });
                                                 }
-                                                Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                Some(IcEntry::Polymorphic {
+                                                    ref mut entries,
+                                                    ref mut count,
+                                                }) => {
                                                     if *count < 4 {
-                                                        entries[*count] = (shape_id as usize, idx as usize);
+                                                        entries[*count] =
+                                                            (shape_id as usize, idx as usize);
                                                         *count += 1;
                                                     } else {
-                                                        chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                        chunk.caches[ip_at_start] =
+                                                            Some(IcEntry::Megamorphic);
                                                     }
                                                 }
                                                 _ => {}
@@ -4507,14 +5198,22 @@ impl VM {
                                         }
                                     } else {
                                         flush_ip!();
-                                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                                        frame_changed = true; continue 'quantum;
+                                        self.throw_error(
+                                            fiber_idx,
+                                            "Increment operand must be a number",
+                                        )?;
+                                        frame_changed = true;
+                                        continue 'quantum;
                                     }
                                 } else {
                                     let name = self.interner.resolve(name_id).to_string();
                                     flush_ip!();
-                                    self.throw_error(fiber_idx, &format!("Member {} not found", name))?;
-                                    frame_changed = true; continue 'quantum;
+                                    self.throw_error(
+                                        fiber_idx,
+                                        &format!("Member {} not found", name),
+                                    )?;
+                                    frame_changed = true;
+                                    continue 'quantum;
                                 }
                             }
                             GcObject::Instance(inst) => {
@@ -4527,8 +5226,15 @@ impl VM {
                                 };
 
                                 let index = match ic {
-                                    Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
-                                        if cached_shape == shape_id as usize { Some(index as usize) } else { None }
+                                    Some(IcEntry::Monomorphic {
+                                        shape_id: cached_shape,
+                                        index,
+                                    }) => {
+                                        if cached_shape == shape_id as usize {
+                                            Some(index as usize)
+                                        } else {
+                                            None
+                                        }
                                     }
                                     Some(IcEntry::Polymorphic { entries, count }) => {
                                         let mut found = None;
@@ -4543,10 +5249,13 @@ impl VM {
                                     _ => None,
                                 };
 
-                                if let Some(idx) = index.or_else(|| self.shapes.get_index(shape_id, name_id).map(|i| i as usize)) {
+                                if let Some(idx) = index.or_else(|| {
+                                    self.shapes.get_index(shape_id, name_id).map(|i| i as usize)
+                                }) {
                                     let old_val = inst.properties[idx];
                                     if old_val.is_number() {
-                                        let new_val = BxValue::new_number(old_val.as_number() + 1.0);
+                                        let new_val =
+                                            BxValue::new_number(old_val.as_number() + 1.0);
                                         inst.properties[idx] = new_val;
                                         self.fibers[fiber_idx].stack.push(new_val);
 
@@ -4556,20 +5265,36 @@ impl VM {
                                             let mut chunk = frame.chunk.borrow_mut();
                                             match chunk.caches[ip_at_start] {
                                                 None => {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Monomorphic {
+                                                            shape_id: shape_id as usize,
+                                                            index: idx as usize,
+                                                        });
                                                 }
-                                                Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                                Some(IcEntry::Monomorphic {
+                                                    shape_id: s,
+                                                    index: i,
+                                                }) => {
                                                     let mut entries = [(0, 0); 4];
                                                     entries[0] = (s, i);
                                                     entries[1] = (shape_id as usize, idx as usize);
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Polymorphic {
+                                                            entries,
+                                                            count: 2,
+                                                        });
                                                 }
-                                                Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                                Some(IcEntry::Polymorphic {
+                                                    ref mut entries,
+                                                    ref mut count,
+                                                }) => {
                                                     if *count < 4 {
-                                                        entries[*count] = (shape_id as usize, idx as usize);
+                                                        entries[*count] =
+                                                            (shape_id as usize, idx as usize);
                                                         *count += 1;
                                                     } else {
-                                                        chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                        chunk.caches[ip_at_start] =
+                                                            Some(IcEntry::Megamorphic);
                                                     }
                                                 }
                                                 _ => {}
@@ -4577,26 +5302,36 @@ impl VM {
                                         }
                                     } else {
                                         flush_ip!();
-                                        self.throw_error(fiber_idx, "Increment operand must be a number")?;
-                                        frame_changed = true; continue 'quantum;
+                                        self.throw_error(
+                                            fiber_idx,
+                                            "Increment operand must be a number",
+                                        )?;
+                                        frame_changed = true;
+                                        continue 'quantum;
                                     }
                                 } else {
                                     let name = self.interner.resolve(name_id).to_string();
                                     flush_ip!();
-                                    self.throw_error(fiber_idx, &format!("Member {} not found", name))?;
-                                    frame_changed = true; continue 'quantum;
+                                    self.throw_error(
+                                        fiber_idx,
+                                        &format!("Member {} not found", name),
+                                    )?;
+                                    frame_changed = true;
+                                    continue 'quantum;
                                 }
                             }
-                            _ => { 
+                            _ => {
                                 flush_ip!();
                                 self.throw_error(fiber_idx, "Fused increment only supported on structs and instances for now")?;
-                                frame_changed = true; continue 'quantum; 
+                                frame_changed = true;
+                                continue 'quantum;
                             }
                         }
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Member access only supported on objects")?;
-                        frame_changed = true; continue 'quantum;
+                        frame_changed = true;
+                        continue 'quantum;
                     }
                 }
                 op::STRING_CONCAT => {
@@ -4613,7 +5348,9 @@ impl VM {
                     let arg_count = op0;
                     flush_ip!();
                     self.execute_call(fiber_idx, arg_count as usize, None)?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4624,8 +5361,12 @@ impl VM {
                         let marker = self.fibers[fiber_idx].stack.pop().unwrap();
                         if !marker.is_bool() {
                             flush_ip!();
-                            self.throw_error(fiber_idx, "Internal error: call spread marker must be boolean")?;
-                            frame_changed = true; continue 'quantum;
+                            self.throw_error(
+                                fiber_idx,
+                                "Internal error: call spread marker must be boolean",
+                            )?;
+                            frame_changed = true;
+                            continue 'quantum;
                         }
                         let value = self.fibers[fiber_idx].stack.pop().unwrap();
                         if marker.as_bool() {
@@ -4635,7 +5376,8 @@ impl VM {
                         }
                     }
                     flattened_chunks.reverse();
-                    let flattened_len: usize = flattened_chunks.iter().map(|chunk| chunk.len()).sum();
+                    let flattened_len: usize =
+                        flattened_chunks.iter().map(|chunk| chunk.len()).sum();
                     for chunk in flattened_chunks {
                         for value in chunk {
                             self.fibers[fiber_idx].stack.push(value);
@@ -4643,7 +5385,9 @@ impl VM {
                     }
                     flush_ip!();
                     self.execute_call(fiber_idx, flattened_len, None)?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    }
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4655,7 +5399,9 @@ impl VM {
                     }
                     flush_ip!();
                     self.execute_call(fiber_idx, names.len(), Some(names))?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    }
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4674,7 +5420,9 @@ impl VM {
                     };
                     flush_ip!();
                     self.execute_call(fiber_idx, total_count as usize, Some(names))?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4684,13 +5432,16 @@ impl VM {
                     let _unused = next_word!();
                     let name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string();
-                    let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, total_count)?;
+                    let (args, names) =
+                        self.flatten_encoded_named_spread_args(fiber_idx, total_count)?;
                     for value in args {
                         self.fibers[fiber_idx].stack.push(value);
                     }
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, names.len(), Some(names), ip_at_start)?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); }
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    }
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4699,13 +5450,24 @@ impl VM {
                     let arg_count = next_word!();
                     let name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string();
-                    #[cfg(all(target_arch = "wasm32", feature = "js-host-abi", not(feature = "js")))]
+                    #[cfg(all(
+                        target_arch = "wasm32",
+                        feature = "js-host-abi",
+                        not(feature = "js")
+                    ))]
                     {
-                        let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
+                        let receiver_idx =
+                            self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
                         let receiver_val = self.fibers[fiber_idx].stack[receiver_idx];
                         let maybe_handle = if let Some(id) = receiver_val.as_gc_id() {
-                            if let GcObject::JsHandle(h) = self.heap.get(id) { Some(*h) } else { None }
-                        } else { None };
+                            if let GcObject::JsHandle(h) = self.heap.get(id) {
+                                Some(*h)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
                         if let Some(handle) = maybe_handle {
                             let method_bytes = name.as_bytes();
                             let mut args = Vec::with_capacity(arg_count as usize);
@@ -4720,14 +5482,30 @@ impl VM {
                             let mut out_obj: u32 = 0;
                             let rtype = unsafe {
                                 bx_js_call_method(
-                                    handle, method_bytes.as_ptr(), method_bytes.len(),
-                                    args_json.as_ptr(), args_json.len(),
-                                    str_buf.as_mut_ptr(), 4096, &mut out_str_len,
-                                    &mut out_num, &mut out_bool, &mut out_obj,
+                                    handle,
+                                    method_bytes.as_ptr(),
+                                    method_bytes.len(),
+                                    args_json.as_ptr(),
+                                    args_json.len(),
+                                    str_buf.as_mut_ptr(),
+                                    4096,
+                                    &mut out_str_len,
+                                    &mut out_num,
+                                    &mut out_bool,
+                                    &mut out_obj,
                                 )
                             };
-                            for _ in 0..(arg_count as usize + 1) { self.fibers[fiber_idx].stack.pop(); }
-                            let bx_val = self.js_result_to_bx(rtype, &str_buf, out_str_len, out_num, out_bool, out_obj);
+                            for _ in 0..(arg_count as usize + 1) {
+                                self.fibers[fiber_idx].stack.pop();
+                            }
+                            let bx_val = self.js_result_to_bx(
+                                rtype,
+                                &str_buf,
+                                out_str_len,
+                                out_num,
+                                out_bool,
+                                out_obj,
+                            );
                             self.fibers[fiber_idx].stack.push(bx_val);
                             flush_ip!();
                             frame_changed = true;
@@ -4736,7 +5514,9 @@ impl VM {
                     }
                     flush_ip!();
                     self.execute_invoke(fiber_idx, name, arg_count as usize, None, ip_at_start)?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4757,8 +5537,16 @@ impl VM {
                         _ => bail!("Internal VM error: names constant is not a StringArray"),
                     };
                     flush_ip!();
-                    self.execute_invoke(fiber_idx, name, total_count as usize, Some(names), ip_at_start)?;
-                    if timeslice_end.map_or(false, |end| Instant::now() >= end) { return Ok(None); } // ip already flushed
+                    self.execute_invoke(
+                        fiber_idx,
+                        name,
+                        total_count as usize,
+                        Some(names),
+                        ip_at_start,
+                    )?;
+                    if timeslice_end.map_or(false, |end| Instant::now() >= end) {
+                        return Ok(None);
+                    } // ip already flushed
                     frame_changed = true;
                     continue 'quantum;
                 }
@@ -4769,18 +5557,20 @@ impl VM {
                     if let Some(id) = class_val.as_gc_id() {
                         let class = if let GcObject::Class(c) = self.heap.get(id) {
                             Some(Rc::clone(c))
-                        } else { None };
+                        } else {
+                            None
+                        };
 
                         if let Some(class) = class {
                             let variables_scope = Rc::new(RefCell::new(HashMap::new()));
-                            
+
                             let inst_id = self.heap.alloc(GcObject::Instance(BxInstance {
                                 class: Rc::clone(&class),
                                 shape_id: self.shapes.get_root(),
                                 properties: Vec::new(),
                                 variables: variables_scope.clone(),
                             }));
-                            
+
                             let instance_val = BxValue::new_ptr(inst_id);
                             self.fibers[fiber_idx].stack[class_idx] = instance_val;
 
@@ -4857,52 +5647,84 @@ impl VM {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() < b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt < b_dt));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a.as_number() < b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) =
+                        (self.datetime_value(a), self.datetime_value(b))
+                    {
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a_dt < b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(sa < sb));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(sa < sb));
                     }
                 }
                 op::LESS_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() <= b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt <= b_dt));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a.as_number() <= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) =
+                        (self.datetime_value(a), self.datetime_value(b))
+                    {
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a_dt <= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(sa <= sb));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(sa <= sb));
                     }
                 }
                 op::GREATER => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() > b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt > b_dt));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a.as_number() > b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) =
+                        (self.datetime_value(a), self.datetime_value(b))
+                    {
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a_dt > b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(sa > sb));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(sa > sb));
                     }
                 }
                 op::GREATER_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
                     if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a.as_number() >= b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(a_dt >= b_dt));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a.as_number() >= b.as_number()));
+                    } else if let (Some(a_dt), Some(b_dt)) =
+                        (self.datetime_value(a), self.datetime_value(b))
+                    {
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(a_dt >= b_dt));
                     } else {
                         let sa = self.to_string_internal(a);
                         let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx].stack.push(BxValue::new_bool(sa >= sb));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_bool(sa >= sb));
                     }
                 }
                 op::NOT => {
@@ -4921,13 +5743,17 @@ impl VM {
                     let collection_idx = stack_base + collection_slot as usize;
                     let cursor_idx = stack_base + cursor_slot as usize;
                     let collection = self.fibers[fiber_idx].stack[collection_idx];
-                    
+
                     let (is_done, next_val, next_idx) = {
                         let cursor_val = if self.fibers[fiber_idx].stack[cursor_idx].is_number() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_number() as usize
                         } else if self.fibers[fiber_idx].stack[cursor_idx].is_int() {
                             self.fibers[fiber_idx].stack[cursor_idx].as_int() as usize
-                        } else if matches!(self.heap.get_opt(collection.as_gc_id().unwrap_or(usize::MAX)), Some(GcObject::Range(_))) {
+                        } else if matches!(
+                            self.heap
+                                .get_opt(collection.as_gc_id().unwrap_or(usize::MAX)),
+                            Some(GcObject::Range(_))
+                        ) {
                             0
                         } else {
                             bail!(
@@ -4941,37 +5767,46 @@ impl VM {
 
                         if let Some(id) = collection.as_gc_id() {
                             match self.heap.get(id) {
-                            GcObject::Array(arr) => {
-                                if cursor_val < arr.len() {
-                                    (false, Some(arr[cursor_val]), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
-                                } else {
-                                    (true, None, None)
+                                GcObject::Array(arr) => {
+                                    if cursor_val < arr.len() {
+                                        (
+                                            false,
+                                            Some(arr[cursor_val]),
+                                            Some(BxValue::new_number(cursor_val as f64 + 1.0)),
+                                        )
+                                    } else {
+                                        (true, None, None)
+                                    }
                                 }
-                            }
-                            GcObject::Range(range) => {
-                                let (start, end) = range.iter_bounds();
-                                let current = if start <= end {
-                                    start + cursor_val as i64
-                                } else {
-                                    start - cursor_val as i64
-                                };
-                                let done = if start <= end {
-                                    current > end
-                                } else {
-                                    current < end
-                                };
-                                if done {
-                                    (true, None, None)
-                                } else {
-                                    (false, Some(BxValue::new_number(current as f64)), Some(BxValue::new_number(cursor_val as f64 + 1.0)))
+                                GcObject::Range(range) => {
+                                    let (start, end) = range.iter_bounds();
+                                    let current = if start <= end {
+                                        start + cursor_val as i64
+                                    } else {
+                                        start - cursor_val as i64
+                                    };
+                                    let done = if start <= end {
+                                        current > end
+                                    } else {
+                                        current < end
+                                    };
+                                    if done {
+                                        (true, None, None)
+                                    } else {
+                                        (
+                                            false,
+                                            Some(BxValue::new_number(current as f64)),
+                                            Some(BxValue::new_number(cursor_val as f64 + 1.0)),
+                                        )
+                                    }
                                 }
-                            }
-                            GcObject::Struct(s) => {
-                                let keys = {
-                                    let mut k = Vec::new();
-                                    let shape = &self.shapes.shapes[s.shape_id as usize];
+                                GcObject::Struct(s) => {
+                                    let keys = {
+                                        let mut k = Vec::new();
+                                        let shape = &self.shapes.shapes[s.shape_id as usize];
                                         for &intern_id in shape.fields.keys() {
-                                            let resolved = self.interner.resolve(intern_id).to_string();
+                                            let resolved =
+                                                self.interner.resolve(intern_id).to_string();
                                             k.push((intern_id, resolved));
                                         }
                                         k.sort_by(|a, b| a.1.cmp(&b.1));
@@ -4979,21 +5814,30 @@ impl VM {
                                     };
                                     if cursor_val < keys.len() {
                                         let (field_id, key_str) = &keys[cursor_val];
-                                        let idx = self.shapes.get_index(s.shape_id, *field_id).unwrap();
+                                        let idx =
+                                            self.shapes.get_index(s.shape_id, *field_id).unwrap();
                                         let val = s.properties[idx as usize];
-                                        let key_gc_id = self.heap.alloc(GcObject::String(BoxString::new(key_str)));
+                                        let key_gc_id = self
+                                            .heap
+                                            .alloc(GcObject::String(BoxString::new(key_str)));
                                         (false, Some(BxValue::new_ptr(key_gc_id)), Some(val))
                                     } else {
                                         (true, None, None)
                                     }
-                }
-                _ => {
-                                    self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
+                                }
+                                _ => {
+                                    self.throw_error(
+                                        fiber_idx,
+                                        "Iteration only supported for arrays and structs",
+                                    )?;
                                     (true, None, None)
                                 }
                             }
                         } else {
-                            self.throw_error(fiber_idx, "Iteration only supported for arrays and structs")?;
+                            self.throw_error(
+                                fiber_idx,
+                                "Iteration only supported for arrays and structs",
+                            )?;
                             (true, None, None)
                         }
                     };
@@ -5010,14 +5854,19 @@ impl VM {
                             if !push_index {
                                 let collection = self.fibers[fiber_idx].stack[collection_idx];
                                 if let Some(gc_id) = collection.as_gc_id() {
-                                    let is_array = matches!(self.heap.get_opt(gc_id), Some(GcObject::Array(_)));
+                                    let is_array = matches!(
+                                        self.heap.get_opt(gc_id),
+                                        Some(GcObject::Array(_))
+                                    );
                                     if is_array {
                                         let fn_id = code_ptr as usize;
                                         't3: loop {
                                             // ── OSR check: compiled fn from prior quantum ──────
                                             if jit_iter_active.is_none() {
                                                 if let Some(ref mut jit) = self.jit {
-                                                    if let Some(f) = jit.get_compiled_iter(fn_id, ip_at_start) {
+                                                    if let Some(f) =
+                                                        jit.get_compiled_iter(fn_id, ip_at_start)
+                                                    {
                                                         jit_iter_active = Some((ip_at_start, f));
                                                         continue 't3;
                                                     }
@@ -5027,17 +5876,28 @@ impl VM {
                                             // ── Active path: call the compiled native iter loop ─
                                             if let Some((active_ip, compiled)) = jit_iter_active {
                                                 if active_ip == ip_at_start {
-                                                    let (arr_ptr, arr_len) = match self.heap.get(gc_id) {
-                                                        GcObject::Array(arr) => (arr.as_ptr() as *const u64, arr.len() as u64),
-                                                        _ => unreachable!(),
-                                                    };
+                                                    let (arr_ptr, arr_len) =
+                                                        match self.heap.get(gc_id) {
+                                                            GcObject::Array(arr) => (
+                                                                arr.as_ptr() as *const u64,
+                                                                arr.len() as u64,
+                                                            ),
+                                                            _ => unreachable!(),
+                                                        };
                                                     let deopt = unsafe {
-                                                        compiled(locals_ptr as *mut u64, arr_ptr, arr_len)
+                                                        compiled(
+                                                            locals_ptr as *mut u64,
+                                                            arr_ptr,
+                                                            arr_len,
+                                                        )
                                                     };
                                                     if deopt == 0 {
                                                         ip += offset as usize; // jump past loop
                                                     } else {
-                                                        eprintln!("[JIT] deopt iter loop ip={}", ip_at_start);
+                                                        eprintln!(
+                                                            "[JIT] deopt iter loop ip={}",
+                                                            ip_at_start
+                                                        );
                                                         jit_iter_active = None;
                                                     }
                                                     handled = deopt == 0;
@@ -5049,24 +5909,34 @@ impl VM {
                                             // Fire every JIT_ITER_THRESHOLD iterations so that
                                             // profile_iter's internal counter can reach 10000 across quanta.
                                             const JIT_ITER_THRESHOLD: u64 = 5_000;
-                                            let reached_threshold = if let Some(ref mut jit) = self.jit {
-                                                let count = jit.inc_iter_profile(fn_id, ip_at_start);
-                                                count % JIT_ITER_THRESHOLD == 0
-                                            } else {
-                                                false
-                                            };
+                                            let reached_threshold =
+                                                if let Some(ref mut jit) = self.jit {
+                                                    let count =
+                                                        jit.inc_iter_profile(fn_id, ip_at_start);
+                                                    count % JIT_ITER_THRESHOLD == 0
+                                                } else {
+                                                    false
+                                                };
 
                                             if reached_threshold {
                                                 let body_start = ip_at_start + 3;
-                                                let body_len   = offset as usize - 1;
+                                                let body_len = offset as usize - 1;
                                                 let body_code: Vec<u32> = unsafe {
-                                                    std::slice::from_raw_parts(code_ptr.add(body_start), body_len).to_vec()
+                                                    std::slice::from_raw_parts(
+                                                        code_ptr.add(body_start),
+                                                        body_len,
+                                                    )
+                                                    .to_vec()
                                                 };
-                                                let mut const_map: HashMap<u32, f64> = HashMap::new();
+                                                let mut const_map: HashMap<u32, f64> =
+                                                    HashMap::new();
                                                 for &word in &body_code {
                                                     if (word & 0xFF) as u8 == op::CONSTANT {
                                                         let cidx = word >> 8;
-                                                        let cv = self.read_constant(fiber_idx, cidx as usize)?;
+                                                        let cv = self.read_constant(
+                                                            fiber_idx,
+                                                            cidx as usize,
+                                                        )?;
                                                         if cv.is_number() {
                                                             const_map.insert(cidx, cv.as_number());
                                                         }
@@ -5074,11 +5944,16 @@ impl VM {
                                                 }
                                                 if let Some(ref mut jit) = self.jit {
                                                     jit.profile_iter(
-                                                        fn_id, ip_at_start, cursor_slot,
+                                                        fn_id,
+                                                        ip_at_start,
+                                                        cursor_slot,
                                                         JIT_ITER_THRESHOLD,
-                                                        &body_code, &const_map,
+                                                        &body_code,
+                                                        &const_map,
                                                     );
-                                                    if let Some(f) = jit.get_compiled_iter(fn_id, ip_at_start) {
+                                                    if let Some(f) =
+                                                        jit.get_compiled_iter(fn_id, ip_at_start)
+                                                    {
                                                         jit_iter_active = Some((ip_at_start, f));
                                                         continue 't3; // immediately run freshly compiled fn
                                                     }
@@ -5100,7 +5975,11 @@ impl VM {
 
                         if do_normal {
                             let current_cursor = self.fibers[fiber_idx].stack[cursor_idx];
-                            let next_cursor_val = if current_cursor.is_int() { BxValue::new_int(current_cursor.as_int() + 1) } else { BxValue::new_number(current_cursor.as_number() + 1.0) };
+                            let next_cursor_val = if current_cursor.is_int() {
+                                BxValue::new_int(current_cursor.as_int() + 1)
+                            } else {
+                                BxValue::new_number(current_cursor.as_number() + 1.0)
+                            };
                             self.fibers[fiber_idx].stack[cursor_idx] = next_cursor_val;
                             self.fibers[fiber_idx].stack.push(next_val.unwrap());
                             if push_index {
@@ -5123,10 +6002,20 @@ impl VM {
                     let offset = op0;
                     let target_ip = ip + offset as usize;
                     let saved_stack_len = self.fibers[fiber_idx].stack.len();
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.push((target_ip, saved_stack_len));
+                    self.fibers[fiber_idx]
+                        .frames
+                        .last_mut()
+                        .unwrap()
+                        .handlers
+                        .push((target_ip, saved_stack_len));
                 }
                 op::POP_HANDLER => {
-                    self.fibers[fiber_idx].frames.last_mut().unwrap().handlers.pop();
+                    self.fibers[fiber_idx]
+                        .frames
+                        .last_mut()
+                        .unwrap()
+                        .handlers
+                        .pop();
                 }
                 op::THROW => {
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -5142,7 +6031,11 @@ impl VM {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     args.reverse();
-                    let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
+                    let out = args
+                        .iter()
+                        .map(|a| self.to_string(*a))
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     if let Some(ref mut buffer) = self.output_buffer {
                         buffer.push_str(&out);
                     } else {
@@ -5167,7 +6060,11 @@ impl VM {
                     }
                     #[cfg(not(all(target_arch = "wasm32", feature = "js")))]
                     {
-                        let out = args.iter().map(|a| self.to_string(*a)).collect::<Vec<_>>().join(" ");
+                        let out = args
+                            .iter()
+                            .map(|a| self.to_string(*a))
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         if let Some(ref mut buffer) = self.output_buffer {
                             buffer.push_str(&out);
                             buffer.push('\n');
@@ -5191,9 +6088,7 @@ impl VM {
                     let needle_s = self.to_string(needle);
                     let result = if let Some(id) = haystack.as_gc_id() {
                         match self.heap.get(id) {
-                            GcObject::String(s) => {
-                                s.to_string().contains(&needle_s)
-                            }
+                            GcObject::String(s) => s.to_string().contains(&needle_s),
                             GcObject::Array(arr) => arr.iter().any(|v| *v == needle),
                             GcObject::Range(range) => {
                                 if needle.is_number() || needle.is_int() {
@@ -5295,7 +6190,8 @@ impl VM {
                 GcObject::Struct(_) | GcObject::Instance(_) | GcObject::NativeObject(_)
             );
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
-            let is_exception_like = is_exception_like || matches!(self.heap.get(id), GcObject::JsValue(_));
+            let is_exception_like =
+                is_exception_like || matches!(self.heap.get(id), GcObject::JsValue(_));
             is_exception_like
         } else {
             false
@@ -5415,9 +6311,13 @@ impl VM {
             Some(chunk.source.clone())
         } else {
             #[cfg(not(target_arch = "wasm32"))]
-            { std::fs::read_to_string(&chunk.filename).ok() }
+            {
+                std::fs::read_to_string(&chunk.filename).ok()
+            }
             #[cfg(target_arch = "wasm32")]
-            { None }
+            {
+                None
+            }
         };
 
         if let Some(src) = source_text {
@@ -5429,7 +6329,11 @@ impl VM {
                 let end = (zero_idx + 4).min(src_lines.len());
                 for i in start..end {
                     let line_num = i + 1;
-                    let prefix = if line_num == line as usize { "> " } else { "  " };
+                    let prefix = if line_num == line as usize {
+                        "> "
+                    } else {
+                        "  "
+                    };
                     context.push_str(&format!("{}{:4} | {}\n", prefix, line_num, src_lines[i]));
                 }
                 return context;
@@ -5458,9 +6362,12 @@ impl VM {
         while !self.fibers[fiber_idx].frames.is_empty() {
             let frame_idx = self.fibers[fiber_idx].frames.len() - 1;
             if !self.fibers[fiber_idx].frames[frame_idx].handlers.is_empty() {
-                let (handler_ip, saved_stack_len) = self.fibers[fiber_idx].frames[frame_idx].handlers.pop().unwrap();
+                let (handler_ip, saved_stack_len) = self.fibers[fiber_idx].frames[frame_idx]
+                    .handlers
+                    .pop()
+                    .unwrap();
                 self.fibers[fiber_idx].frames[frame_idx].ip = handler_ip;
-                
+
                 self.fibers[fiber_idx].stack.truncate(saved_stack_len);
                 self.fibers[fiber_idx].stack.push(val);
                 return Ok(());
@@ -5468,30 +6375,52 @@ impl VM {
             self.fibers[fiber_idx].frames.pop();
         }
         let val_str = self.exception_summary(val);
-        bail!("VM Runtime Error: {}{}\n\nStack trace:\n{}", val_str, source_context, stack_trace);
+        bail!(
+            "VM Runtime Error: {}{}\n\nStack trace:\n{}",
+            val_str,
+            source_context,
+            stack_trace
+        );
     }
 
-    pub fn call_function(&mut self, name: &str, args: Vec<BxValue>, chunk: Option<Rc<RefCell<Chunk>>>) -> Result<BxValue> {
+    pub fn call_function(
+        &mut self,
+        name: &str,
+        args: Vec<BxValue>,
+        chunk: Option<Rc<RefCell<Chunk>>>,
+    ) -> Result<BxValue> {
         if let Some(f) = self.get_global(name) {
             return self.call_function_value(f, args, chunk);
         }
         anyhow::bail!("Function {} not found", name)
     }
 
-    pub fn call_function_value(&mut self, func: BxValue, args: Vec<BxValue>, _chunk: Option<Rc<RefCell<Chunk>>>) -> Result<BxValue> {
+    pub fn call_function_value(
+        &mut self,
+        func: BxValue,
+        args: Vec<BxValue>,
+        _chunk: Option<Rc<RefCell<Chunk>>>,
+    ) -> Result<BxValue> {
         if let Some(id) = func.as_gc_id() {
             match self.heap.get(id) {
                 GcObject::CompiledFunction(f) => {
                     let f = Rc::clone(f);
                     if args.len() < f.min_arity as usize || args.len() > f.arity as usize {
-                        anyhow::bail!("Expected {}-{} arguments but got {}", f.min_arity, f.arity, args.len());
+                        anyhow::bail!(
+                            "Expected {}-{} arguments but got {}",
+                            f.min_arity,
+                            f.arity,
+                            args.len()
+                        );
                     }
                     let _future = self.enqueue_function_call(func, f, args, 0, None);
                     let fiber_idx = self.fibers.len() - 1;
                     self.current_fiber_idx = Some(fiber_idx);
                     // Loop until the fiber completes — this is a synchronous blocking call.
                     let result = loop {
-                        match self.run_fiber(fiber_idx, Some(Instant::now() + Duration::from_millis(2))) {
+                        match self
+                            .run_fiber(fiber_idx, Some(Instant::now() + Duration::from_millis(2)))
+                        {
                             Ok(Some(val)) => break Ok(val),
                             Ok(None) => continue, // timeslice expired, keep running
                             Err(e) => break Err(e),
@@ -5556,7 +6485,9 @@ impl VM {
                     for _ in 0..(func.arity as usize).saturating_sub(final_args.len()) {
                         final_args.push(BxValue::new_null());
                     }
-                    if final_args.len() < func.min_arity as usize || final_args.len() > func.arity as usize {
+                    if final_args.len() < func.min_arity as usize
+                        || final_args.len() > func.arity as usize
+                    {
                         anyhow::bail!(
                             "Expected {}-{} arguments but got {}",
                             func.min_arity,
@@ -5595,7 +6526,9 @@ impl VM {
                     let fiber_idx = self.fibers.len() - 1;
                     self.current_fiber_idx = Some(fiber_idx);
                     let result = loop {
-                        match self.run_fiber(fiber_idx, Some(Instant::now() + Duration::from_millis(2))) {
+                        match self
+                            .run_fiber(fiber_idx, Some(Instant::now() + Duration::from_millis(2)))
+                        {
                             Ok(Some(val)) => break Ok(val),
                             Ok(None) => continue,
                             Err(e) => break Err(e),
@@ -5786,7 +6719,12 @@ impl VM {
         }
     }
 
-    fn reorder_arguments(&self, args: Vec<BxValue>, names: Vec<String>, params: &[String]) -> Vec<BxValue> {
+    fn reorder_arguments(
+        &self,
+        args: Vec<BxValue>,
+        names: Vec<String>,
+        params: &[String],
+    ) -> Vec<BxValue> {
         let mut final_args = vec![BxValue::new_null(); params.len()];
         let mut positional_args = Vec::new();
         let mut named_args = Vec::new();
@@ -5833,9 +6771,15 @@ impl VM {
         }
     }
 
-    fn execute_call(&mut self, fiber_idx: usize, arg_count: usize, names: Option<Vec<String>>) -> Result<()> {
-        let func_val = self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count];
-        
+    fn execute_call(
+        &mut self,
+        fiber_idx: usize,
+        arg_count: usize,
+        names: Option<Vec<String>>,
+    ) -> Result<()> {
+        let func_val =
+            self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count];
+
         if let Some(id) = func_val.as_gc_id() {
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
             if let GcObject::JsValue(js) = self.heap.get(id) {
@@ -5857,7 +6801,9 @@ impl VM {
                             self.fibers[fiber_idx].stack.push(bx_val);
                             return Ok(());
                         }
-                        Err(e) => return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
+                        Err(e) => {
+                            return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e));
+                        }
                     }
                 } else {
                     return self.throw_error(fiber_idx, "Can only call JS functions.");
@@ -5908,8 +6854,8 @@ impl VM {
 
                         let compiled = if compiled_opt.is_none() {
                             if let Some(ref mut jit) = self.jit {
-                                let fn_id  = Rc::as_ptr(&func) as usize;
-                                let code   = func.chunk.code.as_slice();
+                                let fn_id = Rc::as_ptr(&func) as usize;
+                                let code = func.chunk.code.as_slice();
                                 let consts = func.chunk.constants.as_slice();
                                 jit.profile_fn(fn_id, id, code, consts, func.arity)
                             } else {
@@ -5923,13 +6869,13 @@ impl VM {
                         // compiled functions via jit_resolve_fn without passing extra state.
                         if let Some(ref jit) = self.jit {
                             crate::vm::jit::set_compiled_fns_ptr(
-                                &jit.compiled_fns_by_gcid as *const _
+                                &jit.compiled_fns_by_gcid as *const _,
                             );
                         }
 
                         if let Some(compiled_fn) = compiled {
-                            let stack_base = self.fibers[fiber_idx].stack.len()
-                                - func.arity as usize;
+                            let stack_base =
+                                self.fibers[fiber_idx].stack.len() - func.arity as usize;
                             // Reserve extra space for additional locals the function may use
                             self.fibers[fiber_idx].stack.reserve(64);
                             let locals_raw = unsafe {
@@ -5939,21 +6885,23 @@ impl VM {
                             let heap_raw = &self.heap as *const _ as *const std::ffi::c_void;
                             let mut ret_bits: u64 = 0;
 
-                            let status = unsafe {
-                                compiled_fn(locals_raw, heap_raw, &mut ret_bits)
-                            };
+                            let status =
+                                unsafe { compiled_fn(locals_raw, heap_raw, &mut ret_bits) };
 
                             if status == 0 {
                                 // Success: remove the function object + args, push return value
                                 let func_slot = stack_base - 1;
                                 self.fibers[fiber_idx].stack.truncate(func_slot);
-                                self.fibers[fiber_idx].stack.push(unsafe {
-                                    std::mem::transmute::<u64, BxValue>(ret_bits)
-                                });
+                                self.fibers[fiber_idx]
+                                    .stack
+                                    .push(unsafe { std::mem::transmute::<u64, BxValue>(ret_bits) });
                                 return Ok(());
                             }
                             // status == 1 → deopt: fall through to normal frame creation
-                            eprintln!("[JIT] Tier-4 deopt fn_id=0x{:x}", Rc::as_ptr(&func) as usize);
+                            eprintln!(
+                                "[JIT] Tier-4 deopt fn_id=0x{:x}",
+                                Rc::as_ptr(&func) as usize
+                            );
                             if let Some(ref mut jit) = self.jit {
                                 jit.inc_fn_deopt(Rc::as_ptr(&func) as usize);
                             }
@@ -5985,7 +6933,7 @@ impl VM {
                     }
                     args.reverse();
                     self.fibers[fiber_idx].stack.pop(); // Pop the function object
-                    
+
                     match func(self, &args) {
                         Ok(val) => {
                             self.fibers[fiber_idx].stack.push(val);
@@ -6002,7 +6950,15 @@ impl VM {
     }
 
     #[cfg(all(target_arch = "wasm32", feature = "js-host-abi", not(feature = "js")))]
-    fn js_result_to_bx(&mut self, rtype: i32, str_buf: &[u8], str_len: usize, num: f64, b: i32, obj_id: u32) -> BxValue {
+    fn js_result_to_bx(
+        &mut self,
+        rtype: i32,
+        str_buf: &[u8],
+        str_len: usize,
+        num: f64,
+        b: i32,
+        obj_id: u32,
+    ) -> BxValue {
         match rtype {
             1 => BxValue::new_bool(b != 0),
             2 => BxValue::new_number(num),
@@ -6023,7 +6979,9 @@ impl VM {
     fn bx_args_to_json(&self, args: &[BxValue]) -> Vec<u8> {
         let mut out = b"[".to_vec();
         for (i, v) in args.iter().enumerate() {
-            if i > 0 { out.push(b','); }
+            if i > 0 {
+                out.push(b',');
+            }
             if v.is_null() {
                 out.extend_from_slice(b"null");
             } else if v.is_bool() {
@@ -6033,7 +6991,11 @@ impl VM {
             } else if v.is_int() {
                 out.extend_from_slice(format!("{}", v.as_int()).as_bytes());
             } else if let Some(gc_id) = v.as_gc_id() {
-                let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(gc_id) { Some(*h) } else { None };
+                let maybe_handle = if let GcObject::JsHandle(h) = self.heap.get(gc_id) {
+                    Some(*h)
+                } else {
+                    None
+                };
                 if let Some(h) = maybe_handle {
                     out.extend_from_slice(format!("{{\"h\":{}}}", h).as_bytes());
                 } else {
@@ -6046,7 +7008,10 @@ impl VM {
                             '\n' => out.extend_from_slice(b"\\n"),
                             '\r' => out.extend_from_slice(b"\\r"),
                             '\t' => out.extend_from_slice(b"\\t"),
-                            c => { let mut buf = [0u8; 4]; out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes()); }
+                            c => {
+                                let mut buf = [0u8; 4];
+                                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                            }
                         }
                     }
                     out.push(b'"');
@@ -6059,10 +7024,17 @@ impl VM {
         out
     }
 
-    fn execute_invoke(&mut self, fiber_idx: usize, name: String, arg_count: usize, names: Option<Vec<String>>, ip_at_start: usize) -> Result<()> {
+    fn execute_invoke(
+        &mut self,
+        fiber_idx: usize,
+        name: String,
+        arg_count: usize,
+        names: Option<Vec<String>>,
+        ip_at_start: usize,
+    ) -> Result<()> {
         let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count as usize;
         let receiver_val = self.fibers[fiber_idx].stack[receiver_idx];
-        
+
         if let Some(id) = receiver_val.as_gc_id() {
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
             if let GcObject::JsValue(js) = self.heap.get(id) {
@@ -6071,7 +7043,12 @@ impl VM {
                     let future_val = self.bridge_js_promise_to_future(js.clone());
                     let future_id = match future_val.as_gc_id() {
                         Some(future_id) => future_id,
-                        None => return self.throw_error(fiber_idx, "Promise interop did not produce a future."),
+                        None => {
+                            return self.throw_error(
+                                fiber_idx,
+                                "Promise interop did not produce a future.",
+                            );
+                        }
                     };
 
                     self.fibers[fiber_idx].stack[receiver_idx] = future_val;
@@ -6119,7 +7096,10 @@ impl VM {
                                     self.fibers[fiber_idx].stack.push(bx_val);
                                     return Ok(());
                                 }
-                                Err(e) => return self.throw_error(fiber_idx, &format!("JS Error: {:?}", e)),
+                                Err(e) => {
+                                    return self
+                                        .throw_error(fiber_idx, &format!("JS Error: {:?}", e));
+                                }
                             }
                         }
                     }
@@ -6144,7 +7124,10 @@ impl VM {
                                 return Ok(());
                             }
                             FutureStatus::Completed => {
-                                eprintln!("[future.get] completed in execute_invoke -> {:?}", self.to_string(value));
+                                eprintln!(
+                                    "[future.get] completed in execute_invoke -> {:?}",
+                                    self.to_string(value)
+                                );
                                 for _ in 0..arg_count {
                                     self.fibers[fiber_idx].stack.pop();
                                 }
@@ -6156,7 +7139,8 @@ impl VM {
                                 return self.throw_value(fiber_idx, e);
                             }
                         }
-                    } else if let Some(bif_name) = self.resolve_member_method(&receiver_val, &name) {
+                    } else if let Some(bif_name) = self.resolve_member_method(&receiver_val, &name)
+                    {
                         return self.execute_bif_call(fiber_idx, bif_name, arg_count, receiver_val);
                     }
                 }
@@ -6193,15 +7177,24 @@ impl VM {
                     };
 
                     let method = match ic {
-                        Some(IcEntry::Monomorphic { shape_id: cached_shape, index }) => {
+                        Some(IcEntry::Monomorphic {
+                            shape_id: cached_shape,
+                            index,
+                        }) => {
                             if cached_shape == shape_id as usize {
                                 let method_val = inst.properties[index as usize];
                                 if let Some(m_id) = method_val.as_gc_id() {
                                     if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
                                         Some(Rc::clone(f))
-                                    } else { None }
-                                } else { None }
-                            } else { None }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
                         }
                         Some(IcEntry::Polymorphic { entries, count }) => {
                             let mut found_idx = None;
@@ -6216,9 +7209,15 @@ impl VM {
                                 if let Some(m_id) = method_val.as_gc_id() {
                                     if let GcObject::CompiledFunction(f) = self.heap.get(m_id) {
                                         Some(Rc::clone(f))
-                                    } else { None }
-                                } else { None }
-                            } else { None }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
                         }
                         _ => None,
                     };
@@ -6235,33 +7234,57 @@ impl VM {
                                         let mut chunk = frame.chunk.borrow_mut();
                                         match chunk.caches[ip_at_start] {
                                             None => {
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Monomorphic { shape_id: shape_id as usize, index: idx as usize });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Monomorphic {
+                                                        shape_id: shape_id as usize,
+                                                        index: idx as usize,
+                                                    });
                                             }
-                                            Some(IcEntry::Monomorphic { shape_id: s, index: i }) => {
+                                            Some(IcEntry::Monomorphic {
+                                                shape_id: s,
+                                                index: i,
+                                            }) => {
                                                 let mut entries = [(0, 0); 4];
                                                 entries[0] = (s, i);
                                                 entries[1] = (shape_id as usize, idx as usize);
-                                                chunk.caches[ip_at_start] = Some(IcEntry::Polymorphic { entries, count: 2 });
+                                                chunk.caches[ip_at_start] =
+                                                    Some(IcEntry::Polymorphic {
+                                                        entries,
+                                                        count: 2,
+                                                    });
                                             }
-                                            Some(IcEntry::Polymorphic { ref mut entries, ref mut count }) => {
+                                            Some(IcEntry::Polymorphic {
+                                                ref mut entries,
+                                                ref mut count,
+                                            }) => {
                                                 if *count < 4 {
-                                                    entries[*count] = (shape_id as usize, idx as usize);
+                                                    entries[*count] =
+                                                        (shape_id as usize, idx as usize);
                                                     *count += 1;
                                                 } else {
-                                                    chunk.caches[ip_at_start] = Some(IcEntry::Megamorphic);
+                                                    chunk.caches[ip_at_start] =
+                                                        Some(IcEntry::Megamorphic);
                                                 }
                                             }
                                             _ => {}
                                         }
                                     }
                                     Some(Rc::clone(f))
-                                } else { None }
-                            } else { None }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
                         } else if let Some(f) = self.resolve_method(Rc::clone(&class), &name) {
                             Some(f)
-                        } else { None }
-                    } else { method };
-                    
+                        } else {
+                            None
+                        }
+                    } else {
+                        method
+                    };
+
                     if let Some(func) = method {
                         let mut args = Vec::with_capacity(arg_count);
                         for _ in 0..arg_count {
@@ -6269,7 +7292,7 @@ impl VM {
                         }
                         args.reverse();
                         // Pop receiver, but we'll push it back as the first element of stack for the frame
-                        self.fibers[fiber_idx].stack.pop(); 
+                        self.fibers[fiber_idx].stack.pop();
 
                         let final_args = if let Some(names_list) = names {
                             self.reorder_arguments(args, names_list, &func.params)
@@ -6280,13 +7303,15 @@ impl VM {
                             }
                             a
                         };
-                        
+
                         // Receiver should be available to the frame. In Matchbox, we often put it in CallFrame.receiver.
                         // But local variables slot 0 might also be receiver in some conventions.
                         // Let's stick to CallFrame.receiver and push arguments.
                         self.fibers[fiber_idx].stack.push(receiver_val);
 
-                        for arg in final_args { self.fibers[fiber_idx].stack.push(arg); }
+                        for arg in final_args {
+                            self.fibers[fiber_idx].stack.push(arg);
+                        }
 
                         let sub_chunk = func.chunk.clone();
                         let constant_count = sub_chunk.constants.len();
@@ -6302,7 +7327,9 @@ impl VM {
                         };
                         self.fibers[fiber_idx].frames.push(frame);
                         return Ok(());
-                    } else if let Some(on_missing) = self.resolve_method(Rc::clone(&class), "onmissingmethod") {
+                    } else if let Some(on_missing) =
+                        self.resolve_method(Rc::clone(&class), "onmissingmethod")
+                    {
                         let mut original_args = Vec::with_capacity(arg_count);
                         for _ in 0..arg_count {
                             original_args.push(self.fibers[fiber_idx].stack.pop().unwrap());
@@ -6314,7 +7341,9 @@ impl VM {
 
                         self.fibers[fiber_idx].stack.push(receiver_val); // receiver at base
                         self.fibers[fiber_idx].stack.push(BxValue::new_ptr(name_id));
-                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(args_array_id));
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_ptr(args_array_id));
 
                         let sub_chunk = on_missing.chunk.clone();
                         let constant_count = sub_chunk.constants.len();
@@ -6327,11 +7356,12 @@ impl VM {
                             handlers: Vec::new(),
                             promoted_constants: vec![None; constant_count],
                         };
-                        
+
                         for _ in 0..(on_missing.arity - 2) {
                             self.fibers[fiber_idx].stack.push(BxValue::new_null());
                         }
-                        frame.stack_base = self.fibers[fiber_idx].stack.len() - on_missing.arity as usize;
+                        frame.stack_base =
+                            self.fibers[fiber_idx].stack.len() - on_missing.arity as usize;
 
                         self.fibers[fiber_idx].frames.push(frame);
                         return Ok(());
@@ -6346,10 +7376,19 @@ impl VM {
             return self.execute_bif_call(fiber_idx, bif_name, arg_count, receiver_val);
         }
 
-        self.throw_error(fiber_idx, &format!("Method {} not found on {}.", name, receiver_val))
+        self.throw_error(
+            fiber_idx,
+            &format!("Method {} not found on {}.", name, receiver_val),
+        )
     }
 
-    fn execute_bif_call(&mut self, fiber_idx: usize, bif_name: String, arg_count: usize, receiver: BxValue) -> Result<()> {
+    fn execute_bif_call(
+        &mut self,
+        fiber_idx: usize,
+        bif_name: String,
+        arg_count: usize,
+        receiver: BxValue,
+    ) -> Result<()> {
         if bif_name == "futureget" {
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
             let receiver_idx = self.fibers[fiber_idx].stack.len() - 1 - arg_count;
@@ -6404,10 +7443,10 @@ impl VM {
                     }
                     args.reverse();
                     self.fibers[fiber_idx].stack.pop(); // receiver
-                    
+
                     let mut final_args = vec![receiver];
                     final_args.extend(args);
-                    
+
                     match bif(self, &final_args) {
                         Ok(res) => {
                             self.fibers[fiber_idx].stack.push(res);
@@ -6425,7 +7464,7 @@ impl VM {
         let val = {
             let fiber = &self.fibers[fiber_idx];
             let frame = fiber.frames.last().unwrap();
-            
+
             let promoted = &frame.promoted_constants;
             if idx < promoted.len() {
                 promoted[idx]
@@ -6446,7 +7485,7 @@ impl VM {
         };
 
         let promoted = self.promote_constant(constant)?;
-        
+
         {
             let fiber = &mut self.fibers[fiber_idx];
             let frame = fiber.frames.last_mut().unwrap();
@@ -6456,7 +7495,7 @@ impl VM {
             }
             frame.promoted_constants[idx] = Some(promoted);
         }
-        
+
         Ok(promoted)
     }
 
@@ -6538,7 +7577,9 @@ impl VM {
                     js_arr.into()
                 }
                 GcObject::Range(range) => JsValue::from_str(&format!("{}", range)),
-                GcObject::DateTime(dt) => JsValue::from_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
+                GcObject::DateTime(dt) => {
+                    JsValue::from_str(&dt.to_rfc3339_opts(SecondsFormat::Millis, true))
+                }
                 GcObject::Struct(s) => {
                     let js_obj = js_sys::Object::new();
                     let shape = &self.shapes.shapes[s.shape_id as usize];
@@ -6547,7 +7588,12 @@ impl VM {
                     fields.sort_by_key(|&(_, idx)| idx);
                     for (k, idx) in fields {
                         let key_str = self.interner.resolve(k);
-                        Reflect::set(&js_obj, &JsValue::from_str(key_str), &self.bx_to_js(&s.properties[idx as usize])).ok();
+                        Reflect::set(
+                            &js_obj,
+                            &JsValue::from_str(key_str),
+                            &self.bx_to_js(&s.properties[idx as usize]),
+                        )
+                        .ok();
                     }
                     js_obj.into()
                 }
@@ -6559,10 +7605,11 @@ impl VM {
                         _ => return JsValue::UNDEFINED,
                     };
 
-                    let create_proxy = match Reflect::get(&matchbox, &JsValue::from_str("createInstanceProxy")) {
-                        Ok(value) => value,
-                        Err(_) => return JsValue::UNDEFINED,
-                    };
+                    let create_proxy =
+                        match Reflect::get(&matchbox, &JsValue::from_str("createInstanceProxy")) {
+                            Ok(value) => value,
+                            Err(_) => return JsValue::UNDEFINED,
+                        };
 
                     if let Ok(func) = create_proxy.dyn_into::<Function>() {
                         func.call2(
@@ -6582,19 +7629,27 @@ impl VM {
 
                     future_to_promise(async move {
                         async fn yield_to_host() -> Result<(), JsValue> {
-                            let promise = Promise::new(&mut |resolve: Function, reject: Function| {
-                                let win = match window() {
-                                    Some(win) => win,
-                                    None => {
-                                        let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("window is unavailable"));
-                                        return;
-                                    }
-                                };
+                            let promise =
+                                Promise::new(&mut |resolve: Function, reject: Function| {
+                                    let win = match window() {
+                                        Some(win) => win,
+                                        None => {
+                                            let _ = reject.call1(
+                                                &JsValue::NULL,
+                                                &JsValue::from_str("window is unavailable"),
+                                            );
+                                            return;
+                                        }
+                                    };
 
-                                if let Err(err) = win.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0) {
-                                    let _ = reject.call1(&JsValue::NULL, &err);
-                                }
-                            });
+                                    if let Err(err) = win
+                                        .set_timeout_with_callback_and_timeout_and_arguments_0(
+                                            &resolve, 0,
+                                        )
+                                    {
+                                        let _ = reject.call1(&JsValue::NULL, &err);
+                                    }
+                                });
 
                             let _ = JsFuture::from(promise).await?;
                             Ok(())
@@ -6634,12 +7689,15 @@ impl VM {
                         let id = *self.next_callback_id.borrow();
                         self.callback_registry.borrow_mut().insert(id, val.clone());
                         *self.next_callback_id.borrow_mut() += 1;
-                        
+
                         let vm_ptr = self as *const VM as usize;
-                        let body = format!("return globalThis.MatchBox.invokeCallback({}, {}, this, Array.from(arguments));", vm_ptr, id);
+                        let body = format!(
+                            "return globalThis.MatchBox.invokeCallback({}, {}, this, Array.from(arguments));",
+                            vm_ptr, id
+                        );
                         match Function::new_no_args(&body).dyn_into::<Function>() {
                             Ok(f) => f.into(),
-                            Err(_) => JsValue::UNDEFINED
+                            Err(_) => JsValue::UNDEFINED,
                         }
                     }
                     #[cfg(not(all(target_arch = "wasm32", feature = "js")))]
@@ -6683,7 +7741,9 @@ impl VM {
         match self.heap.get(id) {
             GcObject::Instance(_) => Some(id),
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
-            GcObject::JsValue(js) => self.unwrap_matchbox_instance(js).map(|gc_id| gc_id as usize),
+            GcObject::JsValue(js) => self
+                .unwrap_matchbox_instance(js)
+                .map(|gc_id| gc_id as usize),
             _ => None,
         }
     }
@@ -6742,11 +7802,11 @@ impl VM {
             return Ok(id);
         }
         self.collect_garbage();
-        self.heap
-            .try_alloc(obj)
-            .ok_or_else(|| RuntimeError::OutOfMemory(
+        self.heap.try_alloc(obj).ok_or_else(|| {
+            RuntimeError::OutOfMemory(
                 "Heap exhausted: allocation failed even after garbage collection".into(),
-            ))
+            )
+        })
     }
 
     /// Helper for the opcode dispatch loop: attempts GC allocation,
@@ -6758,11 +7818,7 @@ impl VM {
         match self.gc_alloc(obj) {
             Ok(id) => Ok(id),
             Err(e) => {
-                let val = self.exception_from_message(
-                    e.exception_type(),
-                    e.to_string(),
-                    None,
-                );
+                let val = self.exception_from_message(e.exception_type(), e.to_string(), None);
                 // throw_value returns Err only if no handler caught it
                 self.throw_value(fiber_idx, val)?;
                 // If throw_value returned Ok, the exception was caught;
@@ -6786,9 +7842,12 @@ impl VM {
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
                 GcObject::String(s) => serde_json::Value::String(s.to_string()),
-                GcObject::DateTime(dt) => serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
+                GcObject::DateTime(dt) => {
+                    serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::Millis, true))
+                }
                 GcObject::Array(arr) => {
-                    let json_arr: Vec<serde_json::Value> = arr.iter().map(|v| self.bx_to_json(v)).collect();
+                    let json_arr: Vec<serde_json::Value> =
+                        arr.iter().map(|v| self.bx_to_json(v)).collect();
                     serde_json::Value::Array(json_arr)
                 }
                 GcObject::Range(range) => serde_json::Value::String(format!("{}", range)),
@@ -6851,7 +7910,12 @@ impl VM {
 
 #[cfg(all(target_arch = "wasm32", feature = "js"))]
 #[wasm_bindgen]
-pub fn _matchbox_invoke_callback(vm_ptr: usize, callback_id: usize, this_val: JsValue, args: js_sys::Array) -> Result<JsValue, JsValue> {
+pub fn _matchbox_invoke_callback(
+    vm_ptr: usize,
+    callback_id: usize,
+    this_val: JsValue,
+    args: js_sys::Array,
+) -> Result<JsValue, JsValue> {
     let vm = unsafe { &mut *(vm_ptr as *mut VM) };
     let func = vm.callback_registry.borrow().get(&callback_id).cloned();
     if let Some(func) = func {
@@ -6915,7 +7979,10 @@ fn wasm_instance_prop_get(vm: &mut VM, base_val: BxValue, name: &str) -> BxValue
         GcObject::Instance(inst) => {
             let name_id = vm.interner.intern(name);
             if let Some(idx) = vm.shapes.get_index(inst.shape_id, name_id) {
-                inst.properties.get(idx as usize).copied().unwrap_or_else(BxValue::new_null)
+                inst.properties
+                    .get(idx as usize)
+                    .copied()
+                    .unwrap_or_else(BxValue::new_null)
             } else if let Some(method) = vm.resolve_method(Rc::clone(&inst.class), name) {
                 BxValue::new_ptr(vm.heap.alloc(GcObject::CompiledFunction(method)))
             } else {
@@ -7087,7 +8154,11 @@ mod tests {
     fn gc_alloc_succeeds_on_normal_allocation() {
         let mut vm = VM::new();
         let result = vm.gc_alloc(GcObject::String(BoxString::new("test")));
-        assert!(result.is_ok(), "gc_alloc should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "gc_alloc should succeed: {:?}",
+            result.err()
+        );
         let id = result.unwrap();
         assert!(vm.heap.get_opt(id).is_some());
     }
