@@ -1,0 +1,21 @@
+component {
+    // MatchBox ESP32 Application – configures platform services
+    // via `application.esp32` during onApplicationStart.
+
+    function onApplicationStart() {
+        // application.esp32 is pre-populated with defaults from
+        // the build profile. Modify any values you want to override.
+        //
+        // Supported fields:
+        //   application.esp32.wifi.ssid
+        //   application.esp32.wifi.password
+        //   application.esp32.wifi.hostname
+        //   application.esp32.web.port
+
+        application.esp32.wifi.hostname = "my-esp32-device";
+    }
+
+    function hello() {
+        return "Hello from MatchBox ESP32!";
+    }
+}

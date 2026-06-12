@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= application.esp32.wifi.hostname %></title>
+</head>
+<body>
+  <h1><%= application.esp32.wifi.hostname %></h1>
+  <p>Web port: <%= application.esp32.web.port %></p>
+  <p>Wi‑Fi SSID: <%= application.esp32.wifi.ssid %></p>
+  <p>Result: <%= hello() %></p>
+</body>
+</html>

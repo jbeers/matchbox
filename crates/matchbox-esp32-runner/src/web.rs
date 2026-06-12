@@ -22,6 +22,33 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
+#[derive(Debug, Clone)]
+pub struct Esp32AppConfig {
+    pub wifi_ssid: String,
+    pub wifi_password: String,
+    pub wifi_hostname: String,
+    pub web_port: u16,
+}
+
+impl Default for Esp32AppConfig {
+    fn default() -> Self {
+        Self {
+            wifi_ssid: option_env!("MATCHBOX_ESP32_WIFI_SSID")
+                .unwrap_or("Pixel_174")
+                .to_string(),
+            wifi_password: option_env!("MATCHBOX_ESP32_WIFI_PASSWORD")
+                .unwrap_or("myinternetpass")
+                .to_string(),
+            wifi_hostname: option_env!("MATCHBOX_ESP32_WIFI_HOSTNAME")
+                .unwrap_or("matchbox-esp32")
+                .to_string(),
+            web_port: option_env!("MATCHBOX_ESP32_WEB_PORT")
+                .and_then(|v| v.parse::<u16>().ok())
+                .unwrap_or(80),
+        }
+    }
+}
+
 static EMBEDDED_ROUTE_TABLE_JSON: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/embedded-route-table.json"));
 
@@ -407,39 +434,158 @@ pub fn load_executable_route_table() -> ExecutableRouteTable {
     }
 }
 
-pub fn run_application_start(route_table: &ExecutableRouteTable) -> Result<()> {
-    let Some(application) = route_table.application.as_ref() else {
-        return Ok(());
+pub fn run_application_start(route_table: &ExecutableRouteTable) -> Result<Esp32AppConfig> {
+        let Some(application) = route_table.application.as_ref() else {
+            return Ok(Esp32AppConfig::default());
+        };
+
+        println!(
+            "[matchbox] Executing Application.onApplicationStart source={}",
+            application.source_path
+        );
+        let mut vm = VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new());
+        vm.interpret_chunk_borrowed(application.chunk.as_ref())
+            .map_err(anyhow::Error::msg)?;
+        let application = vm
+            .construct_global_class("Application", Vec::new())
+            .map_err(anyhow::Error::msg)?;
+        vm.insert_empty_struct_global("application");
+
+        // Populate application.esp32 with defaults from environment/profile
+        populate_application_esp32(&mut vm);
+
+        match vm.call_method_value(application, "onApplicationStart", Vec::new()) {
+            Ok(_) => {
+                // Read back the config (may have been modified by BoxLang)
+                let config = read_esp32_config(&vm, application);
+
+                let runtime = Arc::new(Mutex::new(ApplicationVm {
+                    ptr: Box::into_raw(Box::new(vm)) as usize,
+                }));
+                let _ = APPLICATION_VM.set(Arc::clone(&runtime));
+                start_application_fiber_scheduler(runtime);
+                Ok(config)
+            }
+            Err(error)
+                if error.to_string().contains("Method ")
+                    && error.to_string().contains(" not found on instance") =>
+            {
+                Ok(Esp32AppConfig::default())
+            }
+            Err(error) => Err(anyhow::Error::msg(error)),
+        }
+    }
+}
+
+/// Populate `application.esp32` with default configuration values
+/// before `onApplicationStart()` runs. BoxLang code can then modify
+/// these values during startup.
+fn populate_application_esp32(vm: &mut VM) {
+    let app_global = vm.get_global("application");
+    let app_id = match app_global.and_then(|v| v.as_gc_id()) {
+        Some(id) => id,
+        None => return,
     };
 
-    println!(
-        "[matchbox] Executing Application.onApplicationStart source={}",
-        application.source_path
+    // Create the esp32 config struct
+    let esp32_id = vm.struct_new();
+
+    // wifi sub-struct
+    let wifi_id = vm.struct_new();
+    
+    // Create strings separately to avoid mutable borrow conflicts
+    let ssid_id = vm.string_new(
+        option_env!("MATCHBOX_ESP32_WIFI_SSID")
+            .unwrap_or("Pixel_174")
+            .to_string(),
     );
-    let mut vm = VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new());
-    vm.interpret_chunk_borrowed(application.chunk.as_ref())
-        .map_err(anyhow::Error::msg)?;
-    let application = vm
-        .construct_global_class("Application", Vec::new())
-        .map_err(anyhow::Error::msg)?;
-    vm.insert_empty_struct_global("application");
-    match vm.call_method_value(application, "onApplicationStart", Vec::new()) {
-        Ok(_) => {
-            let runtime = Arc::new(Mutex::new(ApplicationVm {
-                ptr: Box::into_raw(Box::new(vm)) as usize,
-            }));
-            let _ = APPLICATION_VM.set(Arc::clone(&runtime));
-            start_application_fiber_scheduler(runtime);
-            Ok(())
+    vm.struct_set(wifi_id, "ssid", BxValue::new_ptr(ssid_id));
+    
+    let password_id = vm.string_new(
+        option_env!("MATCHBOX_ESP32_WIFI_PASSWORD")
+            .unwrap_or("myinternetpass")
+            .to_string(),
+    );
+    vm.struct_set(wifi_id, "password", BxValue::new_ptr(password_id));
+    
+    let hostname_id = vm.string_new(
+        option_env!("MATCHBOX_ESP32_WIFI_HOSTNAME")
+            .unwrap_or("matchbox-esp32")
+            .to_string(),
+    );
+    vm.struct_set(wifi_id, "hostname", BxValue::new_ptr(hostname_id));
+
+    vm.struct_set(esp32_id, "wifi", BxValue::new_ptr(wifi_id));
+
+    // web sub-struct
+    let web_id = vm.struct_new();
+    vm.struct_set(
+        web_id,
+        "port",
+        BxValue::new_number(
+            option_env!("MATCHBOX_ESP32_WEB_PORT")
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(80.0),
+        ),
+    );
+    vm.struct_set(esp32_id, "web", BxValue::new_ptr(web_id));
+
+    // Attach esp32 config to application struct
+    vm.struct_set(app_id, "esp32", BxValue::new_ptr(esp32_id));
+}
+
+/// Read configuration from `application.esp32` after BoxLang
+/// `onApplicationStart()` may have modified the default values.
+fn read_esp32_config(vm: &VM, _application_instance: BxValue) -> Esp32AppConfig {
+    let mut config = Esp32AppConfig::default();
+
+    let app_val = match vm.get_global("application") {
+        Some(v) => v,
+        None => return config,
+    };
+    let app_id = match app_val.as_gc_id() {
+        Some(id) => id,
+        None => return config,
+    };
+
+    // Read application.esp32.wifi
+    let esp32_val = vm.struct_get(app_id, "esp32");
+    if let Some(esp32_id) = esp32_val.as_gc_id() {
+        // wifi.ssid
+        let ssid_val = vm.struct_get(esp32_id, "ssid");
+        if !ssid_val.is_null() {
+            config.wifi_ssid = vm.to_string(ssid_val);
         }
-        Err(error)
-            if error.to_string().contains("Method ")
-                && error.to_string().contains(" not found on instance") =>
-        {
-            Ok(())
+        let wifi_val = vm.struct_get(esp32_id, "wifi");
+        if let Some(wifi_id) = wifi_val.as_gc_id() {
+            let ssid_val = vm.struct_get(wifi_id, "ssid");
+            if !ssid_val.is_null() {
+                config.wifi_ssid = vm.to_string(ssid_val);
+            }
+            let password_val = vm.struct_get(wifi_id, "password");
+            if !password_val.is_null() {
+                config.wifi_password = vm.to_string(password_val);
+            }
+            let hostname_val = vm.struct_get(wifi_id, "hostname");
+            if !hostname_val.is_null() {
+                config.wifi_hostname = vm.to_string(hostname_val);
+            }
         }
-        Err(error) => Err(anyhow::Error::msg(error)),
+
+        // web.port
+        let web_val = vm.struct_get(esp32_id, "web");
+        if let Some(web_id) = web_val.as_gc_id() {
+            let port_val = vm.struct_get(web_id, "port");
+            if port_val.is_number() {
+                let port = port_val.as_number() as u16;
+                if port > 0 {
+                    config.web_port = port;
+                }
+            }
+        }
     }
+
+    config
 }
 
 fn start_application_fiber_scheduler(vm: Arc<Mutex<ApplicationVm>>) {

@@ -2798,6 +2798,17 @@ impl VM {
                 return Ok(Some(BxValue::new_null()));
             }
 
+            // Periodic GC check: on ESP32 (and elsewhere), long-running fibers in tight
+            // while(true) loops can accumulate allocations without ever returning to the
+            // dispatcher. This check breaks the quantum so the caller (pump_until_blocked or
+            // run_fiber_to_completion) can run collect_garbage(). Throttled with safe_point_count
+            // to avoid checking every single iteration.
+            safe_point_count = safe_point_count.wrapping_add(1);
+            if safe_point_count & 1023 == 0 && self.heap.should_collect() {
+                self.fibers[fiber_idx].frames.last_mut().unwrap().ip = ip;
+                return Ok(None);
+            }
+
             #[cfg(feature = "debugger")]
             {
                 let loc = self.debug_location_at_ip(fiber_idx, ip);

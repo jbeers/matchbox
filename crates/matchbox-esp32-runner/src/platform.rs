@@ -46,12 +46,16 @@ impl PlatformServices {
         self.log_psram_runtime();
 
         #[cfg(feature = "platform-web")]
-        let route_table = if self.features.web {
+        let (route_table, app_config) = if self.features.web {
             let route_table = web::load_executable_route_table();
-            web::run_application_start(&route_table)?;
-            Some(route_table)
+            let app_config = web::run_application_start(&route_table)?;
+            println!(
+                "[matchbox] Application config: wifi_ssid={} web_port={}",
+                app_config.wifi_ssid, app_config.web_port,
+            );
+            (Some(route_table), app_config)
         } else {
-            None
+            (None, web::Esp32AppConfig::default())
         };
 
         let fallback_wifi_state = if wifi::active_ip().is_some() {
