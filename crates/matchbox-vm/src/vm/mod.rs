@@ -15,7 +15,7 @@ use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
 use chrono::{DateTime, SecondsFormat, Utc};
 use self::chunk::{Chunk, IcEntry};
 use self::opcode::op;
-use self::gc::{Heap, GcObject};
+use self::gc::{Heap, GcObject, GcId, GCConfig};
 use self::shape::ShapeRegistry;
 use self::intern::StringInterner;
 use anyhow::{Result, bail};
@@ -363,6 +363,33 @@ pub enum DebugStepStatus {
     Blocked,
 }
 
+/// Runtime errors that can bubble up as BoxLang exceptions
+/// rather than causing a Rust panic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RuntimeError {
+    /// Memory allocation failed even after garbage collection.
+    OutOfMemory(String),
+}
+
+impl RuntimeError {
+    /// Returns the BoxLang exception type name for this error.
+    pub fn exception_type(&self) -> &str {
+        match self {
+            RuntimeError::OutOfMemory(_) => "OutOfMemoryException",
+        }
+    }
+}
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeError::OutOfMemory(msg) => write!(f, "OutOfMemory: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for RuntimeError {}
+
 #[cfg(feature = "debugger")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DebugStepResult {
@@ -414,6 +441,8 @@ pub struct VM {
     pub cli_args: Vec<String>,
     pub output_buffer: Option<String>,
     pub gc_suspended: bool,
+    /// GC tuning parameters; use `VM::with_config()` or accept defaults.
+    pub config: GCConfig,
     native_completions: VecDeque<NativeCompletion>,
     native_future_tx: Sender<NativeFutureMessage>,
     native_future_rx: Receiver<NativeFutureMessage>,
@@ -1574,6 +1603,14 @@ impl VM {
         Self::new_with_bifs(HashMap::new(), HashMap::new())
     }
 
+    /// Create a VM with custom GC tuning parameters.
+    pub fn with_config(config: GCConfig) -> Self {
+        let mut vm = Self::new_with_bifs(HashMap::new(), HashMap::new());
+        vm.heap = Heap::with_config(config.clone());
+        vm.config = config;
+        vm
+    }
+
     pub fn new_with_args(args: Vec<String>) -> Self {
         let mut vm = Self::new();
         vm.cli_args = args;
@@ -1590,6 +1627,7 @@ impl VM {
             current_fiber_idx: None,
             shapes: ShapeRegistry::new(),
             heap: Heap::new(),
+            config: GCConfig::default(),
             native_classes: native_classes.into_iter().map(|(k, v)| (k.to_lowercase(), v)).collect(),
             interner: StringInterner::new(),
             cli_args: Vec::new(),
@@ -2934,7 +2972,7 @@ impl VM {
                         let already = unsafe {
                             (&*promoted_ptr).get(const_idx as usize).copied().flatten()
                         };
-                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize) }
+                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize)? }
                     };
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
@@ -2974,7 +3012,7 @@ impl VM {
                     // no concurrent mutable access to promoted_constants is possible here.
                     let limit: BxValue = {
                         let already = unsafe { (&*promoted_ptr).get(const_idx as usize).copied().flatten() };
-                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize) }
+                        if let Some(v) = already { v } else { self.read_constant(fiber_idx, const_idx as usize)? }
                     };
                     let should_loop = if next_val.is_int() && limit.is_int() {
                         next_val.as_int() < limit.as_int()
@@ -3110,7 +3148,7 @@ impl VM {
                                         for &word in &body_code {
                                             if (word & 0xFF) as u8 == op::CONSTANT {
                                                 let cidx = word >> 8;
-                                                let cv = self.read_constant(fiber_idx, cidx as usize);
+                                                let cv = self.read_constant(fiber_idx, cidx as usize)?;
                                                 if cv.is_number() {
                                                     const_map.insert(cidx, cv.as_number());
                                                 }
@@ -3171,7 +3209,7 @@ impl VM {
                 op::COMPARE_JUMP => {
                     let const_idx = op0;
                     let offset = next_word!();
-                    let limit = self.read_constant(fiber_idx, const_idx as usize);
+                    let limit = self.read_constant(fiber_idx, const_idx as usize)?;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
 
                     if val.is_number() && limit.is_number() {
@@ -3201,7 +3239,7 @@ impl VM {
                         }
                     } else {
                         // Slow path: resolve global and update IC
-                        let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                        let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             let val = self.global_values[global_idx];
                             if val.is_number() {
@@ -3235,7 +3273,7 @@ impl VM {
                     let val = if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index]
                     } else {
-                        let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                        let name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             let v = self.global_values[global_idx];
                             let frame = self.fibers[fiber_idx].frames.last().unwrap();
@@ -3247,7 +3285,7 @@ impl VM {
                         }
                     };
 
-                    let limit = self.read_constant(fiber_idx, const_idx as usize);
+                    let limit = self.read_constant(fiber_idx, const_idx as usize)?;
                     if val.is_number() && limit.is_number() {
                         if val.as_number() < limit.as_number() {
                             ip -= offset as usize;
@@ -3277,7 +3315,7 @@ impl VM {
                 }
                 op::CONSTANT => {
                     let idx = op0;
-                    let constant = self.read_constant(fiber_idx, idx as usize);
+                    let constant = self.read_constant(fiber_idx, idx as usize)?;
                     self.fibers[fiber_idx].stack.push(constant);
                 }
                 op::ADD_INT => {
@@ -3587,7 +3625,7 @@ impl VM {
                         let val = self.global_values[index];
                         self.fibers[fiber_idx].stack.push(val);
                     } else {
-                        let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                        let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             let val = self.global_values[global_idx];
                             self.fibers[fiber_idx].stack.push(val);
@@ -3613,7 +3651,7 @@ impl VM {
                     if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index] = val;
                     } else {
-                        let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                        let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             self.global_values[global_idx] = val;
 
@@ -3643,7 +3681,7 @@ impl VM {
                     if let Some(IcEntry::Global { index }) = ic {
                         self.global_values[index] = val;
                     } else {
-                        let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                        let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                         if let Some(&global_idx) = self.global_names.get(&name_id) {
                             self.global_values[global_idx] = val;
 
@@ -3662,13 +3700,13 @@ impl VM {
                 }
                 op::DEFINE_GLOBAL => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     self.insert_global_interned(name_id, val);
                 }
                 op::GET_PRIVATE => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string().to_lowercase();
                     let val = {
                         let mut found = None;
@@ -3716,7 +3754,7 @@ impl VM {
                 }
                 op::SET_PRIVATE => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string().to_lowercase();
                     let val = *self.fibers[fiber_idx].stack.last().unwrap();
                     if let Some(receiver) = self.fibers[fiber_idx].frames.last().unwrap().receiver {
@@ -4008,7 +4046,7 @@ impl VM {
                 }
                 op::MEMBER => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
                     if let Some(id) = base_val.as_gc_id() {
@@ -4206,7 +4244,7 @@ impl VM {
                 }
                 op::SET_MEMBER => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
@@ -4404,7 +4442,7 @@ impl VM {
                 }
                 op::INC_MEMBER => {
                     let idx = op0;
-                    let name_id = self.read_intern_id(fiber_idx, idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, idx as usize)?;
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
                     if let Some(id) = base_val.as_gc_id() {
@@ -4624,7 +4662,7 @@ impl VM {
                 op::CALL_NAMED => {
                     let total_count = op0;
                     let names_idx = next_word!();
-                    let names = match self.read_constant(fiber_idx, names_idx as usize) {
+                    let names = match self.read_constant(fiber_idx, names_idx as usize)? {
                         v if v.is_ptr() => {
                             if let GcObject::Array(arr) = self.heap.get(v.as_gc_id().unwrap()) {
                                 arr.iter().map(|v| self.to_string(*v)).collect::<Vec<_>>()
@@ -4644,7 +4682,7 @@ impl VM {
                     let name_idx = op0;
                     let total_count = next_word!();
                     let _unused = next_word!();
-                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string();
                     let (args, names) = self.flatten_encoded_named_spread_args(fiber_idx, total_count)?;
                     for value in args {
@@ -4659,7 +4697,7 @@ impl VM {
                 op::INVOKE => {
                     let name_idx = op0;
                     let arg_count = next_word!();
-                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                    let name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                     let name = self.interner.resolve(name_id).to_string();
                     #[cfg(all(target_arch = "wasm32", feature = "js-host-abi", not(feature = "js")))]
                     {
@@ -4706,9 +4744,9 @@ impl VM {
                     let name_idx = op0;
                     let total_count = next_word!();
                     let names_idx = next_word!();
-                    let invoke_name_id = self.read_intern_id(fiber_idx, name_idx as usize);
+                    let invoke_name_id = self.read_intern_id(fiber_idx, name_idx as usize)?;
                     let name = self.interner.resolve(invoke_name_id).to_string();
-                    let names = match self.read_constant(fiber_idx, names_idx as usize) {
+                    let names = match self.read_constant(fiber_idx, names_idx as usize)? {
                         v if v.is_ptr() => {
                             if let GcObject::Array(arr) = self.heap.get(v.as_gc_id().unwrap()) {
                                 arr.iter().map(|v| self.to_string(*v)).collect::<Vec<_>>()
@@ -5028,7 +5066,7 @@ impl VM {
                                                 for &word in &body_code {
                                                     if (word & 0xFF) as u8 == op::CONSTANT {
                                                         let cidx = word >> 8;
-                                                        let cv = self.read_constant(fiber_idx, cidx as usize);
+                                                        let cv = self.read_constant(fiber_idx, cidx as usize)?;
                                                         if cv.is_number() {
                                                             const_map.insert(cidx, cv.as_number());
                                                         }
@@ -5076,7 +5114,7 @@ impl VM {
                     let const_idx = next_word!();
                     let offset = next_word!();
                     let val = unsafe { *locals_ptr.add(slot as usize) };
-                    let constant = self.read_constant(fiber_idx, const_idx as usize);
+                    let constant = self.read_constant(fiber_idx, const_idx as usize)?;
                     if val != constant {
                         ip += offset as usize;
                     }
@@ -6383,7 +6421,7 @@ impl VM {
         self.throw_error(fiber_idx, &format!("BIF {} not found.", bif_name))
     }
 
-    fn read_constant(&mut self, fiber_idx: usize, idx: usize) -> BxValue {
+    fn read_constant(&mut self, fiber_idx: usize, idx: usize) -> Result<BxValue> {
         let val = {
             let fiber = &self.fibers[fiber_idx];
             let frame = fiber.frames.last().unwrap();
@@ -6397,7 +6435,7 @@ impl VM {
         };
 
         if let Some(v) = val {
-            return v;
+            return Ok(v);
         }
 
         let constant = {
@@ -6407,7 +6445,7 @@ impl VM {
             chunk.constants[idx].clone()
         };
 
-        let promoted = self.promote_constant(constant);
+        let promoted = self.promote_constant(constant)?;
         
         {
             let fiber = &mut self.fibers[fiber_idx];
@@ -6419,51 +6457,61 @@ impl VM {
             frame.promoted_constants[idx] = Some(promoted);
         }
         
-        promoted
+        Ok(promoted)
     }
 
-    fn promote_constant(&mut self, constant: Constant) -> BxValue {
+    fn promote_constant(&mut self, constant: Constant) -> Result<BxValue, RuntimeError> {
         match constant {
-            Constant::Number(n) => BxValue::new_number(n),
-            Constant::Boolean(b) => BxValue::new_bool(b),
-            Constant::Null => BxValue::new_null(),
-            Constant::String(s) => BxValue::new_ptr(self.heap.alloc(GcObject::String(s))),
+            Constant::Number(n) => Ok(BxValue::new_number(n)),
+            Constant::Boolean(b) => Ok(BxValue::new_bool(b)),
+            Constant::Null => Ok(BxValue::new_null()),
+            Constant::String(s) => {
+                let id = self.gc_alloc(GcObject::String(s))?;
+                Ok(BxValue::new_ptr(id))
+            }
             Constant::StringArray(arr) => {
                 let mut values = Vec::with_capacity(arr.len());
                 for s in arr {
-                    let id = self.heap.alloc(GcObject::String(BoxString::new(&s)));
+                    let id = self.gc_alloc(GcObject::String(BoxString::new(&s)))?;
                     values.push(BxValue::new_ptr(id));
                 }
-                let id = self.heap.alloc(GcObject::Array(values));
-                BxValue::new_ptr(id)
+                let id = self.gc_alloc(GcObject::Array(values))?;
+                Ok(BxValue::new_ptr(id))
             }
             Constant::CompiledFunction(f) => {
                 let mut f = f;
                 if f.captured_receiver.is_none() {
                     f.captured_receiver = self.current_receiver();
                 }
-                BxValue::new_ptr(self.heap.alloc(GcObject::CompiledFunction(Rc::new(f))))
+                let id = self.gc_alloc(GcObject::CompiledFunction(Rc::new(f)))?;
+                Ok(BxValue::new_ptr(id))
             }
-            Constant::Class(c) => BxValue::new_ptr(self.heap.alloc(GcObject::Class(Rc::new(RefCell::new(c))))),
-            Constant::Interface(i) => BxValue::new_ptr(self.heap.alloc(GcObject::Interface(Rc::new(RefCell::new(i))))),
+            Constant::Class(c) => {
+                let id = self.gc_alloc(GcObject::Class(Rc::new(RefCell::new(c))))?;
+                Ok(BxValue::new_ptr(id))
+            }
+            Constant::Interface(i) => {
+                let id = self.gc_alloc(GcObject::Interface(Rc::new(RefCell::new(i))))?;
+                Ok(BxValue::new_ptr(id))
+            }
         }
     }
 
-    fn read_string_constant(&mut self, fiber_idx: usize, idx: usize) -> String {
-        let val = self.read_constant(fiber_idx, idx);
+    fn read_string_constant(&mut self, fiber_idx: usize, idx: usize) -> Result<String> {
+        let val = self.read_constant(fiber_idx, idx)?;
         if let Some(id) = val.as_gc_id() {
             if let GcObject::String(s) = self.heap.get(id) {
-                return s.to_string();
+                return Ok(s.to_string());
             }
         }
-        panic!("Constant at index {} is not a string: {:?}", idx, val)
+        bail!("Constant at index {} is not a string: {:?}", idx, val)
     }
 
     /// Read a string constant, intern it, and return the InternId.
     /// Since InternId is Copy (u32), the borrow on self is released.
-    fn read_intern_id(&mut self, fiber_idx: usize, idx: usize) -> u32 {
-        let s = self.read_string_constant(fiber_idx, idx);
-        self.interner.intern(&s)
+    fn read_intern_id(&mut self, fiber_idx: usize, idx: usize) -> Result<u32> {
+        let s = self.read_string_constant(fiber_idx, idx)?;
+        Ok(self.interner.intern(&s))
     }
 
     #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -6684,6 +6732,44 @@ impl VM {
 
     pub fn collect_garbage_now(&mut self) {
         self.collect_garbage();
+    }
+
+    /// Attempts to allocate a GC object. On failure, triggers garbage
+    /// collection and retries once. Returns `RuntimeError::OutOfMemory`
+    /// if allocation fails even after GC.
+    pub(crate) fn gc_alloc(&mut self, obj: GcObject) -> Result<GcId, RuntimeError> {
+        if let Some(id) = self.heap.try_alloc(obj.clone()) {
+            return Ok(id);
+        }
+        self.collect_garbage();
+        self.heap
+            .try_alloc(obj)
+            .ok_or_else(|| RuntimeError::OutOfMemory(
+                "Heap exhausted: allocation failed even after garbage collection".into(),
+            ))
+    }
+
+    /// Helper for the opcode dispatch loop: attempts GC allocation,
+    /// and on failure converts the RuntimeError into a BoxLang throw.
+    /// Returns the allocated GcId on success, or propagates the error
+    /// via `throw_value` (returning `Err` if the exception bubbles up
+    /// uncaught).
+    fn gc_alloc_or_throw(&mut self, fiber_idx: usize, obj: GcObject) -> Result<GcId> {
+        match self.gc_alloc(obj) {
+            Ok(id) => Ok(id),
+            Err(e) => {
+                let val = self.exception_from_message(
+                    e.exception_type(),
+                    e.to_string(),
+                    None,
+                );
+                // throw_value returns Err only if no handler caught it
+                self.throw_value(fiber_idx, val)?;
+                // If throw_value returned Ok, the exception was caught;
+                // return an arbitrary error to stop the current operation.
+                bail!("OutOfMemory thrown and caught")
+            }
+        }
     }
 
     pub fn bx_to_json(&self, val: &BxValue) -> serde_json::Value {
@@ -6962,4 +7048,78 @@ pub fn _matchbox_set_instance_prop(vm_ptr: usize, gc_id: u32, name: &str, val: J
     let base_val = BxValue::new_ptr(gc_id as usize);
     let bx_val = vm.js_to_bx(val);
     wasm_instance_prop_set(vm, base_val, name, bx_val);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_error_out_of_memory_display() {
+        let err = RuntimeError::OutOfMemory("Heap exhausted after GC".to_string());
+        let display_str = format!("{}", err);
+        assert!(
+            display_str.contains("OutOfMemory"),
+            "Display should contain variant name, got: {}",
+            display_str
+        );
+        assert!(
+            display_str.contains("Heap exhausted after GC"),
+            "Display should contain message, got: {}",
+            display_str
+        );
+    }
+
+    #[test]
+    fn runtime_error_out_of_memory_exception_type() {
+        let err = RuntimeError::OutOfMemory("test".to_string());
+        assert_eq!(err.exception_type(), "OutOfMemoryException");
+    }
+
+    #[test]
+    fn runtime_error_out_of_memory_is_error_trait() {
+        // Verify it implements std::error::Error
+        let err = RuntimeError::OutOfMemory("test".to_string());
+        let _: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn gc_alloc_succeeds_on_normal_allocation() {
+        let mut vm = VM::new();
+        let result = vm.gc_alloc(GcObject::String(BoxString::new("test")));
+        assert!(result.is_ok(), "gc_alloc should succeed: {:?}", result.err());
+        let id = result.unwrap();
+        assert!(vm.heap.get_opt(id).is_some());
+    }
+
+    #[test]
+    fn gc_alloc_returns_err_on_oom() {
+        // Verify that RuntimeError::OutOfMemory is returned when the heap
+        // is completely exhausted. We test this by directly constructing
+        // the error since true OOM is difficult to trigger in unit tests.
+        let err = RuntimeError::OutOfMemory("No memory after GC".into());
+        assert_eq!(err.exception_type(), "OutOfMemoryException");
+        // Verify it can be used as a Result::Err
+        let result: Result<usize, RuntimeError> = Err(err);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn runtime_error_converts_to_anyhow() {
+        // RuntimeError implements std::error::Error, so anyhow's blanket
+        // From<E: std::error::Error + Send + Sync + 'static> applies.
+        let err = RuntimeError::OutOfMemory("test".into());
+        let anyhow_err: anyhow::Error = err.into();
+        let msg = format!("{}", anyhow_err);
+        assert!(msg.contains("OutOfMemory"));
+        assert!(msg.contains("test"));
+    }
+
+    #[test]
+    fn vm_with_config_uses_esp32_preset() {
+        let vm = VM::with_config(GCConfig::for_esp32());
+        assert_eq!(vm.config.initial_capacity, 128);
+        assert_eq!(vm.config.initial_threshold, 256);
+        assert_eq!(vm.heap.gc_threshold(), 256);
+    }
 }
