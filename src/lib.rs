@@ -109,7 +109,10 @@ The embedded HTTP transport for `listen()` and heavier server features is not im
     bail!(message)
 }
 
-pub fn include_bif(vm: &mut dyn types::BxVM, args: &[types::BxValue]) -> Result<types::BxValue, String> {
+pub fn include_bif(
+    vm: &mut dyn types::BxVM,
+    args: &[types::BxValue],
+) -> Result<types::BxValue, String> {
     if args.is_empty() {
         return Err("include() expects 1 argument".to_string());
     }
@@ -127,7 +130,10 @@ pub fn include_bif(vm: &mut dyn types::BxVM, args: &[types::BxValue]) -> Result<
         })
         .unwrap_or_else(|| std_env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-    let base_dir = current_file.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let base_dir = current_file
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
     let raw_path = Path::new(&include_path);
     let resolved = if raw_path.is_absolute() {
         raw_path.to_path_buf()
@@ -146,10 +152,7 @@ pub fn include_bif(vm: &mut dyn types::BxVM, args: &[types::BxValue]) -> Result<
             if with_bx.exists() {
                 with_bx
             } else {
-                return Err(format!(
-                    "Include file not found: {}",
-                    resolved.display()
-                ));
+                return Err(format!("Include file not found: {}", resolved.display()));
             }
         }
     } else {
@@ -184,8 +187,13 @@ fn collect_esp32_unsupported_features_in_stmt(
     use ast::StatementKind;
 
     match &stmt.kind {
-        StatementKind::Import { .. } | StatementKind::Continue | StatementKind::Break
-        | StatementKind::Rethrow | StatementKind::Not(_) |         StatementKind::Include(_) | StatementKind::BufferOutput(_) => {}
+        StatementKind::Import { .. }
+        | StatementKind::Continue
+        | StatementKind::Break
+        | StatementKind::Rethrow
+        | StatementKind::Not(_)
+        | StatementKind::Include(_)
+        | StatementKind::BufferOutput(_) => {}
         StatementKind::ClassDecl { members, .. } => {
             for member in members {
                 if let ast::ClassMember::Statement(statement) = member {
@@ -368,7 +376,11 @@ fn collect_esp32_unsupported_features_in_stmt(
         StatementKind::DoWhile { condition, body } => {
             collect_esp32_unsupported_features_in_expr(condition, findings, embedded_web_enabled);
             for statement in body {
-                collect_esp32_unsupported_features_in_stmt(statement, findings, embedded_web_enabled);
+                collect_esp32_unsupported_features_in_stmt(
+                    statement,
+                    findings,
+                    embedded_web_enabled,
+                );
             }
         }
     }
@@ -1544,7 +1556,8 @@ pub fn process_file(
             .unwrap_or_else(|_| source_path.parent().unwrap_or(Path::new(".")).to_path_buf());
         let modules_info = modules::discover_modules(&cwd, extra_module_paths)?;
         let embedded_manifest = if orig_target == Some("esp32") {
-            embedded::discover_embedded_app(&cwd)?
+            let project_root = source_path.parent().unwrap_or(cwd.as_path());
+            embedded::discover_embedded_app(project_root)?
         } else {
             None
         };
@@ -1775,7 +1788,10 @@ pub fn run_chunk(chunk: Chunk, modules: &[modules::ModuleInfo]) -> Result<()> {
     let mut external_bifs = HashMap::new();
     #[allow(unused_mut)]
     let mut native_classes = HashMap::new();
-    external_bifs.insert("include".to_string(), include_bif as types::BxNativeFunction);
+    external_bifs.insert(
+        "include".to_string(),
+        include_bif as types::BxNativeFunction,
+    );
 
     #[cfg(feature = "bif-tui")]
     {
@@ -1817,7 +1833,10 @@ fn run_repl() -> Result<()> {
 
     let args: Vec<String> = std_env::args().collect();
     let mut external_bifs = HashMap::new();
-    external_bifs.insert("include".to_string(), include_bif as types::BxNativeFunction);
+    external_bifs.insert(
+        "include".to_string(),
+        include_bif as types::BxNativeFunction,
+    );
     let mut vm = vm::VM::new_with_bifs(external_bifs, HashMap::new());
     vm.cli_args = args;
 
@@ -2138,7 +2157,8 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
-strip = true
+debug = "line-tables-only"
+strip = false
 "#,
     );
 
@@ -2741,7 +2761,7 @@ fn produce_esp32_binary(
             println!("Fast deploy successful!");
             return Ok(());
         }
-        bail!("Embedded web fast deploy requires an app/ directory with embedded routes");
+        bail!("Embedded web fast deploy requires an app/ directory or Application.bx");
     }
 
     // Attempt to use a pre-built stub if available
@@ -2824,6 +2844,27 @@ fn produce_esp32_binary(
     let runner_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("crates")
         .join("matchbox-esp32-runner");
+    let runner_sdkconfig_defaults = runner_path.join("sdkconfig.defaults");
+    let mut runner_sdkconfig_defaults_contents = fs::read_to_string(&runner_sdkconfig_defaults)?;
+    runner_sdkconfig_defaults_contents = runner_sdkconfig_defaults_contents.replace(
+        "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"",
+        &format!(
+            "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"{}\"",
+            runner_path.join("partitions.csv").display()
+        ),
+    );
+    runner_sdkconfig_defaults_contents = runner_sdkconfig_defaults_contents.replace(
+        "CONFIG_PARTITION_TABLE_FILENAME=\"partitions.csv\"",
+        &format!(
+            "CONFIG_PARTITION_TABLE_FILENAME=\"{}\"",
+            runner_path.join("partitions.csv").display()
+        ),
+    );
+    let runner_sdkconfig_defaults_path = temp_dir.join("runner-sdkconfig.defaults");
+    fs::write(
+        &runner_sdkconfig_defaults_path,
+        runner_sdkconfig_defaults_contents,
+    )?;
 
     let cargo_bin = std_env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut cmd = std::process::Command::new(cargo_bin);
@@ -2835,7 +2876,26 @@ fn produce_esp32_binary(
         .current_dir(&runner_path)
         .env("BOXLANG_BYTECODE_PATH", bytecode_path.to_str().unwrap())
         .env("ESP_IDF_TOOLS_INSTALL_DIR", "fromenv")
-        .env("MCU", chip);
+        .env(
+            "ESP_IDF_SDKCONFIG_DEFAULTS",
+            runner_sdkconfig_defaults_path.to_str().unwrap(),
+        )
+        .env(
+            "SDKCONFIG_DEFAULTS",
+            runner_sdkconfig_defaults_path.to_str().unwrap(),
+        )
+        .env("MCU", chip)
+        .env(
+            "BINDGEN_EXTRA_CLANG_ARGS",
+            format!(
+                "-include {} -I{}",
+                runner_path
+                    .join("bindgen-shims")
+                    .join("portmacro_bindgen.h")
+                    .display(),
+                runner_path.join("bindgen-shims").display()
+            ),
+        );
 
     if let Some(config) = esp32_config {
         if let Some(board) = config.board.as_deref() {
@@ -2864,15 +2924,17 @@ fn produce_esp32_binary(
         );
     }
 
-    if esp32_web {
-        cmd.arg("--features").arg("embedded-web");
-    }
     let psram_enabled = esp32_config
         .and_then(|config| config.psram)
         .unwrap_or(false)
         || std_env::var_os("MATCHBOX_ESP32_PSRAM").is_some();
+    let mut runner_features = Vec::new();
+    if esp32_web {
+        cmd.arg("--no-default-features");
+        runner_features.push("embedded-web");
+    }
     if psram_enabled {
-        cmd.arg("--features").arg("psram");
+        runner_features.push("psram");
         match esp32_config.and_then(|config| config.board.as_deref()) {
             Some("xiao-esp32s3-sense") => {
                 let sdkconfig_path = runner_path.join("sdkconfig.xiao-esp32s3-sense");
@@ -2888,6 +2950,9 @@ fn produce_esp32_binary(
                 cmd.env("SDKCONFIG_DEFAULTS", sdkconfig_defaults.to_str().unwrap());
             }
         }
+    }
+    if !runner_features.is_empty() {
+        cmd.arg("--features").arg(runner_features.join(","));
     }
 
     let status = cmd.status()?;
@@ -3158,7 +3223,8 @@ fn watch_mode(
                                 source_path.parent().unwrap_or(Path::new(".")).to_path_buf()
                             });
                             let embedded_manifest = if esp32_web {
-                                embedded::discover_embedded_app(&cwd)?
+                                let project_root = source_path.parent().unwrap_or(cwd.as_path());
+                                embedded::discover_embedded_app(project_root)?
                             } else {
                                 None
                             };

@@ -1853,6 +1853,19 @@ impl VM {
         self.insert_global_interned(name_id, val);
     }
 
+    pub fn insert_empty_struct_global(&mut self, name: &str) -> BxValue {
+        let id = self.struct_new();
+        let value = BxValue::new_ptr(id);
+        self.insert_global(name.to_string(), value);
+        value
+    }
+
+    pub fn get_global_struct_member(&self, global_name: &str, member_name: &str) -> Option<BxValue> {
+        let global = self.get_global(global_name)?;
+        let id = global.as_gc_id()?;
+        Some(self.struct_get(id, member_name))
+    }
+
     fn insert_global_interned(&mut self, name_id: u32, val: BxValue) {
         if let Some(&idx) = self.global_names.get(&name_id) {
             self.global_values[idx] = val;
@@ -2071,6 +2084,14 @@ impl VM {
         self.interpret_chunk_shared(chunk_for_func, chunk_rc)
     }
 
+    pub fn interpret_chunk_borrowed_current_task(&mut self, chunk: &Chunk) -> Result<BxValue> {
+        let chunk_for_func = Chunk::default();
+        let mut owned_chunk = chunk.clone_without_runtime_caches();
+        owned_chunk.ensure_caches();
+        let chunk_rc = Rc::new(RefCell::new(owned_chunk));
+        self.interpret_chunk_shared_current_task(chunk_for_func, chunk_rc)
+    }
+
     fn interpret_chunk_shared(
         &mut self,
         chunk_for_func: Chunk,
@@ -2116,6 +2137,54 @@ impl VM {
         let res = self.run_all();
         self.current_fiber_idx = None;
         res
+    }
+
+    fn interpret_chunk_shared_current_task(
+        &mut self,
+        chunk_for_func: Chunk,
+        chunk_rc: Rc<RefCell<Chunk>>,
+    ) -> Result<BxValue> {
+        let function = Rc::new(BxCompiledFunction {
+            name: "script".to_string(),
+            arity: 0,
+            min_arity: 0,
+            params: Vec::new(),
+            modifiers: crate::types::FunctionModifiers::default(),
+            captured_receiver: None,
+            chunk: chunk_for_func,
+        });
+
+        let future_id = self.heap.alloc(GcObject::Future(BxFuture {
+            value: BxValue::new_null(),
+            status: FutureStatus::Pending,
+            error_handler: None,
+        }));
+
+        let fiber = BxFiber {
+            stack: Vec::with_capacity(256),
+            frames: vec![CallFrame {
+                function,
+                chunk: chunk_rc,
+                ip: 0,
+                stack_base: 0,
+                receiver: None,
+                handlers: Vec::new(),
+                promoted_constants: Vec::new(),
+            }],
+
+            variables: Self::new_variables_scope(),
+            future_id,
+            wait_until: None,
+            yield_requested: false,
+            priority: 0,
+            root_stack: Vec::new(),
+        };
+
+        self.fibers.push(fiber);
+        let fiber_idx = self.fibers.len() - 1;
+        let result = self.run_fiber_to_completion(fiber_idx);
+        self.current_fiber_idx = None;
+        result
     }
 
     pub fn start_call_function_value(&mut self, func: BxValue, args: Vec<BxValue>) -> Result<BxValue> {
@@ -2167,6 +2236,14 @@ impl VM {
         let mut i = 0;
 
         while i < self.fibers.len() {
+            if let Some(until) = self.fibers[i].wait_until {
+                if Instant::now() < until {
+                    i += 1;
+                    continue;
+                }
+                self.fibers[i].wait_until = None;
+            }
+
             self.current_fiber_idx = Some(i);
             match self.run_fiber(i, None) {
                 Ok(Some(result)) => {
@@ -2575,6 +2652,56 @@ impl VM {
         }
         
         Ok(last_result)
+    }
+
+    fn run_fiber_to_completion(&mut self, fiber_idx: usize) -> Result<BxValue> {
+        loop {
+            self.drain_native_completions();
+            if fiber_idx >= self.fibers.len() {
+                return Ok(BxValue::new_null());
+            }
+
+            if let Some(until) = self.fibers[fiber_idx].wait_until {
+                let now = Instant::now();
+                if until > now {
+                    std::thread::sleep(until - now);
+                }
+                if fiber_idx < self.fibers.len() {
+                    self.fibers[fiber_idx].wait_until = None;
+                }
+            }
+
+            self.current_fiber_idx = Some(fiber_idx);
+            match self.run_fiber(fiber_idx, None) {
+                Ok(Some(result)) => {
+                    let fiber = self.fibers.swap_remove(fiber_idx);
+                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                        f.value = result;
+                        f.status = FutureStatus::Completed;
+                    }
+                    self.current_fiber_idx = None;
+                    return Ok(result);
+                }
+                Ok(None) => {
+                    self.current_fiber_idx = None;
+                }
+                Err(e) => {
+                    let fiber = self.fibers.swap_remove(fiber_idx);
+                    let err_val = BxValue::new_ptr(
+                        self.heap.alloc(GcObject::String(BoxString::new(&e.to_string()))),
+                    );
+                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                        f.status = FutureStatus::Failed(err_val);
+                    }
+                    self.current_fiber_idx = None;
+                    return Err(e);
+                }
+            }
+
+            if self.heap.should_collect() {
+                self.collect_garbage();
+            }
+        }
     }
 
     fn run_fiber(&mut self, fiber_idx: usize, timeslice_end: Option<Instant>) -> Result<Option<BxValue>> {
@@ -5426,7 +5553,9 @@ impl VM {
                         }
                     };
                     self.current_fiber_idx = None;
-                    let _ = self.fibers.pop();
+                    if fiber_idx < self.fibers.len() {
+                        self.fibers.swap_remove(fiber_idx);
+                    }
                     result
                 } else {
                     anyhow::bail!("Method {} not found on instance", name)
@@ -6540,6 +6669,10 @@ impl VM {
         }
 
         self.heap.collect(&roots);
+    }
+
+    pub fn collect_garbage_now(&mut self) {
+        self.collect_garbage();
     }
 
     pub fn bx_to_json(&self, val: &BxValue) -> serde_json::Value {

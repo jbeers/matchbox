@@ -1,7 +1,10 @@
-use crate::types::{BxValue, BxStruct, BxInstance, BxFuture, BxCompiledFunction, BxClass, BxInterface, BxNativeFunction, BxNativeObject, BxRange, box_string::BoxString};
+use crate::types::{
+    box_string::BoxString, BxClass, BxCompiledFunction, BxFuture, BxInstance, BxInterface,
+    BxNativeFunction, BxNativeObject, BxRange, BxStruct, BxValue,
+};
 use chrono::{DateTime, Utc};
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 pub type GcId = usize;
 
@@ -41,14 +44,19 @@ pub struct Heap {
 
 impl Heap {
     pub fn new() -> Self {
+        #[cfg(target_os = "espidf")]
+        const INITIAL_CAPACITY: usize = 128;
+        #[cfg(not(target_os = "espidf"))]
+        const INITIAL_CAPACITY: usize = 1024;
+
         Heap {
-            objects: Vec::with_capacity(1024),
-            marks: Vec::with_capacity(1024),
+            objects: Vec::with_capacity(INITIAL_CAPACITY),
+            marks: Vec::with_capacity(INITIAL_CAPACITY),
             free_list: Vec::new(),
             alloc_count: 0,
             next_gc_threshold: 1000,
-            generations: Vec::with_capacity(1024),
-            dirty: Vec::with_capacity(1024),
+            generations: Vec::with_capacity(INITIAL_CAPACITY),
+            dirty: Vec::with_capacity(INITIAL_CAPACITY),
             remembered_set: Vec::new(),
             young_objects: Vec::new(),
             minor_gc_count: 0,
@@ -76,7 +84,9 @@ impl Heap {
     }
 
     pub fn get(&self, id: GcId) -> &GcObject {
-        self.objects[id].as_ref().expect("Attempted to access collected object")
+        self.objects[id]
+            .as_ref()
+            .expect("Attempted to access collected object")
     }
 
     #[inline]
@@ -89,7 +99,9 @@ impl Heap {
             self.dirty[id] = true;
             self.remembered_set.push(id);
         }
-        self.objects[id].as_mut().expect("Attempted to access collected object")
+        self.objects[id]
+            .as_mut()
+            .expect("Attempted to access collected object")
     }
 
     pub fn should_collect(&self) -> bool {
@@ -135,7 +147,9 @@ impl Heap {
 
         // Mark phase: only traverse young objects
         while let Some(id) = worklist.pop() {
-            if self.marks[id] { continue; }
+            if self.marks[id] {
+                continue;
+            }
             self.marks[id] = true;
             self.push_children_young(id, &mut worklist);
         }
@@ -167,7 +181,9 @@ impl Heap {
         }
 
         while let Some(id) = worklist.pop() {
-            if self.marks[id] { continue; }
+            if self.marks[id] {
+                continue;
+            }
             self.marks[id] = true;
             self.push_children(id, &mut worklist);
         }
@@ -191,9 +207,19 @@ impl Heap {
 
     fn push_children(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) | GcObject::DateTime(_) => {}
+            GcObject::String(_)
+            | GcObject::Bytes(_)
+            | GcObject::NativeFunction(_)
+            | GcObject::Class(_)
+            | GcObject::Interface(_)
+            | GcObject::CompiledFunction(_)
+            | GcObject::Range(_)
+            | GcObject::DateTime(_) => {}
             GcObject::NativeObject(obj) => {
-                let mut tracer = WorklistTracer { worklist, heap: self };
+                let mut tracer = WorklistTracer {
+                    worklist,
+                    heap: self,
+                };
                 // Use unsafe to bypass RefCell borrow check during tracing.
                 // This is safe because GC is stop-the-world and we are only reading.
                 // This is necessary because the object might be borrowed by the VM
@@ -236,9 +262,19 @@ impl Heap {
 
     fn push_children_young(&self, id: GcId, worklist: &mut Vec<GcId>) {
         match self.objects[id].as_ref().unwrap() {
-            GcObject::String(_) | GcObject::Bytes(_) | GcObject::NativeFunction(_) | GcObject::Class(_) | GcObject::Interface(_) | GcObject::CompiledFunction(_) | GcObject::Range(_) | GcObject::DateTime(_) => {}
+            GcObject::String(_)
+            | GcObject::Bytes(_)
+            | GcObject::NativeFunction(_)
+            | GcObject::Class(_)
+            | GcObject::Interface(_)
+            | GcObject::CompiledFunction(_)
+            | GcObject::Range(_)
+            | GcObject::DateTime(_) => {}
             GcObject::NativeObject(obj) => {
-                let mut tracer = YoungWorklistTracer { worklist, heap: self };
+                let mut tracer = YoungWorklistTracer {
+                    worklist,
+                    heap: self,
+                };
                 unsafe {
                     let ptr = obj.as_ptr();
                     (*ptr).trace(&mut tracer);
@@ -299,7 +335,6 @@ impl<'a> crate::types::Tracer for YoungWorklistTracer<'a> {
 }
 
 impl Heap {
-
     fn add_to_worklist(&self, val: &BxValue, worklist: &mut Vec<GcId>) {
         if let Some(id) = val.as_gc_id() {
             if id < self.objects.len() && self.objects[id].is_some() {
@@ -310,10 +345,7 @@ impl Heap {
 
     fn add_to_worklist_young(&self, val: &BxValue, worklist: &mut Vec<GcId>) {
         if let Some(id) = val.as_gc_id() {
-            if id < self.objects.len()
-                && self.objects[id].is_some()
-                && self.generations[id] == 0
-            {
+            if id < self.objects.len() && self.objects[id].is_some() && self.generations[id] == 0 {
                 worklist.push(id);
             }
         }

@@ -14,7 +14,10 @@ pub fn try_start(profile: &StrictProfile, port: u16) -> Result<EspMdns> {
         "_http",
         "_tcp",
         port,
-        &[("board", "matchbox-esp32"), ("hostname", profile.wifi_hostname)],
+        &[
+            ("board", "matchbox-esp32"),
+            ("hostname", profile.wifi_hostname),
+        ],
     )?;
     println!(
         "[matchbox] mDNS ready: http://{}.local:{}",

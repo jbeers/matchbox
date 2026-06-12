@@ -1,7 +1,8 @@
 use crate::features::BundledFeatures;
+#[cfg(feature = "platform-mdns")]
+use crate::mdns;
 use crate::profile::StrictProfile;
-use crate::printer;
-use crate::{mdns, web, wifi};
+use crate::{web, wifi};
 use anyhow::Result;
 
 #[derive(Clone, Copy, Debug)]
@@ -43,11 +44,30 @@ impl PlatformServices {
 
     pub fn run_forever(&self, profile: &StrictProfile) -> Result<()> {
         self.log_psram_runtime();
-        let wifi_state = wifi::connect(profile)?;
+
+        #[cfg(feature = "platform-web")]
+        let route_table = if self.features.web {
+            let route_table = web::load_executable_route_table();
+            web::run_application_start(&route_table)?;
+            Some(route_table)
+        } else {
+            None
+        };
+
+        let fallback_wifi_state = if wifi::active_ip().is_some() {
+            None
+        } else {
+            Some(wifi::connect(profile)?)
+        };
+        let ip = wifi::active_ip()
+            .or_else(|| fallback_wifi_state.as_ref().map(|state| state.ip.clone()))
+            .unwrap_or_else(|| "0.0.0.0".to_string());
 
         #[cfg(feature = "platform-web")]
         if self.features.web {
-            web::serve(profile, self.features, &wifi_state)?;
+            if let Some(route_table) = route_table {
+                web::serve_with_route_table(profile, self.features, &ip, route_table)?;
+            }
         }
 
         #[cfg(feature = "platform-mdns")]

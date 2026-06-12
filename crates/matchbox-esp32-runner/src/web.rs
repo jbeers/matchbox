@@ -1,33 +1,51 @@
-use crate::features::BundledFeatures;
 use crate::camera::with_photo;
+use crate::features::BundledFeatures;
 use crate::profile::StrictProfile;
-use crate::wifi::WifiState;
 use anyhow::Result;
 use embedded_svc::http::Method;
 use embedded_svc::http::server::Request;
 use embedded_svc::io::Read as _;
 use embedded_svc::io::Write as _;
-use esp_idf_svc::http::server::{Configuration as HttpConfiguration, EspHttpConnection, EspHttpServer};
-use matchbox_vm::{types::{BxVM, BxValue}, vm::VM, Chunk};
+use esp_idf_svc::http::server::{
+    Configuration as HttpConfiguration, EspHttpConnection, EspHttpServer,
+};
+use matchbox_vm::{
+    Chunk,
+    types::{BxVM, BxValue},
+    vm::VM,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 
 static EMBEDDED_ROUTE_TABLE_JSON: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/embedded-route-table.json"));
 
-// ESP32-specific warmed VM holder. This is intentionally separate from the
-// general MatchBox runtime model so the embedded runner can reuse one warmed VM
-// across requests without reintroducing per-request VM construction.
-struct SharedEsp32Vm {
+struct ActiveHttpServer(EspHttpServer<'static>);
+
+// The server is created once on startup and stored only to keep ESP-IDF's
+// server handle and URI registrations alive for the process lifetime.
+unsafe impl Send for ActiveHttpServer {}
+
+fn active_server() -> &'static Mutex<Option<ActiveHttpServer>> {
+    static ACTIVE_SERVER: OnceLock<Mutex<Option<ActiveHttpServer>>> = OnceLock::new();
+    ACTIVE_SERVER.get_or_init(|| Mutex::new(None))
+}
+
+struct ApplicationVm {
     ptr: usize,
 }
 
-impl SharedEsp32Vm {
+impl ApplicationVm {
     fn new() -> Self {
-        let vm = Box::new(VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new()));
+        let vm = Box::new(VM::new_with_bifs(
+            crate::esp32_bifs::register_bifs(),
+            HashMap::new(),
+        ));
         Self {
             ptr: Box::into_raw(vm) as usize,
         }
@@ -42,12 +60,29 @@ impl SharedEsp32Vm {
 // This wrapper is an embedded-only escape hatch. Access is serialized through
 // a Mutex in the runner, and it should be unified with a cleaner shared runtime
 // model once the main VM grows one.
-unsafe impl Send for SharedEsp32Vm {}
-unsafe impl Sync for SharedEsp32Vm {}
+unsafe impl Send for ApplicationVm {}
+unsafe impl Sync for ApplicationVm {}
+
+static APPLICATION_VM: OnceLock<Arc<Mutex<ApplicationVm>>> = OnceLock::new();
+
+fn application_vm() -> Arc<Mutex<ApplicationVm>> {
+    APPLICATION_VM
+        .get_or_init(|| Arc::new(Mutex::new(ApplicationVm::new())))
+        .clone()
+}
 
 #[derive(Clone, Debug, Default, Deserialize)]
 struct EmbeddedRouteTable {
+    #[serde(default)]
+    application: Option<EmbeddedApplicationEntry>,
+    #[serde(default)]
     routes: Vec<EmbeddedRouteTableEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct EmbeddedApplicationEntry {
+    source_path: String,
+    bytecode: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -60,8 +95,15 @@ struct EmbeddedRouteTableEntry {
 }
 
 #[derive(Clone, Debug)]
-struct ExecutableRouteTable {
+pub(crate) struct ExecutableRouteTable {
+    application: Option<ExecutableApplicationEntry>,
     routes: Vec<ExecutableRouteTableEntry>,
+}
+
+#[derive(Clone, Debug)]
+struct ExecutableApplicationEntry {
+    source_path: String,
+    chunk: Arc<Chunk>,
 }
 
 #[derive(Clone, Debug)]
@@ -99,31 +141,74 @@ struct PartitionSnapshot {
     size: usize,
 }
 
-pub fn serve(
+pub fn serve(profile: &StrictProfile, features: BundledFeatures, ip: &str) -> Result<()> {
+    let route_table = load_executable_route_table();
+    serve_with_route_table(profile, features, ip, route_table)
+}
+
+pub fn serve_with_route_table(
     profile: &StrictProfile,
     features: BundledFeatures,
-    wifi_state: &WifiState,
+    ip: &str,
+    route_table: ExecutableRouteTable,
 ) -> Result<()> {
     let mut config = HttpConfiguration::default();
     config.http_port = profile.web_port;
     config.stack_size = 16384;
-    config.max_sessions = 2;
-    config.max_open_sockets = 2;
-    config.max_uri_handlers = 12;
+    config.max_sessions = 4;
+    config.max_open_sockets = 4;
+    config.max_uri_handlers = 20;
     config.lru_purge_enable = true;
     config.uri_match_wildcard = true;
 
     let mut server = EspHttpServer::new(&config)?;
     let hostname = profile.wifi_hostname.to_string();
-    let ip = wifi_state.ip.clone();
+    let ip = ip.to_string();
     let feature_summary = features.describe();
-    let route_table = Arc::new(load_executable_route_table());
-    let shared_vm = Arc::new(Mutex::new(SharedEsp32Vm::new()));
+    let route_table = Arc::new(route_table);
+    let shared_vm = application_vm();
     let route_count = route_table.routes.len();
 
+    let index_hostname = hostname.clone();
+    let index_ip = ip.clone();
+    let index_feature_summary = feature_summary.clone();
+    for path in [
+        "/generate_204",
+        "/gen_204",
+        "/hotspot-detect.html",
+        "/library/test/success.html",
+        "/connecttest.txt",
+        "/ncsi.txt",
+    ] {
+        server.fn_handler(path, Method::Get, move |request| {
+            println!("[matchbox] captive portal redirect {}", request.uri());
+            request
+                .into_response(
+                    302,
+                    Some("Found"),
+                    &[
+                        ("location", "http://192.168.4.1/"),
+                        ("content-type", "text/plain; charset=utf-8"),
+                        ("cache-control", "no-store"),
+                    ],
+                )?
+                .write_all(b"Open http://192.168.4.1/")
+                .map(|_| ())
+        })?;
+    }
+
+    server.fn_handler("/__matchbox/ping", Method::Get, move |request| {
+        println!("[matchbox] HTTP GET /__matchbox/ping");
+        request
+            .into_response(200, Some("OK"), &[("content-type", "text/plain")])?
+            .write_all(b"pong")
+            .map(|_| ())
+    })?;
+
     server.fn_handler("/__matchbox", Method::Get, move |request| {
+        println!("[matchbox] HTTP GET /__matchbox");
         let html = format!(
-            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{hostname}</title></head><body><main><h1>{hostname}</h1><p>Bundled ESP32 runner is online.</p><p>IP: {ip}</p><p>Features: {feature_summary}</p><p>Embedded routes: {route_count}</p></main></body></html>"
+            "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{index_hostname}</title></head><body><main><h1>{index_hostname}</h1><p>Bundled ESP32 runner is online.</p><p>IP: {index_ip}</p><p>Features: {index_feature_summary}</p><p>Embedded routes: {route_count}</p></main></body></html>"
         );
         request
             .into_ok_response()?
@@ -132,7 +217,7 @@ pub fn serve(
     })?;
 
     let hostname = profile.wifi_hostname.to_string();
-    let ip = wifi_state.ip.clone();
+    let status_ip = ip.clone();
     let feature_summary = features.describe();
     let status_routes: Vec<_> = route_table
         .routes
@@ -149,12 +234,14 @@ pub fn serve(
     server.fn_handler("/__matchbox/status", Method::Get, move |request| {
         let heap = heap_snapshot();
         let partitions = partition_snapshots();
+        println!("[matchbox] HTTP GET /__matchbox/status");
         let payload = json!({
             "ok": true,
             "hostname": hostname,
-            "ip": ip,
+            "ip": status_ip,
             "features": feature_summary,
             "heap": heap,
+            "diagnostics": crate::diagnostics::snapshot(),
             "partitions": partitions,
             "routes": status_routes,
         });
@@ -162,11 +249,18 @@ pub fn serve(
         let mut response = request
             .into_response(200, Some("OK"), &[("content-type", "application/json")])
             .map_err(anyhow::Error::msg)?;
-        response.write_all(&body).map(|_| ()).map_err(anyhow::Error::msg)
+        response
+            .write_all(&body)
+            .map(|_| ())
+            .map_err(anyhow::Error::msg)
     })?;
 
     server.fn_handler("/__matchbox/photo/*", Method::Get, move |request| {
-        let path = request.uri().split_once('?').map(|(path, _)| path).unwrap_or(request.uri());
+        let path = request
+            .uri()
+            .split_once('?')
+            .map(|(path, _)| path)
+            .unwrap_or(request.uri());
         let Some(photo_id) = path
             .strip_prefix("/__matchbox/photo/")
             .and_then(|segment| segment.parse::<u64>().ok())
@@ -201,7 +295,10 @@ pub fn serve(
                         ],
                     )
                     .map_err(anyhow::Error::msg)?;
-                response.write_all(bytes).map(|_| ()).map_err(anyhow::Error::msg)
+                response
+                    .write_all(bytes)
+                    .map(|_| ())
+                    .map_err(anyhow::Error::msg)
             }
             None => request
                 .into_response(
@@ -235,9 +332,12 @@ pub fn serve(
 
     println!(
         "[matchbox] Embedded app server listening on http://{}:{}",
-        wifi_state.ip, profile.web_port
+        ip, profile.web_port
     );
-    core::mem::forget(server);
+    *active_server()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("HTTP server state lock poisoned"))? =
+        Some(ActiveHttpServer(server));
     Ok(())
 }
 
@@ -253,8 +353,25 @@ fn load_route_table() -> EmbeddedRouteTable {
     postcard::from_bytes(EMBEDDED_ROUTE_TABLE_JSON).unwrap_or_default()
 }
 
-fn load_executable_route_table() -> ExecutableRouteTable {
+pub fn load_executable_route_table() -> ExecutableRouteTable {
     let route_table = load_route_table();
+    let application = route_table.application.and_then(|application| {
+        let mut chunk: Chunk = match postcard::from_bytes(&application.bytecode) {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                println!(
+                    "[matchbox] Failed to deserialize application bytecode for {}: {}",
+                    application.source_path, error
+                );
+                return None;
+            }
+        };
+        chunk.reconstruct_functions();
+        Some(ExecutableApplicationEntry {
+            source_path: application.source_path,
+            chunk: Arc::new(chunk),
+        })
+    });
     let mut routes = Vec::with_capacity(route_table.routes.len());
 
     for route in route_table.routes {
@@ -284,7 +401,97 @@ fn load_executable_route_table() -> ExecutableRouteTable {
         routes.len()
     );
 
-    ExecutableRouteTable { routes }
+    ExecutableRouteTable {
+        application,
+        routes,
+    }
+}
+
+pub fn run_application_start(route_table: &ExecutableRouteTable) -> Result<()> {
+    let Some(application) = route_table.application.as_ref() else {
+        return Ok(());
+    };
+
+    println!(
+        "[matchbox] Executing Application.onApplicationStart source={}",
+        application.source_path
+    );
+    let mut vm = VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new());
+    vm.interpret_chunk_borrowed(application.chunk.as_ref())
+        .map_err(anyhow::Error::msg)?;
+    let application = vm
+        .construct_global_class("Application", Vec::new())
+        .map_err(anyhow::Error::msg)?;
+    vm.insert_empty_struct_global("application");
+    match vm.call_method_value(application, "onApplicationStart", Vec::new()) {
+        Ok(_) => {
+            let runtime = Arc::new(Mutex::new(ApplicationVm {
+                ptr: Box::into_raw(Box::new(vm)) as usize,
+            }));
+            let _ = APPLICATION_VM.set(Arc::clone(&runtime));
+            start_application_fiber_scheduler(runtime);
+            Ok(())
+        }
+        Err(error)
+            if error.to_string().contains("Method ")
+                && error.to_string().contains(" not found on instance") =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(anyhow::Error::msg(error)),
+    }
+}
+
+fn start_application_fiber_scheduler(vm: Arc<Mutex<ApplicationVm>>) {
+    let has_fibers = vm
+        .lock()
+        .map(|mut vm| vm.with_vm(|vm| !vm.fibers.is_empty()))
+        .unwrap_or(false);
+    if !has_fibers {
+        return;
+    }
+
+    let builder = thread::Builder::new()
+        .name("matchbox-app-fibers".to_string())
+        .stack_size(16384);
+    match builder.spawn(move || {
+        println!("[matchbox] Application fiber scheduler started");
+        loop {
+            match vm.lock() {
+                Ok(mut vm) => {
+                    let result = vm.with_vm(|vm| {
+                        if vm.fibers.is_empty() {
+                            return Ok(false);
+                        }
+                        vm.pump_until_blocked()?;
+                        Ok::<bool, anyhow::Error>(true)
+                    });
+                    match result {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            println!("[matchbox] Application fiber scheduler stopped");
+                            break;
+                        }
+                        Err(error) => {
+                            println!("[matchbox] Application fiber scheduler error: {}", error);
+                            break;
+                        }
+                    }
+                }
+                Err(_) => {
+                    println!("[matchbox] Application fiber scheduler lock poisoned");
+                    break;
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }) {
+        Ok(_) => {}
+        Err(error) => println!(
+            "[matchbox] Application fiber scheduler failed to start: {}",
+            error
+        ),
+    }
 }
 
 fn load_route_table_from_storage() -> Option<EmbeddedRouteTable> {
@@ -344,7 +551,7 @@ fn load_route_table_from_storage() -> Option<EmbeddedRouteTable> {
 fn respond_with_embedded_route(
     mut request: Request<&mut EspHttpConnection<'_>>,
     route_table: &ExecutableRouteTable,
-    shared_vm: &Mutex<SharedEsp32Vm>,
+    shared_vm: &Mutex<ApplicationVm>,
 ) -> anyhow::Result<()> {
     let method = method_name(request.method());
     let request_uri = request.uri().to_string();
@@ -356,11 +563,15 @@ fn respond_with_embedded_route(
     let form_fields = read_form_fields(&mut request);
 
     if let Some((route, params)) = match_route(route_table, method, &request_path) {
-        log_heap(&format!("route-match {} {}", method, request_path));
-        let context = build_request_context(method, &request_path, params, query_params, form_fields);
+        let context =
+            build_request_context(method, &request_path, params, query_params, form_fields);
         return match execute_embedded_route(route, &context, shared_vm) {
             Ok(RouteExecution::Html(body)) => request
-                .into_response(200, Some("OK"), &[("content-type", "text/html; charset=utf-8")])
+                .into_response(
+                    200,
+                    Some("OK"),
+                    &[("content-type", "text/html; charset=utf-8")],
+                )
                 .map_err(anyhow::Error::msg)?
                 .write_all(body.as_bytes())
                 .map(|_| ())
@@ -391,7 +602,11 @@ fn respond_with_embedded_route(
     }
 
     request
-        .into_response(404, Some("Not Found"), &[("content-type", "text/plain; charset=utf-8")])
+        .into_response(
+            404,
+            Some("Not Found"),
+            &[("content-type", "text/plain; charset=utf-8")],
+        )
         .map_err(anyhow::Error::msg)?
         .write_all(b"Embedded route not found")
         .map(|_| ())
@@ -436,7 +651,7 @@ enum RouteExecution {
 fn execute_embedded_route(
     route: &ExecutableRouteTableEntry,
     context: &RequestContextData,
-    shared_vm: &Mutex<SharedEsp32Vm>,
+    shared_vm: &Mutex<ApplicationVm>,
 ) -> anyhow::Result<RouteExecution> {
     println!(
         "[matchbox] Executing embedded route method={} path={} kind={}",
@@ -444,49 +659,33 @@ fn execute_embedded_route(
     );
     // New borrowed execution path for ESP32. This avoids the old per-request
     // route chunk clone and lets the runner reuse preloaded route programs.
-    log_heap("before-route-chunk-borrowed");
 
     let mut shared_vm = shared_vm.lock().unwrap();
     shared_vm.with_vm(|vm| {
-        log_heap("after-vm-acquire");
         install_scope(vm, "url", &context.url);
         install_scope(vm, "form", &context.form);
         install_scope(vm, "request", &context.request);
         install_scope(vm, "cgi", &context.cgi);
-        log_heap("after-scope-install");
 
         vm.begin_output_capture();
-        log_heap("before-interpret-chunk");
-        let result = vm
-            .interpret_chunk_borrowed(route.chunk.as_ref())
-            .map_err(anyhow::Error::msg)?;
-        log_heap("after-interpret-chunk");
+        let result = vm.interpret_chunk_borrowed_current_task(route.chunk.as_ref());
         let output = vm.end_output_capture().unwrap_or_default();
 
-        if route.source_kind == "template" {
-            return Ok(RouteExecution::Html(output));
-        }
+        let execution = match result {
+            Ok(result) if route.source_kind == "template" => Ok(RouteExecution::Html(output)),
+            Ok(_) if !output.is_empty() => Ok(RouteExecution::Html(output)),
+            Ok(result) => {
+                let json = vm.bx_to_json(&result);
+                Ok(RouteExecution::Json(serde_json::to_string(&json)?))
+            }
+            Err(error) => Err(anyhow::Error::msg(error)),
+        };
 
-        if !output.is_empty() {
-            return Ok(RouteExecution::Html(output));
-        }
+        clear_request_scopes(vm);
+        vm.collect_garbage_now();
 
-        let json = vm.bx_to_json(&result);
-        Ok(RouteExecution::Json(serde_json::to_string(&json)?))
+        execution
     })
-}
-
-fn log_heap(label: &str) {
-    unsafe {
-        let free = esp_idf_sys::esp_get_free_heap_size();
-        let largest = esp_idf_sys::heap_caps_get_largest_free_block(
-            esp_idf_sys::MALLOC_CAP_INTERNAL | esp_idf_sys::MALLOC_CAP_8BIT,
-        );
-        println!(
-            "[matchbox] heap {} free={} largest={}",
-            label, free, largest
-        );
-    }
 }
 
 fn heap_snapshot() -> HeapSnapshot {
@@ -532,11 +731,8 @@ unsafe fn find_partition_snapshot(
     subtype: u32,
     type_label: &str,
 ) -> Option<PartitionSnapshot> {
-    let partition = esp_idf_sys::esp_partition_find_first(
-        partition_type,
-        subtype,
-        std::ptr::null(),
-    );
+    let partition =
+        esp_idf_sys::esp_partition_find_first(partition_type, subtype, std::ptr::null());
     if partition.is_null() {
         return None;
     }
@@ -561,6 +757,12 @@ fn install_scope(vm: &mut VM, scope_name: &str, values: &HashMap<String, String>
         vm.struct_set(scope_id, key, BxValue::new_ptr(value_id));
     }
     vm.insert_global(scope_name.to_string(), BxValue::new_ptr(scope_id));
+}
+
+fn clear_request_scopes(vm: &mut VM) {
+    for scope_name in ["url", "form", "request", "cgi"] {
+        vm.insert_global(scope_name.to_string(), BxValue::new_null());
+    }
 }
 
 fn build_request_context(
@@ -602,7 +804,10 @@ fn parse_query_params(uri: &str) -> HashMap<String, String> {
 }
 
 fn read_form_fields(request: &mut Request<&mut EspHttpConnection<'_>>) -> HashMap<String, String> {
-    let content_type = request.header("content-type").unwrap_or_default().to_ascii_lowercase();
+    let content_type = request
+        .header("content-type")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     let content_length = request
         .header("content-length")
         .and_then(|value| value.parse::<usize>().ok())

@@ -1,12 +1,14 @@
 use crate::camera::{
-    capture_frame, capture_jpeg, capture_photo_handle, default_xiao_esp32s3_sense_camera,
-    free_photo, low_memory_xiao_esp32s3_sense_camera, low_memory_xiao_esp32s3_sense_print_camera,
-    photo_info, shutdown_camera, Esp32CameraOptions, Esp32Capture, StoredCaptureMeta,
+    Esp32CameraOptions, Esp32Capture, StoredCaptureMeta, capture_frame, capture_jpeg,
+    capture_photo_handle, default_xiao_esp32s3_sense_camera, free_photo,
+    low_memory_xiao_esp32s3_sense_camera, low_memory_xiao_esp32s3_sense_print_camera, photo_info,
+    shutdown_camera,
 };
 use crate::imaging::{grayscale_to_monochrome_bitmap, jpeg_to_monochrome_bitmap};
+#[cfg(feature = "platform-bluetooth")]
 use crate::printer::{
-    connect_printer, disconnect_handle, ensure_ble_ready, print_bytes, print_bytes_to_address,
-    print_hello_boxlang, shutdown_ble, write_connected, PrinterConnectionInfo,
+    PrinterConnectionInfo, connect_printer, disconnect_handle, ensure_ble_ready, print_bytes,
+    print_bytes_to_address, print_hello_boxlang, shutdown_ble, write_connected,
 };
 use matchbox_vm::types::{BxNativeFunction, BxVM, BxValue};
 use std::collections::HashMap;
@@ -23,7 +25,12 @@ fn bytes_value(vm: &mut dyn BxVM, bytes: Vec<u8>) -> BxValue {
     BxValue::new_ptr(vm.bytes_new(bytes))
 }
 
-fn print_result_value(vm: &mut dyn BxVM, print: crate::printer::PrintResult, message: &str) -> BxValue {
+#[cfg(feature = "platform-bluetooth")]
+fn print_result_value(
+    vm: &mut dyn BxVM,
+    print: crate::printer::PrintResult,
+    message: &str,
+) -> BxValue {
     let result = struct_value(vm);
     let message = string_value(vm, message);
     let device_name = string_value(vm, print.device_name);
@@ -42,13 +49,18 @@ fn print_result_value(vm: &mut dyn BxVM, print: crate::printer::PrintResult, mes
     BxValue::new_ptr(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn printer_connection_value(vm: &mut dyn BxVM, connection: PrinterConnectionInfo) -> BxValue {
     let result = struct_value(vm);
     let device_name = string_value(vm, connection.device_name);
     let device_id = string_value(vm, connection.device_id);
     let write_mode = string_value(vm, connection.write_mode);
     let characteristic_uuid = string_value(vm, connection.characteristic_uuid);
-    vm.struct_set(result, "handleId", BxValue::new_number(connection.handle_id as f64));
+    vm.struct_set(
+        result,
+        "handleId",
+        BxValue::new_number(connection.handle_id as f64),
+    );
     vm.struct_set(result, "deviceName", device_name);
     vm.struct_set(result, "deviceId", device_id);
     vm.struct_set(result, "writeMode", write_mode);
@@ -92,7 +104,13 @@ fn parse_photo_handle_id(vm: &mut dyn BxVM, value: BxValue) -> Result<Option<u64
     }
 }
 
-fn bitmap_result_value(vm: &mut dyn BxVM, width: usize, height: usize, bytes_per_row: usize, bytes: Vec<u8>) -> BxValue {
+fn bitmap_result_value(
+    vm: &mut dyn BxVM,
+    width: usize,
+    height: usize,
+    bytes_per_row: usize,
+    bytes: Vec<u8>,
+) -> BxValue {
     let id = struct_value(vm);
     let bytes = bytes_value(vm, bytes);
     vm.struct_set(id, "width", BxValue::new_number(width as f64));
@@ -133,7 +151,9 @@ fn minimal_bitmap_value(
     BxValue::new_ptr(id)
 }
 
-fn frame_to_monochrome_bitmap(capture: &Esp32Capture) -> Result<crate::imaging::MonochromeBitmap, String> {
+fn frame_to_monochrome_bitmap(
+    capture: &Esp32Capture,
+) -> Result<crate::imaging::MonochromeBitmap, String> {
     if capture.format.eq_ignore_ascii_case("grayscale") {
         grayscale_to_monochrome_bitmap(
             capture.width as usize,
@@ -156,9 +176,7 @@ fn esp32_camera_capture(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue,
     let stored = capture_photo_handle(&build_default_camera_options())?;
     println!(
         "[esp32-bif] camera capture done width={} height={} bytes={}",
-        stored.width,
-        stored.height,
-        stored.bytes_len
+        stored.width, stored.height, stored.bytes_len
     );
     Ok(capture_result_value(vm, &stored))
 }
@@ -264,10 +282,19 @@ fn build_tspl_payload(
     payload.extend_from_slice(bitmap_bytes);
     payload.extend_from_slice(b"\r\n");
     payload.extend_from_slice(
-        format!("TEXT 16,{},\"2\",0,1,1,\"Roastatron 3K\"\r\n", bitmap_height + 24).as_bytes(),
+        format!(
+            "TEXT 16,{},\"2\",0,1,1,\"Roastatron 3K\"\r\n",
+            bitmap_height + 24
+        )
+        .as_bytes(),
     );
     payload.extend_from_slice(
-        format!("TEXT 16,{},\"1\",0,1,1,\"{}\"\r\n", bitmap_height + 56, timestamp).as_bytes(),
+        format!(
+            "TEXT 16,{},\"1\",0,1,1,\"{}\"\r\n",
+            bitmap_height + 56,
+            timestamp
+        )
+        .as_bytes(),
     );
     payload.extend_from_slice(
         format!(
@@ -282,13 +309,13 @@ fn build_tspl_payload(
     payload
 }
 
-#[cfg(matchbox_camera_supported)]
+#[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
 fn esp32_capture_and_print(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     println!("[esp32-bif] capture-and-print start");
     let capture = capture_jpeg(&build_default_camera_options())
         .map_err(|error| format!("camera: {}", error))?;
-    let bitmap = jpeg_to_monochrome_bitmap(&capture.bytes)
-        .map_err(|error| format!("bitmap: {}", error))?;
+    let bitmap =
+        jpeg_to_monochrome_bitmap(&capture.bytes).map_err(|error| format!("bitmap: {}", error))?;
     let payload = build_tspl_payload(
         bitmap.width,
         bitmap.height,
@@ -296,13 +323,8 @@ fn esp32_capture_and_print(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxVal
         capture.width,
         capture.height,
     );
-    let print = print_bytes(
-        "KM",
-        "00002af1-0000-1000-8000-00805f9b34fb",
-        5000,
-        &payload,
-    )
-    .map_err(|error| format!("printer: {}", error))?;
+    let print = print_bytes("KM", "00002af1-0000-1000-8000-00805f9b34fb", 5000, &payload)
+        .map_err(|error| format!("printer: {}", error))?;
 
     let result = struct_value(vm);
     let capture_value = minimal_capture_value(
@@ -328,12 +350,16 @@ fn esp32_capture_and_print(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxVal
     vm.struct_set(result, "deviceName", device_name);
     vm.struct_set(result, "deviceId", device_id);
     vm.struct_set(result, "writeMode", write_mode);
-    vm.struct_set(result, "payloadBytes", BxValue::new_number(print.payload_bytes as f64));
+    vm.struct_set(
+        result,
+        "payloadBytes",
+        BxValue::new_number(print.payload_bytes as f64),
+    );
     println!("[esp32-bif] capture-and-print done");
     Ok(BxValue::new_ptr(result))
 }
 
-#[cfg(matchbox_camera_supported)]
+#[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
 fn esp32_printer_capture_bitmap(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("esp32PrinterCaptureBitmap requires a connection handle".to_string());
@@ -349,11 +375,14 @@ fn esp32_printer_capture_bitmap(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<B
         args[0].as_number() as u32
     };
 
-    println!("[esp32-bif] printer-capture-bitmap start handleId={}", handle_id);
+    println!(
+        "[esp32-bif] printer-capture-bitmap start handleId={}",
+        handle_id
+    );
     let capture = capture_frame(&low_memory_xiao_esp32s3_sense_print_camera())
         .map_err(|error| format!("camera: {}", error))?;
-    let bitmap = frame_to_monochrome_bitmap(&capture)
-        .map_err(|error| format!("bitmap: {}", error))?;
+    let bitmap =
+        frame_to_monochrome_bitmap(&capture).map_err(|error| format!("bitmap: {}", error))?;
     let capture_width = capture.width;
     let capture_height = capture.height;
     let capture_format = capture.format;
@@ -372,7 +401,8 @@ fn esp32_printer_capture_bitmap(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<B
     // Free camera and bitmap buffers before we touch the BLE stack.
     drop(bitmap);
     drop(capture);
-    let print = write_connected(handle_id, &payload).map_err(|error| format!("printer: {}", error))?;
+    let print =
+        write_connected(handle_id, &payload).map_err(|error| format!("printer: {}", error))?;
 
     let result = struct_value(vm);
     let capture_value = minimal_capture_value(
@@ -398,12 +428,19 @@ fn esp32_printer_capture_bitmap(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<B
     vm.struct_set(result, "deviceName", device_name);
     vm.struct_set(result, "deviceId", device_id);
     vm.struct_set(result, "writeMode", write_mode);
-    vm.struct_set(result, "payloadBytes", BxValue::new_number(print.payload_bytes as f64));
-    println!("[esp32-bif] printer-capture-bitmap done handleId={}", handle_id);
+    vm.struct_set(
+        result,
+        "payloadBytes",
+        BxValue::new_number(print.payload_bytes as f64),
+    );
+    println!(
+        "[esp32-bif] printer-capture-bitmap done handleId={}",
+        handle_id
+    );
     Ok(BxValue::new_ptr(result))
 }
 
-#[cfg(matchbox_camera_supported)]
+#[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
 fn esp32_capture_bitmap_and_print_to(
     vm: &mut dyn BxVM,
     args: &[BxValue],
@@ -426,16 +463,15 @@ fn esp32_capture_bitmap_and_print_to(
 
     println!(
         "[esp32-bif] capture-bitmap-and-print-to start address={} addressType={:?}",
-        address,
-        address_type
+        address, address_type
     );
 
     // Capture first so the camera init path gets the cleanest internal-RAM
     // state possible before BLE allocates its own controller/connection data.
     let capture = capture_frame(&low_memory_xiao_esp32s3_sense_print_camera())
         .map_err(|error| format!("camera: {}", error))?;
-    let bitmap = frame_to_monochrome_bitmap(&capture)
-        .map_err(|error| format!("bitmap: {}", error))?;
+    let bitmap =
+        frame_to_monochrome_bitmap(&capture).map_err(|error| format!("bitmap: {}", error))?;
     let capture_width = capture.width;
     let capture_height = capture.height;
     let capture_format = capture.format;
@@ -501,6 +537,7 @@ fn esp32_capture_bitmap_and_print_to(
     Ok(BxValue::new_ptr(result))
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_print_hello_boxlang(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     println!("[esp32-bif] print-hello-boxlang start");
     let print = print_hello_boxlang().map_err(|error| format!("printer: {}", error))?;
@@ -509,6 +546,7 @@ fn esp32_print_hello_boxlang(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxV
     Ok(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_print_tspl(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("esp32PrintTspl requires a TSPL string or bytes payload".to_string());
@@ -539,6 +577,7 @@ fn esp32_print_tspl(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     Ok(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_bluetooth_write(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 3 {
         return Err(
@@ -566,6 +605,7 @@ fn esp32_bluetooth_write(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     Ok(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_print_tspl_to(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("esp32PrintTsplTo requires address and TSPL payload".to_string());
@@ -596,12 +636,13 @@ fn esp32_print_tspl_to(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         &payload,
         address_type.as_deref(),
     )
-        .map_err(|error| format!("printer: {}", error))?;
+    .map_err(|error| format!("printer: {}", error))?;
     let result = print_result_value(vm, print, "TSPL payload sent to printer");
     println!("[esp32-bif] print-tspl-to done");
     Ok(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_bluetooth_connect(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() || args[0].is_null() {
         return Err("esp32BluetoothConnect requires an options struct".to_string());
@@ -654,6 +695,7 @@ fn esp32_bluetooth_connect(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValu
     Ok(result)
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_bluetooth_disconnect(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() || args[0].is_null() {
         return Err("esp32BluetoothDisconnect requires a connection handle".to_string());
@@ -669,15 +711,21 @@ fn esp32_bluetooth_disconnect(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxV
         args[0].as_number() as u32
     };
 
-    println!("[esp32-bif] bluetooth-disconnect start handleId={}", handle_id);
+    println!(
+        "[esp32-bif] bluetooth-disconnect start handleId={}",
+        handle_id
+    );
     disconnect_handle(handle_id).map_err(|error| format!("printer: {}", error))?;
     println!("[esp32-bif] bluetooth-disconnect done");
     Ok(BxValue::new_bool(true))
 }
 
+#[cfg(feature = "platform-bluetooth")]
 fn esp32_printer_print_tspl(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
-        return Err("esp32PrinterPrintTspl requires a connection handle and TSPL payload".to_string());
+        return Err(
+            "esp32PrinterPrintTspl requires a connection handle and TSPL payload".to_string(),
+        );
     }
 
     let handle_id = if let Some(id) = args[0].as_gc_id() {
@@ -696,18 +744,26 @@ fn esp32_printer_print_tspl(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVal
         handle_id,
         payload.len()
     );
-    let print = write_connected(handle_id, &payload).map_err(|error| format!("printer: {}", error))?;
+    let print =
+        write_connected(handle_id, &payload).map_err(|error| format!("printer: {}", error))?;
     let result = print_result_value(vm, print, "TSPL payload sent to printer");
     println!("[esp32-bif] printer-print-tspl done");
     Ok(result)
 }
 
 pub fn register_bifs() -> HashMap<String, BxNativeFunction> {
-    let mut map = HashMap::new();
+    let mut map = crate::hid::register_bifs();
+    map.extend(crate::wifi::register_bifs());
     #[cfg(matchbox_camera_supported)]
-    map.insert("esp32cameracapture".to_string(), esp32_camera_capture as BxNativeFunction);
+    map.insert(
+        "esp32cameracapture".to_string(),
+        esp32_camera_capture as BxNativeFunction,
+    );
     #[cfg(matchbox_camera_supported)]
-    map.insert("esp32CameraCapture".to_string(), esp32_camera_capture as BxNativeFunction);
+    map.insert(
+        "esp32CameraCapture".to_string(),
+        esp32_camera_capture as BxNativeFunction,
+    );
     #[cfg(matchbox_camera_supported)]
     map.insert(
         "esp32cameracapturebitmap".to_string(),
@@ -718,84 +774,134 @@ pub fn register_bifs() -> HashMap<String, BxNativeFunction> {
         "esp32CameraCaptureBitmap".to_string(),
         esp32_camera_capture_bitmap as BxNativeFunction,
     );
-    map.insert("esp32photoinfo".to_string(), esp32_photo_info as BxNativeFunction);
-    map.insert("esp32PhotoInfo".to_string(), esp32_photo_info as BxNativeFunction);
-    map.insert("esp32photourl".to_string(), esp32_photo_url as BxNativeFunction);
-    map.insert("esp32PhotoUrl".to_string(), esp32_photo_url as BxNativeFunction);
-    map.insert("esp32photofree".to_string(), esp32_photo_free as BxNativeFunction);
-    map.insert("esp32PhotoFree".to_string(), esp32_photo_free as BxNativeFunction);
-    map.insert("esp32bitmapfromjpeg".to_string(), esp32_bitmap_from_jpeg as BxNativeFunction);
-    map.insert("esp32BitmapFromJpeg".to_string(), esp32_bitmap_from_jpeg as BxNativeFunction);
-    #[cfg(matchbox_camera_supported)]
-    map.insert("esp32captureandprint".to_string(), esp32_capture_and_print as BxNativeFunction);
-    #[cfg(matchbox_camera_supported)]
-    map.insert("esp32CaptureAndPrint".to_string(), esp32_capture_and_print as BxNativeFunction);
-    #[cfg(matchbox_camera_supported)]
+    map.insert(
+        "esp32photoinfo".to_string(),
+        esp32_photo_info as BxNativeFunction,
+    );
+    map.insert(
+        "esp32PhotoInfo".to_string(),
+        esp32_photo_info as BxNativeFunction,
+    );
+    map.insert(
+        "esp32photourl".to_string(),
+        esp32_photo_url as BxNativeFunction,
+    );
+    map.insert(
+        "esp32PhotoUrl".to_string(),
+        esp32_photo_url as BxNativeFunction,
+    );
+    map.insert(
+        "esp32photofree".to_string(),
+        esp32_photo_free as BxNativeFunction,
+    );
+    map.insert(
+        "esp32PhotoFree".to_string(),
+        esp32_photo_free as BxNativeFunction,
+    );
+    map.insert(
+        "esp32bitmapfromjpeg".to_string(),
+        esp32_bitmap_from_jpeg as BxNativeFunction,
+    );
+    map.insert(
+        "esp32BitmapFromJpeg".to_string(),
+        esp32_bitmap_from_jpeg as BxNativeFunction,
+    );
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
+    map.insert(
+        "esp32captureandprint".to_string(),
+        esp32_capture_and_print as BxNativeFunction,
+    );
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
+    map.insert(
+        "esp32CaptureAndPrint".to_string(),
+        esp32_capture_and_print as BxNativeFunction,
+    );
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
     map.insert(
         "esp32printercapturebitmap".to_string(),
         esp32_printer_capture_bitmap as BxNativeFunction,
     );
-    #[cfg(matchbox_camera_supported)]
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
     map.insert(
         "esp32PrinterCaptureBitmap".to_string(),
         esp32_printer_capture_bitmap as BxNativeFunction,
     );
-    #[cfg(matchbox_camera_supported)]
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
     map.insert(
         "esp32capturebitmapandprintto".to_string(),
         esp32_capture_bitmap_and_print_to as BxNativeFunction,
     );
-    #[cfg(matchbox_camera_supported)]
+    #[cfg(all(matchbox_camera_supported, feature = "platform-bluetooth"))]
     map.insert(
         "esp32CaptureBitmapAndPrintTo".to_string(),
         esp32_capture_bitmap_and_print_to as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32printhelloboxlang".to_string(),
         esp32_print_hello_boxlang as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32PrintHelloBoxLang".to_string(),
         esp32_print_hello_boxlang as BxNativeFunction,
     );
-    map.insert("esp32printtspl".to_string(), esp32_print_tspl as BxNativeFunction);
-    map.insert("esp32PrintTspl".to_string(), esp32_print_tspl as BxNativeFunction);
+    #[cfg(feature = "platform-bluetooth")]
+    map.insert(
+        "esp32printtspl".to_string(),
+        esp32_print_tspl as BxNativeFunction,
+    );
+    #[cfg(feature = "platform-bluetooth")]
+    map.insert(
+        "esp32PrintTspl".to_string(),
+        esp32_print_tspl as BxNativeFunction,
+    );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32bluetoothwrite".to_string(),
         esp32_bluetooth_write as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32BluetoothWrite".to_string(),
         esp32_bluetooth_write as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32bluetoothconnect".to_string(),
         esp32_bluetooth_connect as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32BluetoothConnect".to_string(),
         esp32_bluetooth_connect as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32bluetoothdisconnect".to_string(),
         esp32_bluetooth_disconnect as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32BluetoothDisconnect".to_string(),
         esp32_bluetooth_disconnect as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32printtsplto".to_string(),
         esp32_print_tspl_to as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32PrintTsplTo".to_string(),
         esp32_print_tspl_to as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32printerprinttspl".to_string(),
         esp32_printer_print_tspl as BxNativeFunction,
     );
+    #[cfg(feature = "platform-bluetooth")]
     map.insert(
         "esp32PrinterPrintTspl".to_string(),
         esp32_printer_print_tspl as BxNativeFunction,

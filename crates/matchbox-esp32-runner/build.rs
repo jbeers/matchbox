@@ -5,6 +5,10 @@ fn main() {
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let dest_path = out_dir.join("embedded-route-table.json");
     let sdkconfig_dest_path = out_dir.join("sdkconfig.defaults.generated");
+    let partition_table = std::path::PathBuf::from("partitions.csv");
+    println!("cargo:rerun-if-changed={}", partition_table.display());
+    std::fs::copy(&partition_table, out_dir.join("partitions.csv"))
+        .expect("Failed to copy ESP32 partition table");
 
     if std::env::var("TARGET")
         .map(|target| target == "xtensa-esp32s3-espidf")
@@ -20,8 +24,7 @@ fn main() {
                 .expect("Failed to copy embedded route table");
         }
     } else {
-        std::fs::write(dest_path, [])
-            .expect("Failed to write default embedded route table");
+        std::fs::write(dest_path, []).expect("Failed to write default embedded route table");
     }
 
     if std::env::var_os("CARGO_FEATURE_PSRAM").is_some() {

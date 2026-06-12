@@ -172,6 +172,18 @@ impl Chunk {
         }
     }
 
+    pub fn clone_without_runtime_caches(&self) -> Self {
+        Chunk {
+            code: self.code.clone(),
+            constants: self.constants.clone(),
+            lines: self.lines.clone(),
+            filename: self.filename.clone(),
+            source: self.source.clone(),
+            caches: Vec::new(),
+            constant_map: HashMap::new(),
+        }
+    }
+
     pub fn reconstruct_functions(&mut self) {
         // NO-OP in the flat model.
     }

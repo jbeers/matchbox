@@ -1,10 +1,13 @@
 pub mod boot;
 pub mod camera;
+pub mod diagnostics;
 pub mod esp32_bifs;
 pub mod features;
+pub mod hid;
 pub mod imaging;
 pub mod mdns;
 pub mod platform;
+#[cfg(feature = "platform-bluetooth")]
 pub mod printer;
 pub mod profile;
 pub mod web;
@@ -18,6 +21,8 @@ use profile::StrictProfile;
 pub fn main_entry() -> Result<()> {
     esp_idf_sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
+    diagnostics::init();
+    diagnostics::start_health_sampler();
 
     let profile = StrictProfile::from_env();
     let features = BundledFeatures::from_compiled_features();

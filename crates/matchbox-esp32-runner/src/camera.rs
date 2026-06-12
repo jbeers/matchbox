@@ -469,7 +469,9 @@ fn ensure_camera_initialized(
 ) -> Result<(), String> {
     let signature = options_signature(options);
     let state = camera_state();
-    let mut state = state.lock().map_err(|_| "camera state lock poisoned".to_string())?;
+    let mut state = state
+        .lock()
+        .map_err(|_| "camera state lock poisoned".to_string())?;
 
     unsafe {
         esp_idf_sys::link_patches();
@@ -539,16 +541,26 @@ pub fn store_latest_capture_owned(capture: Esp32Capture) -> Result<StoredCapture
         .map_err(|_| "photo store lock poisoned".to_string())?;
     let frame = Box::new(bytes);
     let frame_ptr = Box::into_raw(frame) as usize;
-    store.insert(id, StoredCapture {
+    store.insert(
+        id,
+        StoredCapture {
+            id,
+            version,
+            width,
+            height,
+            format: format.clone(),
+            frame_ptr,
+            bytes_len,
+        },
+    );
+    Ok(StoredCaptureMeta {
         id,
         version,
         width,
         height,
-        format: format.clone(),
-        frame_ptr,
+        format,
         bytes_len,
-    });
-    Ok(StoredCaptureMeta { id, version, width, height, format, bytes_len })
+    })
 }
 
 #[cfg(all(
@@ -597,15 +609,18 @@ pub fn capture_photo_handle(options: &Esp32CameraOptions) -> Result<StoredCaptur
         let mut store = store
             .lock()
             .map_err(|_| "photo store lock poisoned".to_string())?;
-        store.insert(id, StoredCapture {
+        store.insert(
             id,
-            version,
-            width,
-            height,
-            format: format.clone(),
-            frame_ptr: frame as usize,
-            bytes_len,
-        });
+            StoredCapture {
+                id,
+                version,
+                width,
+                height,
+                format: format.clone(),
+                frame_ptr: frame as usize,
+                bytes_len,
+            },
+        );
 
         Ok(StoredCaptureMeta {
             id,
@@ -633,8 +648,7 @@ pub fn latest_capture() -> Result<Option<Esp32Capture>, String> {
     let capture = store.values().max_by_key(|capture| capture.version);
     Ok(capture.map(|capture| unsafe {
         let frame = frame_ptr_as_ref(capture.frame_ptr);
-        let bytes =
-            std::slice::from_raw_parts(frame.buf, capture.bytes_len).to_vec();
+        let bytes = std::slice::from_raw_parts(frame.buf, capture.bytes_len).to_vec();
         Esp32Capture {
             width: capture.width,
             height: capture.height,
@@ -741,12 +755,16 @@ pub fn free_photo(id: Option<u64>) -> Result<(), String> {
     match id {
         Some(id) => {
             if let Some(capture) = store.remove(&id) {
-                unsafe { camera::esp_camera_fb_return(capture.frame_ptr as *mut camera::camera_fb_t) };
+                unsafe {
+                    camera::esp_camera_fb_return(capture.frame_ptr as *mut camera::camera_fb_t)
+                };
             }
         }
         None => {
             for (_, capture) in store.drain() {
-                unsafe { camera::esp_camera_fb_return(capture.frame_ptr as *mut camera::camera_fb_t) };
+                unsafe {
+                    camera::esp_camera_fb_return(capture.frame_ptr as *mut camera::camera_fb_t)
+                };
             }
         }
     }
@@ -900,10 +918,7 @@ pub fn capture_frame(_options: &Esp32CameraOptions) -> Result<Esp32Capture, Stri
     )
 )))]
 pub fn store_latest_capture(_capture: &Esp32Capture) -> Result<(), String> {
-    Err(
-        "ESP32 camera component is not enabled in this ESP-IDF build."
-            .to_string(),
-    )
+    Err("ESP32 camera component is not enabled in this ESP-IDF build.".to_string())
 }
 
 #[cfg(not(all(
@@ -914,10 +929,7 @@ pub fn store_latest_capture(_capture: &Esp32Capture) -> Result<(), String> {
     )
 )))]
 pub fn store_latest_capture_owned(_capture: Esp32Capture) -> Result<StoredCaptureMeta, String> {
-    Err(
-        "ESP32 camera component is not enabled in this ESP-IDF build."
-            .to_string(),
-    )
+    Err("ESP32 camera component is not enabled in this ESP-IDF build.".to_string())
 }
 
 #[cfg(not(all(
@@ -928,10 +940,7 @@ pub fn store_latest_capture_owned(_capture: Esp32Capture) -> Result<StoredCaptur
     )
 )))]
 pub fn capture_photo_handle(_options: &Esp32CameraOptions) -> Result<StoredCaptureMeta, String> {
-    Err(
-        "ESP32 camera component is not enabled in this ESP-IDF build."
-            .to_string(),
-    )
+    Err("ESP32 camera component is not enabled in this ESP-IDF build.".to_string())
 }
 
 #[cfg(not(all(

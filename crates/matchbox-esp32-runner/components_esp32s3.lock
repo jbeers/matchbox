@@ -1,28 +1,21 @@
 dependencies:
-  espressif/esp32-camera:
-    component_hash: 44a314ca50a150cffe54cc47390503a5930867409ac05b6e156ca568d7121ddd
-    dependencies:
-    - name: espressif/esp_jpeg
-      registry_url: https://components.espressif.com
-      require: public
-      version: ^1.3.1
-    - name: idf
-      require: private
-      version: '>=5.1'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 2.1.3
-  espressif/esp_jpeg:
-    component_hash: defb83669293cbf86d0fa86b475ba5517aceed04ed70db435388c151ab37b5d7
+  espressif/esp_tinyusb:
+    component_hash: 5014eb7e3d2043d13d553e1dc60bf3aa31eb03449868fac775097eed6e66ba57
     dependencies:
     - name: idf
       require: private
       version: '>=5.0'
-    source:
+    - name: espressif/tinyusb
       registry_url: https://components.espressif.com
+      require: public
+      version: '>=0.14.2'
+    source:
+      registry_url: https://components.espressif.com/
       type: service
-    version: 1.3.1
+    targets:
+    - esp32s2
+    - esp32s3
+    version: 1.1.0
   espressif/mdns:
     component_hash: dec353e2d721fd52037694455e2c2a50ac1d1f8e5e24a256c6bebf0c537f9dac
     dependencies:
@@ -33,13 +26,29 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.5.3
+  espressif/tinyusb:
+    component_hash: a40b7f67df6ac254a4afd96c6401cc56f2059ae747d6d7e66b568bca53ad0edc
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    targets:
+    - esp32s2
+    - esp32s3
+    - esp32p4
+    - esp32h4
+    - esp32s31
+    version: 0.19.0~3
   idf:
     source:
       type: idf
     version: 5.2.3
 direct_dependencies:
-- espressif/esp32-camera
+- espressif/esp_tinyusb
 - espressif/mdns
-manifest_hash: 90796f95ebd7857d5ab9d2972047ea3845e70e50a364cc6236bff54294c522e3
+manifest_hash: 2c817f0e31f6557d3119a6dd9e7ac0e38584246914fe08f561805d06edce1fb5
 target: esp32s3
 version: 2.0.0

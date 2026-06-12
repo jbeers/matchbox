@@ -1,13 +1,12 @@
-use esp32_nimble::{
-    utilities::{mutex::Mutex, BleUuid},
-    BLEAddressType,
-    BLEAddress, BLEAdvertisedDevice, BLEClient, BLEDevice, BLERemoteCharacteristic,
-    BLERemoteService, BLEScan,
-};
 use esp_idf_svc::hal::task::block_on;
+use esp32_nimble::{
+    BLEAddress, BLEAddressType, BLEAdvertisedDevice, BLEClient, BLEDevice, BLERemoteCharacteristic,
+    BLERemoteService, BLEScan,
+    utilities::{BleUuid, mutex::Mutex},
+};
 use std::ffi::CString;
-use std::sync::mpsc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use uuid::Uuid;
 
@@ -187,8 +186,7 @@ fn cached_printer() -> &'static StdMutex<Option<DeviceHandle>> {
     CACHE.get_or_init(|| StdMutex::new(None))
 }
 
-fn active_printer_connections(
-) -> &'static StdMutex<ActivePrinterConnectionStore> {
+fn active_printer_connections() -> &'static StdMutex<ActivePrinterConnectionStore> {
     static CONNECTIONS: OnceLock<StdMutex<ActivePrinterConnectionStore>> = OnceLock::new();
     CONNECTIONS.get_or_init(|| StdMutex::new(ActivePrinterConnectionStore::new()))
 }
@@ -301,10 +299,7 @@ fn scan(_adapter: &AdapterHandle, options: &ScanOptions) -> Result<Vec<DeviceHan
                     .start(ble_device(), timeout_ms as _, move |device, data| {
                         let name = data.name().map(|name| name.to_string()).unwrap_or_default();
                         let id = format!("{:?}", device.addr());
-                        println!(
-                            "[esp32-printer] discovered id={} name={:?}",
-                            id, name
-                        );
+                        println!("[esp32-printer] discovered id={} name={:?}", id, name);
 
                         if !service_filters_for_attempt.is_empty()
                             && !service_filter_matches(device, &service_filters_for_attempt)
@@ -313,7 +308,8 @@ fn scan(_adapter: &AdapterHandle, options: &ScanOptions) -> Result<Vec<DeviceHan
                         }
 
                         let mut devices = found_ref.lock();
-                        if let Some(existing) = devices.iter_mut().find(|existing| existing.id == id)
+                        if let Some(existing) =
+                            devices.iter_mut().find(|existing| existing.id == id)
                         {
                             if existing.name.is_empty() && !name.is_empty() {
                                 existing.name = name;
@@ -345,7 +341,10 @@ fn scan(_adapter: &AdapterHandle, options: &ScanOptions) -> Result<Vec<DeviceHan
                 return Ok(devices);
             }
 
-            println!("[esp32-printer] scan attempt {} found no matching devices", attempt);
+            println!(
+                "[esp32-printer] scan attempt {} found no matching devices",
+                attempt
+            );
         }
 
         println!("[esp32-printer] scan complete devices=[]");
@@ -359,7 +358,10 @@ fn connect(device: &DeviceHandle) -> Result<ConnectionHandle, String> {
         let client = Arc::new(Mutex::new(ble_device().new_client()));
         {
             let mut locked = client.lock();
-            locked.connect(&address).await.map_err(|error| error.to_string())?;
+            locked
+                .connect(&address)
+                .await
+                .map_err(|error| error.to_string())?;
         }
         Ok(ConnectionHandle { client })
     })
@@ -496,7 +498,10 @@ pub fn print_bytes_to_address(
         BLEAddressType::RandomID,
         BLEAddressType::PublicID,
     ] {
-        if !addr_types.iter().any(|existing| address_type_label(existing) == address_type_label(&fallback)) {
+        if !addr_types
+            .iter()
+            .any(|existing| address_type_label(existing) == address_type_label(&fallback))
+        {
             addr_types.push(fallback);
         }
     }
@@ -515,8 +520,7 @@ pub fn print_bytes_to_address(
 
         println!(
             "[esp32-printer] trying direct printer address={} type={}",
-            device.id,
-            addr_type_label
+            device.id, addr_type_label
         );
 
         match try_print_to_device(&device, preferred_characteristic_uuid, payload) {
@@ -527,18 +531,14 @@ pub fn print_bytes_to_address(
             Err(error) => {
                 println!(
                     "[esp32-printer] direct printer address={} type={} failed: {}",
-                    address,
-                    addr_type_label,
-                    error
+                    address, addr_type_label, error
                 );
                 last_error = Some(error);
             }
         }
     }
 
-    Err(last_error.unwrap_or_else(|| {
-        format!("Unable to connect to BLE address '{}'", address)
-    }))
+    Err(last_error.unwrap_or_else(|| format!("Unable to connect to BLE address '{}'", address)))
 }
 
 pub fn connect_printer(
@@ -607,13 +607,13 @@ pub fn connect_printer(
         }
 
         let Some((device, connection)) = connected else {
-            return Err(last_error.unwrap_or_else(|| {
-                format!("Unable to connect to BLE address '{}'", address)
-            }));
+            return Err(last_error
+                .unwrap_or_else(|| format!("Unable to connect to BLE address '{}'", address)));
         };
 
         let services = discover_services(&connection)?;
-        let (characteristic, mode) = select_characteristic(&services, preferred_characteristic_uuid)?;
+        let (characteristic, mode) =
+            select_characteristic(&services, preferred_characteristic_uuid)?;
         let handle_id = next_connection_id();
         let info = PrinterConnectionInfo {
             handle_id,
@@ -630,18 +630,21 @@ pub fn connect_printer(
             characteristic_uuid: characteristic.uuid.clone(),
         };
 
-        active_printer_connections().lock().unwrap().with_map(|connections| {
-            connections.insert(
-                handle_id,
-                ActivePrinterConnection {
-                    connection,
-                    characteristic,
-                    write_mode: mode,
-                    device_name: info.device_name.clone(),
-                    device_id: info.device_id.clone(),
-                },
-            );
-        });
+        active_printer_connections()
+            .lock()
+            .unwrap()
+            .with_map(|connections| {
+                connections.insert(
+                    handle_id,
+                    ActivePrinterConnection {
+                        connection,
+                        characteristic,
+                        write_mode: mode,
+                        device_name: info.device_name.clone(),
+                        device_id: info.device_id.clone(),
+                    },
+                );
+            });
         *cached_printer().lock().unwrap() = Some(device);
         info
     } else {
@@ -661,7 +664,8 @@ pub fn connect_printer(
             .ok_or_else(|| format!("No BLE printer was found with prefix '{}'", prefix))?;
         let connection = connect(&device)?;
         let services = discover_services(&connection)?;
-        let (characteristic, mode) = select_characteristic(&services, preferred_characteristic_uuid)?;
+        let (characteristic, mode) =
+            select_characteristic(&services, preferred_characteristic_uuid)?;
         let handle_id = next_connection_id();
         let info = PrinterConnectionInfo {
             handle_id,
@@ -678,18 +682,21 @@ pub fn connect_printer(
             characteristic_uuid: characteristic.uuid.clone(),
         };
 
-        active_printer_connections().lock().unwrap().with_map(|connections| {
-            connections.insert(
-                handle_id,
-                ActivePrinterConnection {
-                    connection,
-                    characteristic,
-                    write_mode: mode,
-                    device_name: info.device_name.clone(),
-                    device_id: info.device_id.clone(),
-                },
-            );
-        });
+        active_printer_connections()
+            .lock()
+            .unwrap()
+            .with_map(|connections| {
+                connections.insert(
+                    handle_id,
+                    ActivePrinterConnection {
+                        connection,
+                        characteristic,
+                        write_mode: mode,
+                        device_name: info.device_name.clone(),
+                        device_id: info.device_id.clone(),
+                    },
+                );
+            });
         *cached_printer().lock().unwrap() = Some(device);
         info
     };
@@ -698,10 +705,11 @@ pub fn connect_printer(
 }
 
 pub fn write_connected(handle_id: u32, payload: &[u8]) -> Result<PrintResult, String> {
-    let active = active_printer_connections().lock().unwrap().with_map(|connections| {
-        connections.get(&handle_id).cloned()
-    })
-    .ok_or_else(|| format!("Unknown printer handle {}", handle_id))?;
+    let active = active_printer_connections()
+        .lock()
+        .unwrap()
+        .with_map(|connections| connections.get(&handle_id).cloned())
+        .ok_or_else(|| format!("Unknown printer handle {}", handle_id))?;
 
     write(&active.characteristic, payload, active.write_mode)?;
     Ok(PrintResult {
@@ -716,10 +724,11 @@ pub fn write_connected(handle_id: u32, payload: &[u8]) -> Result<PrintResult, St
 }
 
 pub fn disconnect_handle(handle_id: u32) -> Result<(), String> {
-    let active = active_printer_connections().lock().unwrap().with_map(|connections| {
-        connections.remove(&handle_id)
-    })
-    .ok_or_else(|| format!("Unknown printer handle {}", handle_id))?;
+    let active = active_printer_connections()
+        .lock()
+        .unwrap()
+        .with_map(|connections| connections.remove(&handle_id))
+        .ok_or_else(|| format!("Unknown printer handle {}", handle_id))?;
     disconnect(&active.connection)
 }
 
@@ -776,10 +785,5 @@ pub fn print_hello_boxlang() -> Result<PrintResult, String> {
     )
     .as_bytes()
     .to_vec();
-    print_bytes(
-        "KM",
-        "00002af1-0000-1000-8000-00805f9b34fb",
-        5000,
-        &payload,
-    )
+    print_bytes("KM", "00002af1-0000-1000-8000-00805f9b34fb", 5000, &payload)
 }
