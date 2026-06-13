@@ -23,9 +23,13 @@ pub struct HidSnapshot {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct HidCommand {
-    dx: i8,
-    dy: i8,
+enum HidCommand {
+    MouseMove { dx: i8, dy: i8 },
+    MouseButton { button: u8, down: bool },
+    MouseScroll { dx: i8, dy: i8 },
+    KeyPress { keycode: u8 },
+    KeyRelease { keycode: u8 },
+    KeyReleaseAll,
 }
 
 pub fn snapshot() -> HidSnapshot {
@@ -59,6 +63,102 @@ pub fn register_bifs() -> HashMap<String, BxNativeFunction> {
         "esp32UsbMouseMove".to_string(),
         esp32_usb_mouse_move as BxNativeFunction,
     );
+    map.insert(
+        "esp32usbmouseclick".to_string(),
+        esp32_usb_mouse_click as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBMouseClick".to_string(),
+        esp32_usb_mouse_click as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbMouseClick".to_string(),
+        esp32_usb_mouse_click as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbmousedown".to_string(),
+        esp32_usb_mouse_down as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBMouseDown".to_string(),
+        esp32_usb_mouse_down as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbMouseDown".to_string(),
+        esp32_usb_mouse_down as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbmouseup".to_string(),
+        esp32_usb_mouse_up as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBMouseUp".to_string(),
+        esp32_usb_mouse_up as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbMouseUp".to_string(),
+        esp32_usb_mouse_up as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbmousescroll".to_string(),
+        esp32_usb_mouse_scroll as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBMouseScroll".to_string(),
+        esp32_usb_mouse_scroll as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbMouseScroll".to_string(),
+        esp32_usb_mouse_scroll as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbkeyboardpress".to_string(),
+        esp32_usb_keyboard_press as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBKeyboardPress".to_string(),
+        esp32_usb_keyboard_press as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbKeyboardPress".to_string(),
+        esp32_usb_keyboard_press as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbkeyboardrelease".to_string(),
+        esp32_usb_keyboard_release as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBKeyboardRelease".to_string(),
+        esp32_usb_keyboard_release as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbKeyboardRelease".to_string(),
+        esp32_usb_keyboard_release as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbkeyboardreleaseall".to_string(),
+        esp32_usb_keyboard_release_all as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBKeyboardReleaseAll".to_string(),
+        esp32_usb_keyboard_release_all as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbKeyboardReleaseAll".to_string(),
+        esp32_usb_keyboard_release_all as BxNativeFunction,
+    );
+    map.insert(
+        "esp32usbhidready".to_string(),
+        esp32_usb_hid_ready as BxNativeFunction,
+    );
+    map.insert(
+        "esp32USBHidReady".to_string(),
+        esp32_usb_hid_ready as BxNativeFunction,
+    );
+    map.insert(
+        "esp32UsbHidReady".to_string(),
+        esp32_usb_hid_ready as BxNativeFunction,
+    );
     map
 }
 
@@ -81,6 +181,16 @@ fn esp32_register_as_hid(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     Ok(BxValue::new_bool(true))
 }
 
+fn esp32_usb_hid_ready(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err(format!(
+            "esp32USBHidReady accepts 0 arguments, got {}",
+            args.len()
+        ));
+    }
+    Ok(BxValue::new_bool(USB_HID_READY.load(Ordering::Acquire)))
+}
+
 fn esp32_usb_mouse_move(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 {
         return Err(format!(
@@ -93,8 +203,107 @@ fn esp32_usb_mouse_move(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     let dy = clamp_i8(args[1].as_number(), "y")?;
 
     ensure_usb_hid_ready(None)?;
-    enqueue_mouse_move(dx, dy)?;
+    enqueue_command(HidCommand::MouseMove { dx, dy })?;
 
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_mouse_click(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "esp32USBMouseClick requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+    let button = clamp_button(args[0].as_number())?;
+    ensure_usb_hid_ready(None)?;
+    // Click = down + up with a short delay in the worker
+    enqueue_command(HidCommand::MouseButton { button, down: true })?;
+    enqueue_command(HidCommand::MouseButton {
+        button,
+        down: false,
+    })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_mouse_down(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "esp32USBMouseDown requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+    let button = clamp_button(args[0].as_number())?;
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::MouseButton { button, down: true })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_mouse_up(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "esp32USBMouseUp requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+    let button = clamp_button(args[0].as_number())?;
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::MouseButton {
+        button,
+        down: false,
+    })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_mouse_scroll(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err(format!(
+            "esp32USBMouseScroll requires 2 arguments, got {}",
+            args.len()
+        ));
+    }
+    let dx = clamp_i8(args[0].as_number(), "scrollX")?;
+    let dy = clamp_i8(args[1].as_number(), "scrollY")?;
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::MouseScroll { dx, dy })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_keyboard_press(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "esp32USBKeyboardPress requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+    let keycode = clamp_keycode(args[0].as_number())?;
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::KeyPress { keycode })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_keyboard_release(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err(format!(
+            "esp32USBKeyboardRelease requires 1 argument, got {}",
+            args.len()
+        ));
+    }
+    let keycode = clamp_keycode(args[0].as_number())?;
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::KeyRelease { keycode })?;
+    Ok(BxValue::new_bool(true))
+}
+
+fn esp32_usb_keyboard_release_all(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err(format!(
+            "esp32USBKeyboardReleaseAll accepts 0 arguments, got {}",
+            args.len()
+        ));
+    }
+    ensure_usb_hid_ready(None)?;
+    enqueue_command(HidCommand::KeyReleaseAll)?;
     Ok(BxValue::new_bool(true))
 }
 
@@ -109,6 +318,28 @@ fn clamp_i8(value: f64, name: &str) -> Result<i8, String> {
     }
 
     Ok(rounded as i8)
+}
+
+fn clamp_button(value: f64) -> Result<u8, String> {
+    if !value.is_finite() {
+        return Err("button must be a valid number (1=left, 2=right, 3=middle)".to_string());
+    }
+    let btn = value.round() as i64;
+    if btn < 1 || btn > 7 {
+        return Err("button must be between 1 and 7 (1=left, 2=right, 3=middle)".to_string());
+    }
+    Ok(btn as u8)
+}
+
+fn clamp_keycode(value: f64) -> Result<u8, String> {
+    if !value.is_finite() {
+        return Err("keycode must be a finite number between 0 and 255".to_string());
+    }
+    let code = value.round() as i64;
+    if code < 0 || code > 255 {
+        return Err("keycode must be between 0 and 255".to_string());
+    }
+    Ok(code as u8)
 }
 
 fn ensure_usb_hid_ready(product_name: Option<&str>) -> Result<(), String> {
@@ -126,15 +357,15 @@ fn ensure_usb_hid_ready(product_name: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn enqueue_mouse_move(dx: i8, dy: i8) -> Result<(), String> {
+fn enqueue_command(command: HidCommand) -> Result<(), String> {
     let tx = HID_COMMANDS
         .get()
         .ok_or_else(|| "USB HID worker is not running".to_string())?;
-    crate::diagnostics::record_event(format!("hid queue dx={} dy={}", dx, dy));
-    tx.try_send(HidCommand { dx, dy })
+    crate::diagnostics::record_event(format!("hid queue {:?}", command));
+    tx.try_send(command)
         .map_err(|error| format!("USB HID command queue is full or stopped: {}", error))?;
     HID_QUEUED.fetch_add(1, Ordering::AcqRel);
-    crate::diagnostics::record_event(format!("hid queued dx={} dy={}", dx, dy));
+    crate::diagnostics::record_event(format!("hid queued {:?}", command));
     Ok(())
 }
 
@@ -148,20 +379,24 @@ fn start_hid_worker() {
             println!("[esp32-bif] USB HID worker started");
             crate::diagnostics::record_event("hid worker started");
             while let Ok(command) = rx.recv() {
-                println!(
-                    "[esp32-bif] USB HID worker sending dx={} dy={}",
-                    command.dx, command.dy
-                );
-                crate::diagnostics::record_event(format!(
-                    "hid worker send start dx={} dy={}",
-                    command.dx, command.dy
-                ));
-                match usb_hid::send_mouse_report(command.dx, command.dy) {
+                let desc = format!("{:?}", command);
+                crate::diagnostics::record_event(format!("hid worker send start {}", desc));
+                let result = match command {
+                    HidCommand::MouseMove { dx, dy } => usb_hid::send_mouse_move_report(dx, dy),
+                    HidCommand::MouseButton { button, down } => {
+                        usb_hid::send_mouse_button_report(button, down)
+                    }
+                    HidCommand::MouseScroll { dx, dy } => usb_hid::send_mouse_scroll_report(dx, dy),
+                    HidCommand::KeyPress { keycode } => usb_hid::send_key_report(keycode, true),
+                    HidCommand::KeyRelease { keycode } => usb_hid::send_key_report(keycode, false),
+                    HidCommand::KeyReleaseAll => usb_hid::send_key_release_all(),
+                };
+                match result {
                     Ok(()) => {
                         HID_SENT.fetch_add(1, Ordering::AcqRel);
                         crate::diagnostics::record_event(format!(
-                            "hid worker send complete dx={} dy={}",
-                            command.dx, command.dy
+                            "hid worker send complete {}",
+                            desc
                         ));
                         println!("[esp32-bif] USB HID worker send complete")
                     }
@@ -202,14 +437,17 @@ mod usb_hid {
     const TUSB_CLASS_HID: u8 = 0x03;
     const HID_SUBCLASS_BOOT: u8 = 0x01;
     const HID_PROTOCOL_MOUSE: u8 = 0x02;
+    const HID_PROTOCOL_KEYBOARD: u8 = 0x01;
 
     const TUSB_XFER_INTERRUPT: u8 = 0x03;
     const TUSB_DIR_IN: u8 = 0x80;
-    const HID_ITF: u8 = 0;
-    const HID_EP_IN: u8 = TUSB_DIR_IN | 1;
+    const HID_ITF_MOUSE: u8 = 0;
+    const HID_ITF_KEYBOARD: u8 = 1;
+    const HID_EP_IN_MOUSE: u8 = TUSB_DIR_IN | 1;
+    const HID_EP_IN_KEYBOARD: u8 = TUSB_DIR_IN | 2;
     const HID_EP_SIZE: u16 = 8;
     const HID_POLL_MS: u8 = 10;
-    const CONFIG_TOTAL_LEN: u16 = 9 + 9 + 9 + 7;
+    const CONFIG_TOTAL_LEN: u16 = 9 + (9 + 9 + 7) + (9 + 9 + 7);
 
     #[repr(C, packed)]
     struct DeviceDescriptor {
@@ -267,24 +505,52 @@ mod usb_hid {
     unsafe impl Sync for DeviceDescriptor {}
 
     static CONFIG_DESCRIPTOR: [u8; CONFIG_TOTAL_LEN as usize] = [
+        // Configuration descriptor
         9,
         TUSB_DESC_CONFIGURATION,
         (CONFIG_TOTAL_LEN & 0xff) as u8,
         (CONFIG_TOTAL_LEN >> 8) as u8,
-        1,
-        1,
-        0,
-        0x80,
-        50,
+        2,    // bNumInterfaces
+        1,    // bConfigurationValue
+        0,    // iConfiguration
+        0x80, // bmAttributes (bus powered)
+        100,  // bMaxPower (200mA)
+        // ── Interface 0: Mouse ──
         9,
         TUSB_DESC_INTERFACE,
-        HID_ITF,
-        0,
-        1,
+        HID_ITF_MOUSE,
+        0, // bAlternateSetting
+        1, // bNumEndpoints
         TUSB_CLASS_HID,
         HID_SUBCLASS_BOOT,
         HID_PROTOCOL_MOUSE,
-        0,
+        0, // iInterface
+        9,
+        TUSB_DESC_HID,
+        0x11,
+        0x01, // HID spec release
+        0,    // country code
+        1,    // num descriptors
+        0x22, // report descriptor type
+        (MOUSE_REPORT_DESCRIPTOR.len() & 0xff) as u8,
+        (MOUSE_REPORT_DESCRIPTOR.len() >> 8) as u8,
+        7,
+        TUSB_DESC_ENDPOINT,
+        HID_EP_IN_MOUSE,
+        TUSB_XFER_INTERRUPT,
+        (HID_EP_SIZE & 0xff) as u8,
+        (HID_EP_SIZE >> 8) as u8,
+        HID_POLL_MS,
+        // ── Interface 1: Keyboard ──
+        9,
+        TUSB_DESC_INTERFACE,
+        HID_ITF_KEYBOARD,
+        0, // bAlternateSetting
+        1, // bNumEndpoints
+        TUSB_CLASS_HID,
+        HID_SUBCLASS_BOOT,
+        HID_PROTOCOL_KEYBOARD,
+        0, // iInterface
         9,
         TUSB_DESC_HID,
         0x11,
@@ -292,11 +558,11 @@ mod usb_hid {
         0,
         1,
         0x22,
-        (MOUSE_REPORT_DESCRIPTOR.len() & 0xff) as u8,
-        (MOUSE_REPORT_DESCRIPTOR.len() >> 8) as u8,
+        (KEYBOARD_REPORT_DESCRIPTOR.len() & 0xff) as u8,
+        (KEYBOARD_REPORT_DESCRIPTOR.len() >> 8) as u8,
         7,
         TUSB_DESC_ENDPOINT,
-        HID_EP_IN,
+        HID_EP_IN_KEYBOARD,
         TUSB_XFER_INTERRUPT,
         (HID_EP_SIZE & 0xff) as u8,
         (HID_EP_SIZE >> 8) as u8,
@@ -309,6 +575,35 @@ mod usb_hid {
         0x81, 0x03, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x81, 0x25, 0x7f, 0x75, 0x08, 0x95,
         0x02, 0x81, 0x06, 0xc0, 0xc0,
     ];
+
+    // Boot keyboard report descriptor: 8-byte report (modifier, reserved, 6 key slots)
+    static KEYBOARD_REPORT_DESCRIPTOR: [u8; 45] = [
+        0x05, 0x01, // Usage Page (Generic Desktop)
+        0x09, 0x06, // Usage (Keyboard)
+        0xa1, 0x01, // Collection (Application)
+        0x05, 0x07, //   Usage Page (Keyboard/Keypad)
+        0x19, 0xe0, //   Usage Minimum (224 = Left Control)
+        0x29, 0xe7, //   Usage Maximum (231 = Right GUI)
+        0x15, 0x00, //   Logical Minimum (0)
+        0x25, 0x01, //   Logical Maximum (1)
+        0x75, 0x01, //   Report Size (1)
+        0x95, 0x08, //   Report Count (8)
+        0x81, 0x02, //   Input (Data, Variable, Absolute) — modifier byte
+        0x95, 0x01, //   Report Count (1)
+        0x75, 0x08, //   Report Size (8)
+        0x81, 0x03, //   Input (Constant, Variable, Absolute) — reserved byte
+        0x95, 0x06, //   Report Count (6)
+        0x75, 0x08, //   Report Size (8)
+        0x15, 0x00, //   Logical Minimum (0)
+        0x25, 0x65, //   Logical Maximum (101)
+        0x05, 0x07, //   Usage Page (Keyboard/Keypad)
+        0x19, 0x00, //   Usage Minimum (0)
+        0x29, 0x65, //   Usage Maximum (101)
+        0x81, 0x00, //   Input (Data, Array) — 6 key slots
+        0xc0, // End Collection
+    ];
+
+    static KEYBOARD_REPORT_LEN: usize = 8;
 
     static MANUFACTURER: &[u8] = b"MatchBox\0";
     static SERIAL: &[u8] = b"MBX-HID-01\0";
@@ -372,23 +667,73 @@ mod usb_hid {
         Ok(())
     }
 
-    pub fn send_mouse_report(dx: i8, dy: i8) -> Result<(), String> {
+    pub fn send_mouse_move_report(dx: i8, dy: i8) -> Result<(), String> {
         let _guard = REPORT_LOCK
             .lock()
             .map_err(|_| "USB HID report lock poisoned".to_string())?;
 
-        send_report(dx, dy)?;
-        unsafe {
-            sys::vTaskDelay(20);
-        }
-        send_report(0, 0)
+        send_report(HID_ITF_MOUSE, &[0u8, dx as u8, dy as u8])?;
+        send_report(HID_ITF_MOUSE, &[0u8, 0, 0])
     }
 
-    fn send_report(dx: i8, dy: i8) -> Result<(), String> {
+    pub fn send_mouse_button_report(button: u8, down: bool) -> Result<(), String> {
+        let _guard = REPORT_LOCK
+            .lock()
+            .map_err(|_| "USB HID report lock poisoned".to_string())?;
+
+        let buttons = if down { 1 << (button - 1) } else { 0 };
+        send_report(HID_ITF_MOUSE, &[buttons, 0, 0])?;
+        unsafe {
+            sys::vTaskDelay(10);
+        }
+        if down {
+            // After button down, send release after short delay
+            send_report(HID_ITF_MOUSE, &[0, 0, 0])
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn send_mouse_scroll_report(dx: i8, dy: i8) -> Result<(), String> {
+        let _guard = REPORT_LOCK
+            .lock()
+            .map_err(|_| "USB HID report lock poisoned".to_string())?;
+
+        // Scroll is sent on the Z axis (byte 4 in the boot protocol)
+        send_report(HID_ITF_MOUSE, &[0u8, 0, 0, dy as u8])?;
+        unsafe {
+            sys::vTaskDelay(10);
+        }
+        send_report(HID_ITF_MOUSE, &[0u8, 0, 0, 0])
+    }
+
+    pub fn send_key_report(keycode: u8, pressed: bool) -> Result<(), String> {
+        let _guard = REPORT_LOCK
+            .lock()
+            .map_err(|_| "USB HID report lock poisoned".to_string())?;
+
+        // Boot keyboard report: 1 byte modifiers, 1 reserved, 6 key slots
+        let report = if pressed {
+            [0u8, 0, keycode, 0, 0, 0, 0, 0]
+        } else {
+            [0u8, 0, 0, 0, 0, 0, 0, 0]
+        };
+        send_report(HID_ITF_KEYBOARD, &report)
+    }
+
+    pub fn send_key_release_all() -> Result<(), String> {
+        let _guard = REPORT_LOCK
+            .lock()
+            .map_err(|_| "USB HID report lock poisoned".to_string())?;
+
+        send_report(HID_ITF_KEYBOARD, &[0u8, 0, 0, 0, 0, 0, 0, 0])
+    }
+
+    fn send_report(instance: u8, data: &[u8]) -> Result<(), String> {
         for _ in 0..200 {
-            if unsafe { tud_mounted() && tud_hid_n_ready(0) } {
-                let report = [0u8, dx as u8, dy as u8];
-                let sent = unsafe { tud_hid_n_report(0, 0, report.as_ptr(), report.len() as u16) };
+            if unsafe { tud_mounted() && tud_hid_n_ready(instance) } {
+                let sent =
+                    unsafe { tud_hid_n_report(instance, 0, data.as_ptr(), data.len() as u16) };
                 if sent {
                     return Ok(());
                 }
@@ -399,7 +744,10 @@ mod usb_hid {
             }
         }
 
-        println!("[esp32-bif] USB HID mouse is not mounted or ready yet");
+        println!(
+            "[esp32-bif] USB HID instance {} is not mounted or ready yet",
+            instance
+        );
         Ok(())
     }
 
@@ -425,7 +773,385 @@ mod usb_hid {
     }
 
     #[unsafe(no_mangle)]
-    extern "C" fn tud_hid_descriptor_report_cb(_instance: u8) -> *const u8 {
-        MOUSE_REPORT_DESCRIPTOR.as_ptr()
+    extern "C" fn tud_hid_descriptor_report_cb(instance: u8) -> *const u8 {
+        if instance == 1 {
+            KEYBOARD_REPORT_DESCRIPTOR.as_ptr()
+        } else {
+            MOUSE_REPORT_DESCRIPTOR.as_ptr()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matchbox_vm::vm::VM;
+
+    fn vm_with_hid_bifs() -> VM {
+        VM::new_with_bifs(register_bifs(), std::collections::HashMap::new())
+    }
+
+    fn invoke_bif(vm: &mut VM, name: &str, args: &[BxValue]) -> Result<BxValue, String> {
+        let bifs = register_bifs();
+        let func = bifs.get(name).expect("BIF not registered");
+        func(vm, args)
+    }
+
+    // ── esp32USBHidReady ──────────────────────────────────────────
+
+    #[test]
+    fn hid_ready_returns_false_before_registration() {
+        let mut vm = vm_with_hid_bifs();
+        // Reset state to simulate pre-registration
+        USB_HID_READY.store(false, Ordering::Release);
+
+        let result = invoke_bif(&mut vm, "esp32USBHidReady", &[]).unwrap();
+        assert!(
+            !result.as_bool(),
+            "HID should not be ready before registerAsHID is called"
+        );
+    }
+
+    #[test]
+    fn hid_ready_rejects_extra_args() {
+        let mut vm = vm_with_hid_bifs();
+        let result = invoke_bif(&mut vm, "esp32USBHidReady", &[BxValue::new_number(1.0)]);
+        assert!(
+            result.is_err(),
+            "esp32USBHidReady should reject extra arguments"
+        );
+    }
+
+    #[test]
+    fn hid_ready_is_case_insensitive() {
+        let mut vm = vm_with_hid_bifs();
+        USB_HID_READY.store(false, Ordering::Release);
+
+        // All registered aliases should exist and return bool
+        for alias in &["esp32USBHidReady", "esp32UsbHidReady", "esp32usbhidready"] {
+            let result = invoke_bif(&mut vm, alias, &[]).unwrap();
+            assert!(!result.as_bool(), "alias {alias} should return false");
+        }
+    }
+
+    // ── Mouse BIF validation ─────────────────────────────────────
+
+    #[test]
+    fn mouse_move_rejects_wrong_arg_count() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(&mut vm, "esp32USBMouseMove", &[]).unwrap_err();
+        assert!(err.contains("2 arguments"), "should reject 0 args: {err}");
+
+        let err =
+            invoke_bif(&mut vm, "esp32USBMouseMove", &[BxValue::new_number(1.0)]).unwrap_err();
+        assert!(err.contains("2 arguments"), "should reject 1 arg: {err}");
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseMove",
+            &[
+                BxValue::new_number(1.0),
+                BxValue::new_number(2.0),
+                BxValue::new_number(3.0),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.contains("2 arguments"), "should reject 3 args: {err}");
+    }
+
+    #[test]
+    fn mouse_move_rejects_non_finite_values() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseMove",
+            &[BxValue::new_number(f64::NAN), BxValue::new_number(0.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("must be a finite number"),
+            "should reject NaN: {err}"
+        );
+    }
+
+    #[test]
+    fn mouse_move_rejects_out_of_range_values() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseMove",
+            &[BxValue::new_number(128.0), BxValue::new_number(0.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("between -128 and 127"),
+            "should reject x=128: {err}"
+        );
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseMove",
+            &[BxValue::new_number(0.0), BxValue::new_number(-129.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("between -128 and 127"),
+            "should reject y=-129: {err}"
+        );
+    }
+
+    // ── RegisterAsHID validation ─────────────────────────────────
+
+    #[test]
+    fn register_as_hid_rejects_too_many_args() {
+        let mut vm = vm_with_hid_bifs();
+        // Reset so we don't hit "already registered" path
+        USB_HID_READY.store(false, Ordering::Release);
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32RegisterAsHID",
+            &[BxValue::new_number(1.0), BxValue::new_number(2.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("0 or 1 arguments"),
+            "should reject 2 args: {err}"
+        );
+    }
+
+    // ── Mouse button BIFs ───────────────────────────────────────
+
+    #[test]
+    fn mouse_button_rejects_wrong_arg_count() {
+        let mut vm = vm_with_hid_bifs();
+
+        for bif in &["esp32USBMouseClick", "esp32USBMouseDown", "esp32USBMouseUp"] {
+            let err = invoke_bif(&mut vm, bif, &[]).unwrap_err();
+            assert!(
+                err.contains("1 argument"),
+                "{bif} should reject 0 args: {err}"
+            );
+
+            let err = invoke_bif(
+                &mut vm,
+                bif,
+                &[BxValue::new_number(1.0), BxValue::new_number(2.0)],
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("1 argument"),
+                "{bif} should reject 2 args: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn mouse_button_rejects_invalid_button_numbers() {
+        let mut vm = vm_with_hid_bifs();
+
+        for bif in &["esp32USBMouseClick", "esp32USBMouseDown", "esp32USBMouseUp"] {
+            let err = invoke_bif(&mut vm, bif, &[BxValue::new_number(-1.0)]).unwrap_err();
+            assert!(
+                err.contains("button must be"),
+                "{bif} should reject -1: {err}"
+            );
+
+            let err = invoke_bif(&mut vm, bif, &[BxValue::new_number(8.0)]).unwrap_err();
+            assert!(
+                err.contains("button must be"),
+                "{bif} should reject 8: {err}"
+            );
+
+            let err = invoke_bif(&mut vm, bif, &[BxValue::new_number(f64::NAN)]).unwrap_err();
+            assert!(
+                err.contains("button must be"),
+                "{bif} should reject NaN: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn mouse_click_has_case_insensitive_aliases() {
+        let mut vm = vm_with_hid_bifs();
+
+        for alias in &[
+            "esp32USBMouseClick",
+            "esp32UsbMouseClick",
+            "esp32usbmouseclick",
+        ] {
+            // Should fail with "not ready" not "BIF not registered"
+            let result = invoke_bif(&mut vm, alias, &[BxValue::new_number(1.0)]);
+            assert!(result.is_err(), "alias {alias} should be registered");
+        }
+    }
+
+    // ── Mouse scroll BIFs ───────────────────────────────────────
+
+    #[test]
+    fn mouse_scroll_rejects_wrong_arg_count() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(&mut vm, "esp32USBMouseScroll", &[]).unwrap_err();
+        assert!(err.contains("2 arguments"), "should reject 0 args: {err}");
+
+        let err =
+            invoke_bif(&mut vm, "esp32USBMouseScroll", &[BxValue::new_number(1.0)]).unwrap_err();
+        assert!(err.contains("2 arguments"), "should reject 1 arg: {err}");
+    }
+
+    #[test]
+    fn mouse_scroll_rejects_non_finite_values() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseScroll",
+            &[BxValue::new_number(f64::INFINITY), BxValue::new_number(0.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("must be a finite number"),
+            "should reject Infinity: {err}"
+        );
+    }
+
+    #[test]
+    fn mouse_scroll_rejects_out_of_range_values() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBMouseScroll",
+            &[BxValue::new_number(128.0), BxValue::new_number(0.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("between -128 and 127"),
+            "should reject dx=128: {err}"
+        );
+    }
+
+    #[test]
+    fn mouse_scroll_has_case_insensitive_aliases() {
+        let mut vm = vm_with_hid_bifs();
+
+        for alias in &[
+            "esp32USBMouseScroll",
+            "esp32UsbMouseScroll",
+            "esp32usbmousescroll",
+        ] {
+            // Should fail with "not ready" not "BIF not registered"
+            let result = invoke_bif(
+                &mut vm,
+                alias,
+                &[BxValue::new_number(1.0), BxValue::new_number(2.0)],
+            );
+            assert!(result.is_err(), "alias {alias} should be registered");
+        }
+    }
+
+    // ── Keyboard BIFs ───────────────────────────────────────────
+
+    #[test]
+    fn keyboard_press_rejects_wrong_arg_count() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(&mut vm, "esp32USBKeyboardPress", &[]).unwrap_err();
+        assert!(err.contains("1 argument"), "should reject 0 args: {err}");
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBKeyboardPress",
+            &[BxValue::new_number(1.0), BxValue::new_number(2.0)],
+        )
+        .unwrap_err();
+        assert!(err.contains("1 argument"), "should reject 2 args: {err}");
+    }
+
+    #[test]
+    fn keyboard_press_rejects_invalid_keycode() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBKeyboardPress",
+            &[BxValue::new_number(-1.0)],
+        )
+        .unwrap_err();
+        assert!(err.contains("between 0 and 255"), "should reject -1: {err}");
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBKeyboardPress",
+            &[BxValue::new_number(256.0)],
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("between 0 and 255"),
+            "should reject 256: {err}"
+        );
+    }
+
+    #[test]
+    fn keyboard_release_rejects_wrong_arg_count() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(&mut vm, "esp32USBKeyboardRelease", &[]).unwrap_err();
+        assert!(err.contains("1 argument"), "should reject 0 args: {err}");
+    }
+
+    #[test]
+    fn keyboard_release_all_accepts_zero_args() {
+        let mut vm = vm_with_hid_bifs();
+
+        // Should fail with "not ready" not "wrong args"
+        let result = invoke_bif(&mut vm, "esp32USBKeyboardReleaseAll", &[]);
+        assert!(result.is_err(), "should be registered");
+        assert!(
+            !result.unwrap_err().contains("argument"),
+            "error should not be about arg count"
+        );
+    }
+
+    #[test]
+    fn keyboard_release_all_rejects_extra_args() {
+        let mut vm = vm_with_hid_bifs();
+
+        let err = invoke_bif(
+            &mut vm,
+            "esp32USBKeyboardReleaseAll",
+            &[BxValue::new_number(1.0)],
+        )
+        .unwrap_err();
+        assert!(err.contains("0 arguments"), "should reject 1 arg: {err}");
+    }
+
+    #[test]
+    fn keyboard_bifs_have_case_insensitive_aliases() {
+        let mut vm = vm_with_hid_bifs();
+
+        for (bif, arg) in &[
+            ("esp32USBKeyboardPress", Some(BxValue::new_number(4.0))),
+            ("esp32UsbKeyboardPress", Some(BxValue::new_number(4.0))),
+            ("esp32usbkeyboardpress", Some(BxValue::new_number(4.0))),
+            ("esp32USBKeyboardRelease", Some(BxValue::new_number(4.0))),
+            ("esp32UsbKeyboardRelease", Some(BxValue::new_number(4.0))),
+            ("esp32usbkeyboardrelease", Some(BxValue::new_number(4.0))),
+            ("esp32USBKeyboardReleaseAll", None),
+            ("esp32UsbKeyboardReleaseAll", None),
+            ("esp32usbkeyboardreleaseall", None),
+        ] {
+            let args: &[BxValue] = if let Some(a) = arg {
+                std::slice::from_ref(a)
+            } else {
+                &[]
+            };
+            let result = invoke_bif(&mut vm, bif, args);
+            assert!(result.is_err(), "alias {bif} should be registered");
+        }
     }
 }

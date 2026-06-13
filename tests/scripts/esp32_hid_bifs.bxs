@@ -1,0 +1,108 @@
+// Integration test: ESP32 HID BIFs
+// Runs on physical ESP32 hardware only.
+//
+// This test validates:
+// 1. esp32USBHidReady returns false before registration
+// 2. esp32RegisterAsHID enables HID
+// 3. esp32USBHidReady returns true after registration
+// 4. Mouse move/click/scroll enqueue commands
+// 5. Keyboard press/release enqueue commands
+
+// ── Test HID readiness ──
+println("=== HID Ready (before registration) ===")
+var beforeReady = esp32USBHidReady()
+println("HID ready: ", beforeReady)
+assert !beforeReady "HID should not be ready yet"
+
+// ── Register as HID ──
+println("=== Register HID ===")
+var registered = esp32RegisterAsHID("MatchBox HID Test")
+println("Registered: ", registered)
+assert registered "Registration should succeed"
+
+// ── Verify ready after registration ──
+println("=== HID Ready (after registration) ===")
+var afterReady = esp32USBHidReady()
+println("HID ready: ", afterReady)
+assert afterReady "HID should be ready after registration"
+
+// ── Mouse movement ──
+println("=== Mouse Movement ===")
+var moved = esp32USBMouseMove(10, -5)
+println("Mouse moved: ", moved)
+assert moved "Mouse move should succeed"
+
+// ── Mouse buttons ──
+println("=== Mouse Buttons ===")
+var clicked = esp32USBMouseClick(1)  // left click
+println("Left click: ", clicked)
+assert clicked "Left click should succeed"
+
+var down = esp32USBMouseDown(2)  // right button down
+println("Right down: ", down)
+assert down "Right button down should succeed"
+
+var up = esp32USBMouseUp(2)  // right button up
+println("Right up: ", up)
+assert up "Right button up should succeed"
+
+// ── Mouse scroll ──
+println("=== Mouse Scroll ===")
+var scrolled = esp32USBMouseScroll(0, -3)  // scroll up
+println("Scrolled: ", scrolled)
+assert scrolled "Scroll should succeed"
+
+// ── Keyboard ──
+println("=== Keyboard ===")
+var keyPressed = esp32USBKeyboardPress(4)  // 'a' key
+println("Key pressed: ", keyPressed)
+assert keyPressed "Key press should succeed"
+
+var keyReleased = esp32USBKeyboardRelease(4)
+println("Key released: ", keyReleased)
+assert keyReleased "Key release should succeed"
+
+var allReleased = esp32USBKeyboardReleaseAll()
+println("All keys released: ", allReleased)
+assert allReleased "Release all should succeed"
+
+// ── Argument validation ──
+println("=== Validation ===")
+
+// Mouse move with wrong args
+try {
+    esp32USBMouseMove()
+    assert false "Should have thrown"
+} catch (e) {
+    println("Mouse move validation: ", e.message)
+    assert e.message contains "2 arguments" "Wrong error message: " & e.message
+}
+
+// Mouse move out of range
+try {
+    esp32USBMouseMove(128, 0)
+    assert false "Should have thrown"
+} catch (e) {
+    println("Mouse move range check: ", e.message)
+    assert e.message contains "between -128 and 127" "Wrong error message"
+}
+
+// Mouse button invalid
+try {
+    esp32USBMouseClick(0)
+    assert false "Should have thrown"
+} catch (e) {
+    println("Mouse button validation: ", e.message)
+    assert e.message contains "between 1 and 7" "Wrong error message"
+}
+
+// Keyboard invalid
+try {
+    esp32USBKeyboardPress(256)
+    assert false "Should have thrown"
+} catch (e) {
+    println("Keyboard validation: ", e.message)
+    assert e.message contains "between 0 and 255" "Wrong error message"
+}
+
+println("=== All HID BIF tests PASSED ===")

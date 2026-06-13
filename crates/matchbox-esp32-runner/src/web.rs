@@ -2,17 +2,17 @@ use crate::camera::with_photo;
 use crate::features::BundledFeatures;
 use crate::profile::StrictProfile;
 use anyhow::Result;
-use embedded_svc::http::Method;
 use embedded_svc::http::server::Request;
+use embedded_svc::http::Method;
 use embedded_svc::io::Read as _;
 use embedded_svc::io::Write as _;
 use esp_idf_svc::http::server::{
     Configuration as HttpConfiguration, EspHttpConnection, EspHttpServer,
 };
 use matchbox_vm::{
-    Chunk,
     types::{BxVM, BxValue},
     vm::VM,
+    Chunk,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -181,7 +181,7 @@ pub fn serve_with_route_table(
 ) -> Result<()> {
     let mut config = HttpConfiguration::default();
     config.http_port = profile.web_port;
-    config.stack_size = 16384;
+    config.stack_size = 8192;
     config.max_sessions = 4;
     config.max_open_sockets = 4;
     config.max_uri_handlers = 20;
@@ -435,45 +435,44 @@ pub fn load_executable_route_table() -> ExecutableRouteTable {
 }
 
 pub fn run_application_start(route_table: &ExecutableRouteTable) -> Result<Esp32AppConfig> {
-        let Some(application) = route_table.application.as_ref() else {
-            return Ok(Esp32AppConfig::default());
-        };
+    let Some(application) = route_table.application.as_ref() else {
+        return Ok(Esp32AppConfig::default());
+    };
 
-        println!(
-            "[matchbox] Executing Application.onApplicationStart source={}",
-            application.source_path
-        );
-        let mut vm = VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new());
-        vm.interpret_chunk_borrowed(application.chunk.as_ref())
-            .map_err(anyhow::Error::msg)?;
-        let application = vm
-            .construct_global_class("Application", Vec::new())
-            .map_err(anyhow::Error::msg)?;
-        vm.insert_empty_struct_global("application");
+    println!(
+        "[matchbox] Executing Application.onApplicationStart source={}",
+        application.source_path
+    );
+    let mut vm = VM::new_with_bifs(crate::esp32_bifs::register_bifs(), HashMap::new());
+    vm.interpret_chunk_borrowed(application.chunk.as_ref())
+        .map_err(anyhow::Error::msg)?;
+    let application = vm
+        .construct_global_class("Application", Vec::new())
+        .map_err(anyhow::Error::msg)?;
+    vm.insert_empty_struct_global("application");
 
-        // Populate application.esp32 with defaults from environment/profile
-        populate_application_esp32(&mut vm);
+    // Populate application.esp32 with defaults from environment/profile
+    populate_application_esp32(&mut vm);
 
-        match vm.call_method_value(application, "onApplicationStart", Vec::new()) {
-            Ok(_) => {
-                // Read back the config (may have been modified by BoxLang)
-                let config = read_esp32_config(&vm, application);
+    match vm.call_method_value(application, "onApplicationStart", Vec::new()) {
+        Ok(_) => {
+            // Read back the config (may have been modified by BoxLang)
+            let config = read_esp32_config(&vm, application);
 
-                let runtime = Arc::new(Mutex::new(ApplicationVm {
-                    ptr: Box::into_raw(Box::new(vm)) as usize,
-                }));
-                let _ = APPLICATION_VM.set(Arc::clone(&runtime));
-                start_application_fiber_scheduler(runtime);
-                Ok(config)
-            }
-            Err(error)
-                if error.to_string().contains("Method ")
-                    && error.to_string().contains(" not found on instance") =>
-            {
-                Ok(Esp32AppConfig::default())
-            }
-            Err(error) => Err(anyhow::Error::msg(error)),
+            let runtime = Arc::new(Mutex::new(ApplicationVm {
+                ptr: Box::into_raw(Box::new(vm)) as usize,
+            }));
+            let _ = APPLICATION_VM.set(Arc::clone(&runtime));
+            start_application_fiber_scheduler(runtime);
+            Ok(config)
         }
+        Err(error)
+            if error.to_string().contains("Method ")
+                && error.to_string().contains(" not found on instance") =>
+        {
+            Ok(Esp32AppConfig::default())
+        }
+        Err(error) => Err(anyhow::Error::msg(error)),
     }
 }
 
@@ -492,7 +491,7 @@ fn populate_application_esp32(vm: &mut VM) {
 
     // wifi sub-struct
     let wifi_id = vm.struct_new();
-    
+
     // Create strings separately to avoid mutable borrow conflicts
     let ssid_id = vm.string_new(
         option_env!("MATCHBOX_ESP32_WIFI_SSID")
@@ -500,14 +499,14 @@ fn populate_application_esp32(vm: &mut VM) {
             .to_string(),
     );
     vm.struct_set(wifi_id, "ssid", BxValue::new_ptr(ssid_id));
-    
+
     let password_id = vm.string_new(
         option_env!("MATCHBOX_ESP32_WIFI_PASSWORD")
             .unwrap_or("myinternetpass")
             .to_string(),
     );
     vm.struct_set(wifi_id, "password", BxValue::new_ptr(password_id));
-    
+
     let hostname_id = vm.string_new(
         option_env!("MATCHBOX_ESP32_WIFI_HOSTNAME")
             .unwrap_or("matchbox-esp32")
@@ -808,6 +807,9 @@ fn execute_embedded_route(
 
     let mut shared_vm = shared_vm.lock().unwrap();
     shared_vm.with_vm(|vm| {
+        // Collect garbage BEFORE execution to reduce heap fragmentation
+        vm.collect_garbage_now();
+
         install_scope(vm, "url", &context.url);
         install_scope(vm, "form", &context.form);
         install_scope(vm, "request", &context.request);
