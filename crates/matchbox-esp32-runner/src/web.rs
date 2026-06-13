@@ -2,17 +2,17 @@ use crate::camera::with_photo;
 use crate::features::BundledFeatures;
 use crate::profile::StrictProfile;
 use anyhow::Result;
-use embedded_svc::http::server::Request;
 use embedded_svc::http::Method;
+use embedded_svc::http::server::Request;
 use embedded_svc::io::Read as _;
 use embedded_svc::io::Write as _;
 use esp_idf_svc::http::server::{
     Configuration as HttpConfiguration, EspHttpConnection, EspHttpServer,
 };
 use matchbox_vm::{
+    Chunk,
     types::{BxVM, BxValue},
     vm::VM,
-    Chunk,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -181,9 +181,9 @@ pub fn serve_with_route_table(
 ) -> Result<()> {
     let mut config = HttpConfiguration::default();
     config.http_port = profile.web_port;
-    config.stack_size = 8192;
-    config.max_sessions = 4;
-    config.max_open_sockets = 4;
+    config.stack_size = 6144;
+    config.max_sessions = 2;
+    config.max_open_sockets = 2;
     config.max_uri_handlers = 20;
     config.lru_purge_enable = true;
     config.uri_match_wildcard = true;
@@ -598,7 +598,7 @@ fn start_application_fiber_scheduler(vm: Arc<Mutex<ApplicationVm>>) {
 
     let builder = thread::Builder::new()
         .name("matchbox-app-fibers".to_string())
-        .stack_size(16384);
+        .stack_size(8192);
     match builder.spawn(move || {
         println!("[matchbox] Application fiber scheduler started");
         loop {
@@ -628,7 +628,7 @@ fn start_application_fiber_scheduler(vm: Arc<Mutex<ApplicationVm>>) {
                     break;
                 }
             }
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(100));
         }
     }) {
         Ok(_) => {}
@@ -700,6 +700,11 @@ fn respond_with_embedded_route(
 ) -> anyhow::Result<()> {
     let method = method_name(request.method());
     let request_uri = request.uri().to_string();
+    let heap = heap_snapshot();
+    println!(
+        "[matchbox] HTTP {} {} free={} largest={}",
+        method, request_uri, heap.free, heap.largest_internal_8bit_block
+    );
     let request_path = request_uri
         .split_once('?')
         .map(|(path, _)| path.to_string())
@@ -799,8 +804,12 @@ fn execute_embedded_route(
     shared_vm: &Mutex<ApplicationVm>,
 ) -> anyhow::Result<RouteExecution> {
     println!(
-        "[matchbox] Executing embedded route method={} path={} kind={}",
-        route.method, route.path, route.source_kind
+        "[matchbox] Executing embedded route method={} path={} kind={} free={} largest={}",
+        route.method,
+        route.path,
+        route.source_kind,
+        heap_snapshot().free,
+        heap_snapshot().largest_internal_8bit_block
     );
     // New borrowed execution path for ESP32. This avoids the old per-request
     // route chunk clone and lets the runner reuse preloaded route programs.
@@ -818,6 +827,15 @@ fn execute_embedded_route(
         vm.begin_output_capture();
         let result = vm.interpret_chunk_borrowed_current_task(route.chunk.as_ref());
         let output = vm.end_output_capture().unwrap_or_default();
+        println!(
+            "[matchbox] Embedded route completed method={} path={} ok={} output_bytes={} free={} largest={}",
+            route.method,
+            route.path,
+            result.is_ok(),
+            output.len(),
+            heap_snapshot().free,
+            heap_snapshot().largest_internal_8bit_block
+        );
 
         let execution = match result {
             Ok(result) if route.source_kind == "template" => Ok(RouteExecution::Html(output)),

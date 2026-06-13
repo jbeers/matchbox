@@ -1,8 +1,14 @@
-use std::collections::HashMap;
+use super::opcode::op;
 use crate::types::Constant;
 use crate::types::box_string::BoxString;
-use super::opcode::op;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+#[cfg(not(target_os = "espidf"))]
+pub type RuntimeCaches = Vec<Option<IcEntry>>;
+
+#[cfg(target_os = "espidf")]
+pub type RuntimeCaches = Vec<(usize, IcEntry)>;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum ConstantKey {
@@ -36,7 +42,7 @@ pub struct Chunk {
     pub filename: String,
     pub source: String,
     #[serde(skip)]
-    pub caches: Vec<Option<IcEntry>>,
+    pub caches: RuntimeCaches,
     #[serde(skip)]
     constant_map: HashMap<ConstantKey, u32>,
 }
@@ -72,6 +78,12 @@ pub enum IcEntry {
 }
 
 impl Chunk {
+    #[inline]
+    fn emit_cache_slot(&mut self) {
+        #[cfg(not(target_os = "espidf"))]
+        self.caches.push(None);
+    }
+
     pub fn new(filename: &str) -> Self {
         Chunk {
             code: Vec::new(),
@@ -102,7 +114,7 @@ impl Chunk {
     pub fn emit0(&mut self, opcode: u8, line: u32) {
         self.code.push(opcode as u32);
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
     }
 
     /// Emit a single-operand instruction (1 word).
@@ -111,7 +123,7 @@ impl Chunk {
     pub fn emit1(&mut self, opcode: u8, a: u32, line: u32) {
         self.code.push((opcode as u32) | (a << 8));
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
     }
 
     /// Emit a two-operand instruction (2 words).
@@ -120,10 +132,10 @@ impl Chunk {
     pub fn emit2(&mut self, opcode: u8, a: u32, b: u32, line: u32) {
         self.code.push((opcode as u32) | (a << 8));
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
         self.code.push(b);
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
     }
 
     /// Emit a three-operand instruction (3 words).
@@ -132,13 +144,13 @@ impl Chunk {
     pub fn emit3(&mut self, opcode: u8, a: u32, b: u32, c: u32, line: u32) {
         self.code.push((opcode as u32) | (a << 8));
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
         self.code.push(b);
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
         self.code.push(c);
         self.lines.push(line);
-        self.caches.push(None);
+        self.emit_cache_slot();
     }
 
     /// Emit ITER_NEXT: 3 words.
@@ -167,9 +179,90 @@ impl Chunk {
     }
 
     pub fn ensure_caches(&mut self) {
+        #[cfg(not(target_os = "espidf"))]
         if self.caches.len() < self.code.len() {
             self.caches.resize(self.code.len(), None);
         }
+    }
+
+    pub fn cache_get(&self, ip: usize) -> Option<IcEntry> {
+        #[cfg(not(target_os = "espidf"))]
+        {
+            self.caches.get(ip).and_then(|entry| entry.clone())
+        }
+
+        #[cfg(target_os = "espidf")]
+        {
+            self.caches
+                .iter()
+                .find_map(|(cached_ip, entry)| (*cached_ip == ip).then(|| entry.clone()))
+        }
+    }
+
+    pub fn cache_set(&mut self, ip: usize, entry: IcEntry) {
+        #[cfg(not(target_os = "espidf"))]
+        {
+            if self.caches.len() <= ip {
+                self.caches.resize(ip + 1, None);
+            }
+            self.caches[ip] = Some(entry);
+        }
+
+        #[cfg(target_os = "espidf")]
+        {
+            if let Some((_, existing)) = self
+                .caches
+                .iter_mut()
+                .find(|(cached_ip, _)| *cached_ip == ip)
+            {
+                *existing = entry;
+            } else {
+                self.caches.push((ip, entry));
+            }
+        }
+    }
+
+    pub fn cache_add_shape(&mut self, ip: usize, shape_id: usize, index: usize) {
+        match self.cache_get(ip) {
+            None => self.cache_set(ip, IcEntry::Monomorphic { shape_id, index }),
+            Some(IcEntry::Monomorphic {
+                shape_id: cached_shape,
+                index: cached_index,
+            }) => {
+                if cached_shape == shape_id {
+                    return;
+                }
+                let mut entries = [(0, 0); 4];
+                entries[0] = (cached_shape, cached_index);
+                entries[1] = (shape_id, index);
+                self.cache_set(ip, IcEntry::Polymorphic { entries, count: 2 });
+            }
+            Some(IcEntry::Polymorphic { mut entries, count }) => {
+                if entries[..count]
+                    .iter()
+                    .any(|(cached_shape, _)| *cached_shape == shape_id)
+                {
+                    return;
+                }
+                if count < entries.len() {
+                    entries[count] = (shape_id, index);
+                    self.cache_set(
+                        ip,
+                        IcEntry::Polymorphic {
+                            entries,
+                            count: count + 1,
+                        },
+                    );
+                } else {
+                    self.cache_set(ip, IcEntry::Megamorphic);
+                }
+            }
+            Some(IcEntry::Megamorphic | IcEntry::Global { .. }) => {}
+        }
+    }
+
+    pub fn cache_slice(&self, start: usize, len: usize) -> Vec<Option<IcEntry>> {
+        (start..start + len).map(|ip| self.cache_get(ip)).collect()
     }
 
     pub fn clone_without_runtime_caches(&self) -> Self {
