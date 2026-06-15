@@ -35,7 +35,10 @@ impl ShapeRegistry {
 
     pub fn transition(&mut self, current_id: ShapeId, field_name_id: u32) -> ShapeId {
         // 1. Check if transition already exists
-        if let Some(&next_id) = self.shapes[current_id as usize].transitions.get(&field_name_id) {
+        if let Some(&next_id) = self.shapes[current_id as usize]
+            .transitions
+            .get(&field_name_id)
+        {
             return next_id;
         }
 
@@ -50,12 +53,17 @@ impl ShapeRegistry {
         self.shapes.push(new_shape);
 
         // 3. Record transition in the parent shape
-        self.shapes[current_id as usize].transitions.insert(field_name_id, new_id);
+        self.shapes[current_id as usize]
+            .transitions
+            .insert(field_name_id, new_id);
 
         new_id
     }
 
     pub fn get_index(&self, shape_id: ShapeId, field_name_id: u32) -> Option<u32> {
-        self.shapes[shape_id as usize].fields.get(&field_name_id).copied()
+        self.shapes[shape_id as usize]
+            .fields
+            .get(&field_name_id)
+            .copied()
     }
 }
