@@ -5962,6 +5962,9 @@ impl VM {
     }
 
     fn throw_error(&mut self, fiber_idx: usize, msg: &str) -> Result<()> {
+        #[cfg(target_os = "espidf")]
+        eprintln!("[matchbox-vm] throwing ExpressionException: {}", msg);
+        self.collect_garbage();
         let val = self.exception_from_message("ExpressionException", msg.to_string(), None);
         self.throw_value(fiber_idx, val)
     }

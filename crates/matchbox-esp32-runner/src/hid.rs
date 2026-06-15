@@ -2,7 +2,7 @@ use matchbox_vm::types::{BxNativeFunction, BxVM, BxValue};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
 
@@ -10,13 +10,16 @@ static USB_HID_READY: AtomicBool = AtomicBool::new(false);
 static HID_QUEUED: AtomicU32 = AtomicU32::new(0);
 static HID_SENT: AtomicU32 = AtomicU32::new(0);
 static HID_ERRORS: AtomicU32 = AtomicU32::new(0);
+static MOUSE_BUTTONS: AtomicU8 = AtomicU8::new(0);
 static HID_COMMANDS: OnceLock<mpsc::SyncSender<HidCommand>> = OnceLock::new();
 const DEFAULT_PRODUCT_NAME: &str = "MatchBox HID";
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HidSnapshot {
+    pub installed: bool,
     pub ready: bool,
+    pub mounted: bool,
     pub queued: u32,
     pub sent: u32,
     pub errors: u32,
@@ -33,8 +36,12 @@ enum HidCommand {
 }
 
 pub fn snapshot() -> HidSnapshot {
+    let installed = USB_HID_READY.load(Ordering::Acquire);
+    let mounted = installed && usb_hid::is_mounted();
     HidSnapshot {
-        ready: USB_HID_READY.load(Ordering::Acquire),
+        installed,
+        ready: installed && usb_hid::is_mouse_ready(),
+        mounted,
         queued: HID_QUEUED.load(Ordering::Acquire),
         sent: HID_SENT.load(Ordering::Acquire),
         errors: HID_ERRORS.load(Ordering::Acquire),
@@ -188,7 +195,9 @@ fn esp32_usb_hid_ready(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
             args.len()
         ));
     }
-    Ok(BxValue::new_bool(USB_HID_READY.load(Ordering::Acquire)))
+    Ok(BxValue::new_bool(
+        USB_HID_READY.load(Ordering::Acquire) && usb_hid::is_mounted(),
+    ))
 }
 
 fn esp32_usb_mouse_move(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -203,6 +212,7 @@ fn esp32_usb_mouse_move(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     let dy = clamp_i8(args[1].as_number(), "y")?;
 
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::MouseMove { dx, dy })?;
 
     Ok(BxValue::new_bool(true))
@@ -217,6 +227,7 @@ fn esp32_usb_mouse_click(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
     }
     let button = clamp_button(args[0].as_number())?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     // Click = down + up with a short delay in the worker
     enqueue_command(HidCommand::MouseButton { button, down: true })?;
     enqueue_command(HidCommand::MouseButton {
@@ -235,6 +246,7 @@ fn esp32_usb_mouse_down(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     }
     let button = clamp_button(args[0].as_number())?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::MouseButton { button, down: true })?;
     Ok(BxValue::new_bool(true))
 }
@@ -248,6 +260,7 @@ fn esp32_usb_mouse_up(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
     }
     let button = clamp_button(args[0].as_number())?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::MouseButton {
         button,
         down: false,
@@ -265,6 +278,7 @@ fn esp32_usb_mouse_scroll(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValu
     let dx = clamp_i8(args[0].as_number(), "scrollX")?;
     let dy = clamp_i8(args[1].as_number(), "scrollY")?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::MouseScroll { dx, dy })?;
     Ok(BxValue::new_bool(true))
 }
@@ -278,6 +292,7 @@ fn esp32_usb_keyboard_press(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVa
     }
     let keycode = clamp_keycode(args[0].as_number())?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::KeyPress { keycode })?;
     Ok(BxValue::new_bool(true))
 }
@@ -291,6 +306,7 @@ fn esp32_usb_keyboard_release(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<Bx
     }
     let keycode = clamp_keycode(args[0].as_number())?;
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::KeyRelease { keycode })?;
     Ok(BxValue::new_bool(true))
 }
@@ -303,6 +319,7 @@ fn esp32_usb_keyboard_release_all(_vm: &mut dyn BxVM, args: &[BxValue]) -> Resul
         ));
     }
     ensure_usb_hid_ready(None)?;
+    usb_hid::ensure_mounted()?;
     enqueue_command(HidCommand::KeyReleaseAll)?;
     Ok(BxValue::new_bool(true))
 }
@@ -351,6 +368,7 @@ fn ensure_usb_hid_ready(product_name: Option<&str>) -> Result<(), String> {
     }
 
     usb_hid::install(product_name.unwrap_or(DEFAULT_PRODUCT_NAME))?;
+    MOUSE_BUTTONS.store(0, Ordering::Release);
     start_hid_worker();
     USB_HID_READY.store(true, Ordering::Release);
     println!("[esp32-bif] USB HID ready");
@@ -362,8 +380,8 @@ fn enqueue_command(command: HidCommand) -> Result<(), String> {
         .get()
         .ok_or_else(|| "USB HID worker is not running".to_string())?;
     crate::diagnostics::record_event(format!("hid queue {:?}", command));
-    tx.try_send(command)
-        .map_err(|error| format!("USB HID command queue is full or stopped: {}", error))?;
+    tx.send(command)
+        .map_err(|error| format!("USB HID command queue is stopped: {}", error))?;
     HID_QUEUED.fetch_add(1, Ordering::AcqRel);
     crate::diagnostics::record_event(format!("hid queued {:?}", command));
     Ok(())
@@ -426,6 +444,7 @@ fn start_hid_worker() {
 mod usb_hid {
     use esp_idf_sys::{self as sys, ESP_OK};
     use std::ffi::CString;
+    use std::sync::atomic::Ordering;
     use std::sync::{Mutex, OnceLock};
 
     const TUSB_DESC_DEVICE: u8 = 0x01;
@@ -667,13 +686,38 @@ mod usb_hid {
         Ok(())
     }
 
+    pub fn is_mouse_ready() -> bool {
+        unsafe { tud_mounted() && tud_hid_n_ready(HID_ITF_MOUSE) }
+    }
+
+    pub fn is_mounted() -> bool {
+        unsafe { tud_mounted() }
+    }
+
+    pub fn ensure_mounted() -> Result<(), String> {
+        if is_mounted() {
+            Ok(())
+        } else {
+            Err("USB HID device is not mounted; reconnect the native USB/OTG port after enabling HID".to_string())
+        }
+    }
+
+    pub fn ensure_mouse_ready() -> Result<(), String> {
+        if is_mouse_ready() {
+            Ok(())
+        } else {
+            Err("USB HID mouse is not mounted or ready yet; reconnect the native USB/OTG port after enabling HID".to_string())
+        }
+    }
+
     pub fn send_mouse_move_report(dx: i8, dy: i8) -> Result<(), String> {
         let _guard = REPORT_LOCK
             .lock()
             .map_err(|_| "USB HID report lock poisoned".to_string())?;
 
-        send_report(HID_ITF_MOUSE, &[0u8, dx as u8, dy as u8])?;
-        send_report(HID_ITF_MOUSE, &[0u8, 0, 0])
+        let buttons = super::MOUSE_BUTTONS.load(Ordering::Acquire);
+        send_report(HID_ITF_MOUSE, &[buttons, dx as u8, dy as u8])?;
+        send_report(HID_ITF_MOUSE, &[buttons, 0, 0])
     }
 
     pub fn send_mouse_button_report(button: u8, down: bool) -> Result<(), String> {
@@ -681,17 +725,16 @@ mod usb_hid {
             .lock()
             .map_err(|_| "USB HID report lock poisoned".to_string())?;
 
-        let buttons = if down { 1 << (button - 1) } else { 0 };
-        send_report(HID_ITF_MOUSE, &[buttons, 0, 0])?;
-        unsafe {
-            sys::vTaskDelay(10);
-        }
-        if down {
-            // After button down, send release after short delay
-            send_report(HID_ITF_MOUSE, &[0, 0, 0])
+        let mask = 1u8 << (button - 1);
+        let current = super::MOUSE_BUTTONS.load(Ordering::Acquire);
+        let buttons = if down {
+            current | mask
         } else {
-            Ok(())
-        }
+            current & !mask
+        };
+        send_report(HID_ITF_MOUSE, &[buttons, 0, 0])?;
+        super::MOUSE_BUTTONS.store(buttons, Ordering::Release);
+        Ok(())
     }
 
     pub fn send_mouse_scroll_report(dx: i8, dy: i8) -> Result<(), String> {
@@ -699,12 +742,13 @@ mod usb_hid {
             .lock()
             .map_err(|_| "USB HID report lock poisoned".to_string())?;
 
+        let buttons = super::MOUSE_BUTTONS.load(Ordering::Acquire);
         // Scroll is sent on the Z axis (byte 4 in the boot protocol)
-        send_report(HID_ITF_MOUSE, &[0u8, 0, 0, dy as u8])?;
+        send_report(HID_ITF_MOUSE, &[buttons, 0, 0, dy as u8])?;
         unsafe {
             sys::vTaskDelay(10);
         }
-        send_report(HID_ITF_MOUSE, &[0u8, 0, 0, 0])
+        send_report(HID_ITF_MOUSE, &[buttons, 0, 0, 0])
     }
 
     pub fn send_key_report(keycode: u8, pressed: bool) -> Result<(), String> {
@@ -748,7 +792,10 @@ mod usb_hid {
             "[esp32-bif] USB HID instance {} is not mounted or ready yet",
             instance
         );
-        Ok(())
+        Err(format!(
+            "USB HID instance {} is not mounted or ready yet",
+            instance
+        ))
     }
 
     #[unsafe(no_mangle)]
