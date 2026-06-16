@@ -9,6 +9,26 @@ use std::path::Path;
 use walkdir::WalkDir;
 
 #[cfg(feature = "bif-io")]
+fn normalize_path_string(path: &Path) -> String {
+    normalize_path_text(path.to_string_lossy().as_ref())
+}
+
+#[cfg(feature = "bif-io")]
+fn normalize_path_text(path: &str) -> String {
+    #[cfg(windows)]
+    {
+        if let Some(stripped) = path.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{}", stripped);
+        }
+        if let Some(stripped) = path.strip_prefix(r"\\?\") {
+            return stripped.to_string();
+        }
+    }
+
+    path.to_string()
+}
+
+#[cfg(feature = "bif-io")]
 pub fn directory_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("directoryExists() expects 1 argument".to_string());
@@ -286,9 +306,12 @@ pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
         return Err("contractPath() expects 1 argument".to_string());
     }
     let path_str = vm.to_string(args[0]);
-    let path = Path::new(&path_str);
+    let path_text = normalize_path_text(&path_str);
+    let path = Path::new(&path_text);
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-    let relative = path.strip_prefix(&cwd).unwrap_or(path);
+    let cwd_text = normalize_path_string(&cwd);
+    let cwd = Path::new(&cwd_text);
+    let relative = path.strip_prefix(cwd).unwrap_or(path);
     let result = relative.to_string_lossy().to_string();
     let result = if result.is_empty() { ".".to_string() } else { result };
     let s_id = vm.string_new(result);
@@ -326,11 +349,7 @@ pub fn create_temp_directory(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVa
 
     let dir_path = base.join(&name);
     fs::create_dir_all(&dir_path).map_err(|e| e.to_string())?;
-    let canonical = dir_path
-        .canonicalize()
-        .unwrap_or(dir_path)
-        .to_string_lossy()
-        .to_string();
+    let canonical = normalize_path_string(&dir_path.canonicalize().unwrap_or(dir_path));
     let s_id = vm.string_new(canonical);
     Ok(BxValue::new_ptr(s_id))
 }
@@ -372,11 +391,7 @@ pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
 
     let file_path = base.join(&name);
     fs::write(&file_path, b"").map_err(|e| e.to_string())?;
-    let canonical = file_path
-        .canonicalize()
-        .unwrap_or(file_path)
-        .to_string_lossy()
-        .to_string();
+    let canonical = normalize_path_string(&file_path.canonicalize().unwrap_or(file_path));
     let s_id = vm.string_new(canonical);
     Ok(BxValue::new_ptr(s_id))
 }
@@ -479,7 +494,7 @@ pub fn expand_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     };
 
     let resolved = expanded.canonicalize().unwrap_or(expanded);
-    let mut result = resolved.to_string_lossy().to_string();
+    let mut result = normalize_path_string(&resolved);
     if has_trailing && !result.ends_with(std::path::MAIN_SEPARATOR) {
         result.push(std::path::MAIN_SEPARATOR);
     }
@@ -683,7 +698,7 @@ pub fn get_canonical_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
 
     match path.canonicalize() {
         Ok(canonical) => {
-            let mut result = canonical.to_string_lossy().to_string();
+            let mut result = normalize_path_string(&canonical);
             if canonical.is_dir() && !result.ends_with(std::path::MAIN_SEPARATOR) {
                 result.push(std::path::MAIN_SEPARATOR);
             }
