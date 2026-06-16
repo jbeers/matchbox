@@ -2926,9 +2926,9 @@ impl Compiler {
         // they are available when the VM executes the parent chunk.
         self.propagate_js_imports(&sub_imports);
 
-        for constant in chunk.constants {
+        for constant in chunk.constants() {
             if let Constant::Class(_) = constant {
-                return Ok(constant);
+                return Ok(constant.clone());
             }
         }
 
@@ -2960,9 +2960,9 @@ impl Compiler {
         // Pull js: import bindings from the sub-compiler into the parent.
         self.propagate_js_imports(&sub_imports);
 
-        for constant in chunk.constants {
+        for constant in chunk.constants() {
             if let Constant::Interface(_) = constant {
-                return Ok(constant);
+                return Ok(constant.clone());
             }
         }
 

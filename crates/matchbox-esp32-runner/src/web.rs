@@ -811,8 +811,13 @@ fn execute_embedded_route(
         heap_snapshot().free,
         heap_snapshot().largest_internal_8bit_block
     );
-    // New borrowed execution path for ESP32. This avoids the old per-request
-    // route chunk clone and lets the runner reuse preloaded route programs.
+    // ESP32 memory model: each route is compiled once and stored as an
+    // `Arc<Chunk>`. The immutable program data (bytecode, constants, line
+    // table, filename and source text) is shared across requests; only a
+    // lightweight per-request runtime cache is allocated. This prevents the
+    // previous behavior of cloning the entire route chunk on every HTTP
+    // request, which could exhaust the ESP32-S3 heap for routes with large
+    // numeric constant tables (e.g. HID drawing instructions parsed from SVG).
 
     let mut shared_vm = shared_vm.lock().unwrap();
     shared_vm.with_vm(|vm| {

@@ -2348,21 +2348,26 @@ impl VM {
     }
 
     pub fn interpret_chunk_borrowed(&mut self, chunk: &Chunk) -> Result<BxValue> {
-        // New borrowed execution path used by the ESP32 runner to avoid
-        // cloning the entire route chunk on every request.
-        let mut chunk_for_func = chunk.clone();
+        // Borrowed execution path used by host tests. It still creates a
+        // fresh Chunk wrapper so the caller's runtime caches are not mutated,
+        // but the immutable program data is shared via Arc.
+        let mut chunk_for_func = chunk.clone_without_runtime_caches();
         chunk_for_func.ensure_caches();
-        let mut owned_chunk = chunk_for_func.clone();
-        owned_chunk.ensure_caches();
-        let chunk_rc = Rc::new(RefCell::new(owned_chunk));
+        let chunk_rc = Rc::new(RefCell::new(chunk_for_func));
+        let chunk_for_func = chunk.clone_without_runtime_caches();
         self.interpret_chunk_shared(chunk_for_func, chunk_rc)
     }
 
     pub fn interpret_chunk_borrowed_current_task(&mut self, chunk: &Chunk) -> Result<BxValue> {
+        // ESP32 route execution path: share the route's immutable program
+        // data (code/constants/lines/filename/source) and attach only a fresh
+        // per-request runtime cache. This avoids the previous OOM-prone
+        // `clone_without_runtime_caches()` path that duplicated the entire
+        // route chunk on every HTTP request.
+        let mut route_chunk = chunk.clone_without_runtime_caches();
+        route_chunk.ensure_caches();
+        let chunk_rc = Rc::new(RefCell::new(route_chunk));
         let chunk_for_func = Chunk::default();
-        let mut owned_chunk = chunk.clone_without_runtime_caches();
-        owned_chunk.ensure_caches();
-        let chunk_rc = Rc::new(RefCell::new(owned_chunk));
         self.interpret_chunk_shared_current_task(chunk_for_func, chunk_rc)
     }
 
@@ -3070,8 +3075,8 @@ impl VM {
                 {
                     let frame = self.fibers[fiber_idx].frames.last().unwrap();
                     let chunk = frame.chunk.borrow();
-                    code_ptr = chunk.code.as_ptr();
-                    code_len = chunk.code.len();
+                    code_ptr = chunk.code().as_ptr();
+                    code_len = chunk.code().len();
                 }
                 promoted_ptr = &mut self.fibers[fiber_idx]
                     .frames
@@ -5387,7 +5392,7 @@ impl VM {
 
                             let constructor = class.borrow().constructor.clone();
                             let sub_chunk = constructor.chunk.clone();
-                            let constant_count = sub_chunk.constants.len();
+                            let constant_count = sub_chunk.constants().len();
 
                             let frame = CallFrame {
                                 function: Rc::new(constructor),
@@ -6102,9 +6107,9 @@ impl VM {
         for (i, frame) in self.fibers[fiber_idx].frames.iter().rev().enumerate() {
             let chunk = frame.chunk.borrow();
             let func_name = &frame.function.name;
-            let file = &chunk.filename;
-            let line = if frame.ip > 0 && frame.ip <= chunk.lines.len() {
-                chunk.lines[frame.ip - 1]
+            let file = chunk.filename();
+            let line = if frame.ip > 0 && frame.ip <= chunk.lines().len() {
+                chunk.lines()[frame.ip - 1]
             } else {
                 0
             };
@@ -6121,12 +6126,12 @@ impl VM {
         if line == 0 {
             return String::new();
         }
-        let source_text: Option<String> = if !chunk.source.is_empty() {
-            Some(chunk.source.clone())
+        let source_text: Option<String> = if !chunk.source().is_empty() {
+            Some(chunk.source().clone())
         } else {
             #[cfg(not(target_arch = "wasm32"))]
             {
-                std::fs::read_to_string(&chunk.filename).ok()
+                std::fs::read_to_string(chunk.filename()).ok()
             }
             #[cfg(target_arch = "wasm32")]
             {
@@ -6165,8 +6170,8 @@ impl VM {
         if !self.fibers[fiber_idx].frames.is_empty() {
             let frame = self.fibers[fiber_idx].frames.last().unwrap();
             let chunk = frame.chunk.borrow();
-            if frame.ip > 0 && frame.ip <= chunk.lines.len() {
-                let line = chunk.lines[frame.ip - 1];
+            if frame.ip > 0 && frame.ip <= chunk.lines().len() {
+                let line = chunk.lines()[frame.ip - 1];
                 source_context = self.source_context(&chunk, line);
             }
         }
@@ -6311,7 +6316,7 @@ impl VM {
                     }
 
                     let sub_chunk = func.chunk.clone();
-                    let constant_count = sub_chunk.constants.len();
+                    let constant_count = sub_chunk.constants().len();
                     let future_id = self.future_new().as_gc_id().unwrap();
                     let fiber = BxFiber {
                         stack: {
@@ -6400,7 +6405,7 @@ impl VM {
 
         let constructor = class.borrow().constructor.clone();
         let sub_chunk = constructor.chunk.clone();
-        let constant_count = sub_chunk.constants.len();
+        let constant_count = sub_chunk.constants().len();
         let future_id = self.future_new().as_gc_id().unwrap();
         let fiber = BxFiber {
             stack: {
@@ -6669,8 +6674,8 @@ impl VM {
                         let compiled = if compiled_opt.is_none() {
                             if let Some(ref mut jit) = self.jit {
                                 let fn_id = Rc::as_ptr(&func) as usize;
-                                let code = func.chunk.code.as_slice();
-                                let consts = func.chunk.constants.as_slice();
+                                let code = func.chunk.code().as_slice();
+                                let consts = func.chunk.constants().as_slice();
                                 jit.profile_fn(fn_id, id, code, consts, func.arity)
                             } else {
                                 None
@@ -6724,7 +6729,7 @@ impl VM {
                     // ── End Tier-4 ────────────────────────────────────────────
 
                     let sub_chunk = func.chunk.clone();
-                    let constant_count = sub_chunk.constants.len();
+                    let constant_count = sub_chunk.constants().len();
                     let mut frame = CallFrame {
                         function: Rc::clone(&func),
                         chunk: Rc::new(RefCell::new(sub_chunk)),
@@ -7096,7 +7101,7 @@ impl VM {
                         }
 
                         let sub_chunk = func.chunk.clone();
-                        let constant_count = sub_chunk.constants.len();
+                        let constant_count = sub_chunk.constants().len();
                         let stack_base = self.fibers[fiber_idx].stack.len() - func.arity as usize;
                         let frame = CallFrame {
                             function: func.clone(),
@@ -7128,7 +7133,7 @@ impl VM {
                             .push(BxValue::new_ptr(args_array_id));
 
                         let sub_chunk = on_missing.chunk.clone();
-                        let constant_count = sub_chunk.constants.len();
+                        let constant_count = sub_chunk.constants().len();
                         let mut frame = CallFrame {
                             function: on_missing.clone(),
                             chunk: Rc::new(RefCell::new(sub_chunk)),
@@ -7263,7 +7268,7 @@ impl VM {
             let fiber = &self.fibers[fiber_idx];
             let frame = fiber.frames.last().unwrap();
             let chunk = frame.chunk.borrow();
-            chunk.constants[idx].clone()
+            chunk.constants()[idx].clone()
         };
 
         let promoted = self.promote_constant(constant)?;
@@ -7272,7 +7277,7 @@ impl VM {
             let fiber = &mut self.fibers[fiber_idx];
             let frame = fiber.frames.last_mut().unwrap();
             if idx >= frame.promoted_constants.len() {
-                let chunk_len = frame.chunk.borrow().constants.len();
+                let chunk_len = frame.chunk.borrow().constants().len();
                 frame.promoted_constants.resize(chunk_len, None);
             }
             frame.promoted_constants[idx] = Some(promoted);
