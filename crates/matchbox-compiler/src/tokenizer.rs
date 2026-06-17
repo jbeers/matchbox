@@ -90,6 +90,150 @@ pub enum LexerMode {
     TemplateScript,
 }
 
+impl std::fmt::Display for TokenKind {
+    /// Human-readable token name for error messages.
+    ///
+    /// Punctuation renders as its literal glyph; keywords and other named
+    /// kinds use lowercase, user-friendly names. Never leaks Rust Debug
+    /// output like `LeftParen` or `Some(Identifier)`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s: &str = match self {
+            // Punctuation — the literal source characters.
+            TokenKind::LeftBrace => "{",
+            TokenKind::RightBrace => "}",
+            TokenKind::LeftParen => "(",
+            TokenKind::RightParen => ")",
+            TokenKind::LeftBracket => "[",
+            TokenKind::RightBracket => "]",
+            TokenKind::Comma => ",",
+            TokenKind::Dot => ".",
+            TokenKind::Semicolon => ";",
+            TokenKind::Colon => ":",
+            TokenKind::At => "@",
+            TokenKind::Equal => "=",
+            TokenKind::Less => "<",
+            TokenKind::Greater => ">",
+            TokenKind::Bang => "!",
+            TokenKind::Question => "?",
+            TokenKind::Ampersand => "&",
+
+            // Operators (single- and multi-character).
+            TokenKind::Plus => "+",
+            TokenKind::Minus => "-",
+            TokenKind::Star => "*",
+            TokenKind::Slash => "/",
+            TokenKind::Percent => "%",
+            TokenKind::Caret => "^",
+            TokenKind::EqualEqual => "==",
+            TokenKind::BangEqual => "!=",
+            TokenKind::LessEqual => "<=",
+            TokenKind::GreaterEqual => ">=",
+            TokenKind::AmpAmp => "&&",
+            TokenKind::PipePipe => "||",
+            TokenKind::EqualGreater => "=>",
+            TokenKind::MinusGreater => "->",
+            TokenKind::QuestionColon => "?:",
+            TokenKind::QuestionDot => "?.",
+            TokenKind::ColonColon => "::",
+            TokenKind::PlusEqual => "+=",
+            TokenKind::MinusEqual => "-=",
+            TokenKind::StarEqual => "*=",
+            TokenKind::SlashEqual => "/=",
+            TokenKind::PercentEqual => "%=",
+            TokenKind::AmpEqual => "&=",
+            TokenKind::PlusPlus => "++",
+            TokenKind::MinusMinus => "--",
+            TokenKind::DotDot => "..",
+            TokenKind::DotDotDot => "...",
+            TokenKind::DotDotLess => "..<",
+            TokenKind::GreaterDotDot => ">..",
+            TokenKind::GreaterDotDotLess => ">..<",
+            TokenKind::BitwiseOr => "|",
+            TokenKind::BitwiseAnd => "&",
+            TokenKind::BitwiseXor => "^",
+            TokenKind::BitwiseComplement => "~",
+            TokenKind::BitwiseShiftLeft => "<<",
+            TokenKind::BitwiseShiftRight => ">>",
+            TokenKind::BitwiseUnsignedShiftRight => ">>>",
+
+            // Literals / identifiers.
+            TokenKind::Identifier => "identifier",
+            TokenKind::Number => "number",
+            TokenKind::String => "string",
+            TokenKind::StringStart => "string start",
+            TokenKind::StringEnd => "string end",
+
+            // Keywords: lowercase keyword form, derived from source spelling.
+            TokenKind::Import => "import",
+            TokenKind::Class => "class",
+            TokenKind::Interface => "interface",
+            TokenKind::Property => "property",
+            TokenKind::Function => "function",
+            TokenKind::Return => "return",
+            TokenKind::Var => "var",
+            TokenKind::Required => "required",
+            TokenKind::For => "for",
+            TokenKind::While => "while",
+            TokenKind::In => "in",
+            TokenKind::If => "if",
+            TokenKind::Else => "else",
+            TokenKind::Try => "try",
+            TokenKind::Catch => "catch",
+            TokenKind::Finally => "finally",
+            TokenKind::Continue => "continue",
+            TokenKind::Break => "break",
+            TokenKind::Switch => "switch",
+            TokenKind::Case => "case",
+            TokenKind::Default => "default",
+            TokenKind::Throw => "throw",
+            TokenKind::New => "new",
+            TokenKind::True => "true",
+            TokenKind::False => "false",
+            TokenKind::Null => "null",
+            TokenKind::As => "as",
+            TokenKind::Public => "public",
+            TokenKind::Private => "private",
+            TokenKind::Remote => "remote",
+            TokenKind::Package => "package",
+            TokenKind::Extends => "extends",
+            TokenKind::Implements => "implements",
+            TokenKind::Accessors => "accessors",
+            TokenKind::Abstract => "abstract",
+            TokenKind::Final => "final",
+            TokenKind::Static => "static",
+            TokenKind::Do => "do",
+            TokenKind::Assert => "assert",
+            TokenKind::Param => "param",
+            TokenKind::Rethrow => "rethrow",
+            TokenKind::Include => "include",
+            TokenKind::Not => "not",
+
+            // Word operators.
+            TokenKind::Xor => "xor",
+            TokenKind::Eqv => "eqv",
+            TokenKind::InstanceOf => "instanceof",
+            TokenKind::CastAs => "castas",
+            TokenKind::Contains => "contains",
+
+            // Interpolation / template boundary tokens.
+            TokenKind::InterpStart => "#{",
+            TokenKind::InterpEnd => "}",
+            TokenKind::ScriptStart => "<cfscript>",
+            TokenKind::ScriptEnd => "</cfscript>",
+
+            // Template-specific tokens.
+            TokenKind::ContentText => "text",
+            TokenKind::ComponentName => "tag name",
+            TokenKind::ComponentOpen => "tag open",
+            TokenKind::ComponentClose => "</",
+            TokenKind::ComponentSelfClose => "/>",
+
+            TokenKind::Eof => "end of input",
+        };
+        f.write_str(s)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LexedSource<'a> {
     source: &'a str,
