@@ -1,0 +1,71 @@
+// Prelude performance benchmark for issue #28.
+//
+// Stresses the rewritten O(n log n) arraySort / structSort and the O(n)
+// arrayUnique against 10,000+ element arrays, and verifies the results so a
+// regression in correctness surfaces during a benchmark run.
+//
+// Run with:
+//   /usr/bin/time -v cargo run -- benchmarks/prelude_perf.bxs
+
+n = 20000
+halfN = n / 2
+
+// Build a workload of n integers spread across [0, n/2) so there are plenty of
+// duplicates (exercises both sort stability and arrayUnique dedup paths).
+// Pure-BoxLang deterministic generator — runs on every target, no Java interop.
+var input = []
+for (var i = 1; i <= n; i = i + 1) {
+    // Multiplicative hash of i, reduced mod halfN. Provides a pseudo-random
+    // spread without depending on any RNG BIF.
+    var x = i * 2654435761
+    x = x - int(x / halfN) * halfN
+    arrayAppend(input, x)
+}
+
+// --- arraySort -----------------------------------------------------------
+sortStart = getTickCount()
+arraySort(input, "numeric", "asc")
+sortElapsed = getTickCount() - sortStart
+
+// Verify the array is sorted ascending.
+for (var i = 2; i <= n; i = i + 1) {
+    if (input[i - 1] > input[i]) {
+        throw "arraySort produced unsorted output at index " & i
+    }
+}
+
+// --- arrayUnique ---------------------------------------------------------
+uniqStart = getTickCount()
+var uniq = arrayUnique(input)
+uniqElapsed = getTickCount() - uniqStart
+
+// Verify uniqueness: every adjacent pair differs.
+for (var i = 2; i <= len(uniq); i = i + 1) {
+    if (uniq[i - 1] == uniq[i]) {
+        throw "arrayUnique left a duplicate at index " & i
+    }
+}
+
+// --- structSort ----------------------------------------------------------
+// Build a struct with n entries, value = key-based, then sort the keys.
+var s = {}
+for (var i = 1; i <= n; i = i + 1) {
+    s["key" & i] = (n - i)
+}
+structStart = getTickCount()
+var sortedKeys = structSort(s, "numeric", "asc")
+structElapsed = getTickCount() - structStart
+
+// Verify structSort ascending order by value.
+for (var i = 2; i <= len(sortedKeys); i = i + 1) {
+    if (s[sortedKeys[i - 1]] > s[sortedKeys[i]]) {
+        throw "structSort produced unsorted keys at index " & i
+    }
+}
+
+println("n = " & n)
+println("arraySort ms = " & sortElapsed)
+println("arrayUnique ms = " & uniqElapsed)
+println("arrayUnique kept " & len(uniq) & " of " & n)
+println("structSort ms = " & structElapsed)
+println("All benchmark correctness checks passed")
