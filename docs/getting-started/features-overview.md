@@ -536,3 +536,5 @@ MatchBox includes a small standard library of BIFs compiled into every program. 
 | `max(a, b)` | Maximum of two numbers |
 | `sleep(ms)` | Pause for `ms` milliseconds |
 | `runAsync(fn)` | Run function on the fiber scheduler |
+| `systemExecute(name, arguments, timeout, terminateOnTimeout, directory, output, error, inheritEnvironment, environment, inheritIO)` | Execute a native process with BoxLang-compatible output, timeout, directory, environment, and terminal inheritance options (native hosts only) |
+| `systemOutput(obj, addNewLine, doErrorStream)` | Write to the process output or error stream |

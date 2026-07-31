@@ -1,0 +1,36 @@
+result = systemExecute( "sh", [ "-c", "printf stdout; printf stderr >&2; exit 7" ] )
+if ( result.exitCode != 7 ) { throw "systemExecute exitCode failed: " & result.exitCode }
+if ( result.output != "stdout" ) { throw "systemExecute output failed" }
+if ( result.error != "stderr" ) { throw "systemExecute error failed" }
+if ( result.timeout ) { throw "systemExecute timeout default failed" }
+if ( result.terminated ) { throw "systemExecute terminated default failed" }
+if ( result.pid <= 0 ) { throw "systemExecute pid failed" }
+
+stringArgumentsResult = systemExecute( "printf", "'%s %s' first second" )
+if ( stringArgumentsResult.output != "first second" ) { throw "systemExecute quoted string arguments failed" }
+
+environmentResult = systemExecute(
+	"sh",
+	[ "-c", 'printf "$MATCHBOX_SYSTEM_EXECUTE_TEST"' ],
+	0,
+	false,
+	null,
+	null,
+	null,
+	false,
+	{ MATCHBOX_SYSTEM_EXECUTE_TEST : "environment value" }
+)
+if ( environmentResult.output != "environment value" ) { throw "systemExecute environment failed" }
+
+timeoutResult = systemExecute( "sleep", [ "2" ], 1, true )
+if ( !timeoutResult.timeout ) { throw "systemExecute timeout failed" }
+if ( !timeoutResult.terminated ) { throw "systemExecute terminateOnTimeout failed" }
+if ( !isNull( timeoutResult.output ) ) { throw "systemExecute terminated output failed" }
+if ( !isNull( timeoutResult.error ) ) { throw "systemExecute terminated error failed" }
+
+inheritedResult = systemExecute( "sh", [ "-c", "exit 0" ], 0, false, null, null, null, true, {}, true )
+if ( inheritedResult.exitCode != 0 ) { throw "systemExecute inheritIO exitCode failed" }
+if ( !isNull( inheritedResult.output ) ) { throw "systemExecute inheritIO output failed" }
+if ( !isNull( inheritedResult.error ) ) { throw "systemExecute inheritIO error failed" }
+
+println( "systemExecute tests passed" )

@@ -2,12 +2,34 @@ use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::time::SystemTime;
 
 fn truthy_env(name: &str) -> bool {
     matches!(
         env::var(name).ok().as_deref(),
         Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
     )
+}
+
+fn path_is_newer_than(path: &Path, reference: SystemTime) -> bool {
+    if path
+        .metadata()
+        .and_then(|metadata| metadata.modified())
+        .map(|modified| modified > reference)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if path.is_dir() {
+        return fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|entry| path_is_newer_than(&entry.path(), reference))
+            })
+            .unwrap_or(false);
+    }
+    false
 }
 
 fn main() {
@@ -96,25 +118,18 @@ fn main() {
         let sources_to_watch = [
             Path::new(&root_dir).join("crates/matchbox-runner/src/main.rs"),
             Path::new(&root_dir).join("crates/matchbox-runner/Cargo.toml"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/vm/mod.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/vm/intern.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/vm/opcode.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/bifs/mod.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/types/mod.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/lib.rs"),
+            Path::new(&root_dir).join("crates/matchbox-vm/src"),
             Path::new(&root_dir).join("crates/matchbox-vm/Cargo.toml"),
+            Path::new(&root_dir).join("build.rs"),
         ];
         let stub_mtime = dest_path.metadata().and_then(|m| m.modified()).ok();
         let needs_rebuild = stub_mtime.map_or(true, |stub_time| {
             fs::metadata(&dest_path)
                 .map(|m| m.len() == 0)
                 .unwrap_or(true)
-                || sources_to_watch.iter().any(|src| {
-                    src.metadata()
-                        .and_then(|m| m.modified())
-                        .map(|src_time| src_time > stub_time)
-                        .unwrap_or(false)
-                })
+                || sources_to_watch
+                    .iter()
+                    .any(|src| path_is_newer_than(src, stub_time))
         });
 
         let mut use_stub = !needs_rebuild;
@@ -274,7 +289,8 @@ fn main() {
             Path::new(&root_dir).join("crates/matchbox-esp32-runner/src/main.rs"),
             Path::new(&root_dir).join("crates/matchbox-esp32-runner/Cargo.toml"),
             Path::new(&root_dir).join("crates/matchbox-esp32-runner/build.rs"),
-            Path::new(&root_dir).join("crates/matchbox-vm/src/lib.rs"),
+            Path::new(&root_dir).join("crates/matchbox-vm/src"),
+            Path::new(&root_dir).join("crates/matchbox-vm/Cargo.toml"),
         ];
 
         let stub_mtime = dest_path.metadata().and_then(|m| m.modified()).ok();
@@ -284,12 +300,9 @@ fn main() {
 
         let needs_rebuild = stub_mtime.map_or(true, |stub_time| {
             is_empty
-                || sources_to_watch.iter().any(|src| {
-                    src.metadata()
-                        .and_then(|m| m.modified())
-                        .map(|src_time| src_time > stub_time)
-                        .unwrap_or(false)
-                })
+                || sources_to_watch
+                    .iter()
+                    .any(|src| path_is_newer_than(src, stub_time))
         });
 
         if needs_rebuild && (is_empty || rebuild_embedded_stubs) {

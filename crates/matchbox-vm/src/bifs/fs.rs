@@ -4,6 +4,10 @@ use crate::types::{BxVM, BxValue};
 use std::fs;
 #[cfg(feature = "bif-io")]
 use std::path::Path;
+#[cfg(all(feature = "bif-io", unix))]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(feature = "bif-io")]
+use uuid::Uuid;
 
 #[cfg(feature = "bif-io")]
 use walkdir::WalkDir;
@@ -352,26 +356,41 @@ pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
     } else {
         ".tmp".to_string()
     };
+    if prefix.contains('/')
+        || prefix.contains('\\')
+        || suffix.contains('/')
+        || suffix.contains('\\')
+    {
+        return Err("createTempFile() prefix and suffix must not contain path separators".to_string());
+    }
 
     let base = Path::new(&directory);
     if !base.exists() {
         fs::create_dir_all(base).map_err(|e| e.to_string())?;
     }
 
-    let mut name = if prefix.is_empty() {
+    let stem = if prefix.is_empty() {
         "tmp".to_string()
     } else {
         prefix
     };
-    let random_suffix: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-    name.push_str(&format!("_{}", random_suffix));
-    name.push_str(&suffix);
-
-    let file_path = base.join(&name);
-    fs::write(&file_path, b"").map_err(|e| e.to_string())?;
+    let mut file_path = None;
+    for _ in 0..16 {
+        let candidate = base.join(format!("{}_{}{}", stem, Uuid::new_v4().simple(), suffix));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        match options.open(&candidate) {
+            Ok(_) => {
+                file_path = Some(candidate);
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    let file_path = file_path.ok_or_else(|| "Could not create a unique temporary file".to_string())?;
     let canonical = file_path
         .canonicalize()
         .unwrap_or(file_path)

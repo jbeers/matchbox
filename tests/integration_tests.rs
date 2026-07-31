@@ -161,6 +161,12 @@ script_test!(vm_math_datetime, "vm_math_datetime.bxs");
 script_test!(vm_type_format, "vm_type_format.bxs");
 script_test!(vm_conversion_bifs, "vm_conversion_bifs.bxs");
 script_test!(vm_io_bifs, "vm_io_bifs.bxs");
+#[cfg(all(
+    not(target_os = "windows"),
+    not(target_family = "wasm"),
+    not(target_os = "espidf")
+))]
+script_test!(vm_system_execute, "vm_system_execute.bxs");
 script_test!(vm_list_query_extra, "vm_list_query_extra.bxs");
 script_test!(vm_binary_encryption, "vm_binary_encryption.bxs");
 script_test!(vm_set_bifs, "vm_set_bifs.bxs");

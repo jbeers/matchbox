@@ -39,6 +39,8 @@ mod json;
 mod conversion;
 mod list_query_extra;
 mod math_datetime;
+mod system_execute;
+mod system_output;
 mod type_format;
 mod set;
 mod i18n;
@@ -48,6 +50,15 @@ mod zip;
 
 pub fn register_all() -> HashMap<String, BxNativeFunction> {
     let mut bifs = HashMap::new();
+
+    bifs.insert(
+        "systemexecute".to_string(),
+        system_execute::system_execute as BxNativeFunction,
+    );
+    bifs.insert(
+        "systemoutput".to_string(),
+        system_output::system_output as BxNativeFunction,
+    );
 
     // Math BIFs
     bifs.insert("round".to_string(), round as BxNativeFunction);

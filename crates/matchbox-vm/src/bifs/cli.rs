@@ -49,7 +49,9 @@ pub fn cli_get_args(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, Str
         }
     }
 
-    for arg in user_args {
+    let mut index = 0;
+    while index < user_args.len() {
+        let arg = &user_args[index];
         if arg.starts_with("--") {
             let part = &arg[2..];
             if part.starts_with('!') {
@@ -61,6 +63,10 @@ pub fn cli_get_args(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, Str
                 let val = &part[idx + 1..];
                 let val_id = vm.string_new(val.to_string());
                 vm.struct_set(options_id, key, BxValue::new_ptr(val_id));
+            } else if index + 1 < user_args.len() && !user_args[index + 1].starts_with('-') {
+                index += 1;
+                let val_id = vm.string_new(user_args[index].clone());
+                vm.struct_set(options_id, part, BxValue::new_ptr(val_id));
             } else {
                 vm.struct_set(options_id, part, BxValue::new_bool(true));
             }
@@ -75,9 +81,10 @@ pub fn cli_get_args(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, Str
                 vm.struct_set(options_id, part, BxValue::new_bool(true));
             }
         } else {
-            let s_id = vm.string_new(arg);
+            let s_id = vm.string_new(arg.clone());
             vm.array_push(positionals_id, BxValue::new_ptr(s_id));
         }
+        index += 1;
     }
 
     let result_id = vm.struct_new();
