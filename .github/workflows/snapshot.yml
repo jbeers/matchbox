@@ -300,6 +300,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: all-stubs
+          pattern: stubs-*
           merge-multiple: true
       
       - name: Show stubs
@@ -399,11 +400,21 @@ jobs:
             export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc
           fi
           
-          # 1. Fat CLI (with cross-compile)
-          cargo build --release --features cross-compile --target ${{ matrix.target }}
-          
-          # 2. Slim CLI (no cross-compile)
+          # 1. Slim CLI (no cross-compile, fewer embedded stubs — build first)
           cargo build --release --target ${{ matrix.target }}
+          
+          # Save slim binary before the fat build overwrites it
+          EXT=""
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then EXT=".exe"; fi
+          mkdir -p dist
+          SLIM_NAME=$(echo "${{ matrix.output_name }}" | sed "s/matchbox/matchbox-slim/")
+          cp "target/${{ matrix.target }}/release/matchbox$EXT" "dist/$SLIM_NAME"
+          
+          # Force recompilation so the fat build picks up the cross-compile stubs
+          cargo clean -p matchbox
+          
+          # 2. Fat CLI (with cross-compile, all stubs embedded)
+          cargo build --release --features cross-compile --target ${{ matrix.target }}
           
           # 3. Server CLI (standalone)
           cargo build --release -p matchbox_server --target ${{ matrix.target }}

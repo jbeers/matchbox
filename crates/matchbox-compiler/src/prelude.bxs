@@ -274,12 +274,82 @@ function arrayDelete(array, value) {
 
 /**
  * Returns an array containing only unique values.
+ *
+ * O(n) for primitive values (numbers, strings, booleans, null) using a
+ * backing struct as a hash set — `structKeyExists` is O(1).
+ *
+ * Equality follows the VM's `==` operator:
+ *   - numbers compare by value (1 == 1.0)
+ *   - strings compare case-insensitively ("Foo" == "foo")
+ *   - booleans, null compare by value
+ *   - other values (datetimes, bytes, arrays, structs, …) are deduplicated
+ *     by value where the VM's `==` defines value equality, using a linear
+ *     scan over previously-seen non-primitive items. That linear scan only
+ *     runs for non-primitive items, so the common primitive case stays O(n).
+ *
+ * Type discrimination uses only true-type-check BIFs (`isNull`, `isString`)
+ * plus `isSimpleValue`, so a parseable string like "1" is never mistaken for
+ * the number 1 (unlike `isNumeric`, which would conflate them).
  */
 function arrayUnique(array) {
     var result = [];
-    for (item in array) {
-        if (!arrayContains(result, item)) {
-            arrayAppend(result, item);
+    var seenKeys = {};
+    var complexItems = [];
+    var length = len(array);
+
+    for (var i = 1; i <= length; i++) {
+        var item = array[i];
+        var key = "";
+        var isPrimitive = true;
+
+        if (isNull(item)) {
+            key = "z:null";
+        } else if (isString(item)) {
+            key = "s:" & lcase(item);
+        } else if (isSimpleValue(item) && isNumeric(item)) {
+            // Reached only for genuine numbers (strings were caught above).
+            // Guard NaN: NaN != NaN, so two NaNs must NOT collapse.
+            if (item != item) {
+                isPrimitive = false;
+            } else {
+                key = "n:" & (item & "");
+            }
+        } else if (isSimpleValue(item)) {
+            // Remaining simple values: booleans (datetimes are rare and use
+            // value equality, so route them through the complex bucket).
+            // Distinguish bool from datetime by string form: bools render as
+            // "true"/"false", datetimes as ISO-8601.
+            var render = item & "";
+            if (render == "true" || render == "false") {
+                key = "b:" & render;
+            } else {
+                isPrimitive = false;
+            }
+        } else {
+            isPrimitive = false;
+        }
+
+        if (isPrimitive) {
+            if (!structKeyExists(seenKeys, key)) {
+                structInsert(seenKeys, key, true);
+                arrayAppend(result, item);
+            }
+        } else {
+            // Non-primitive: rely on VM `==` for value equality (datetimes,
+            // bytes) and identity for the rest, scanning only the previously
+            // seen non-primitive items — bounded and rare in practice.
+            var alreadySeen = false;
+            var complexLen = len(complexItems);
+            for (var c = 1; c <= complexLen; c++) {
+                if (complexItems[c] == item) {
+                    alreadySeen = true;
+                    break;
+                }
+            }
+            if (!alreadySeen) {
+                arrayAppend(complexItems, item);
+                arrayAppend(result, item);
+            }
         }
     }
     return result;
@@ -307,33 +377,76 @@ function arrayContainsNoCase(array, value) {
 }
 
 /**
- * Sorts an array.
+ * Sorts an array in place using an O(n log n) stable merge sort.
+ *
+ * `sortType` ("text"|"numeric") and `sortOrder` ("asc"|"desc") control
+ * ordering. Comparisons reuse the VM's `<` / `>` operators so that numbers,
+ * datetimes, and strings all sort exactly as they did under the previous
+ * bubble-sort implementation — only the algorithmic complexity changes.
+ *
+ * Returns true (matching the legacy contract) and mutates the input array.
  */
 function arraySort(array, sortType = "text", sortOrder = "asc") {
     var length = len(array);
-    // Simple bubble sort for now
-    for (var i = 1; i <= length; i++) {
-        for (var j = 1; j <= length - i; j++) {
-            var shouldSwap = false;
-            var val1 = array[j];
-            var val2 = array[j+1];
-            
-            if (sortOrder == "asc") {
-                if (val1 > val2) {
-                    shouldSwap = true;
+    if (length < 2) {
+        return true;
+    }
+
+    // Work on a slice rather than the live array during the merge passes;
+    // copy back into `array` at the end so the caller sees the sorted result.
+    var work = arraySlice(array, 1, length);
+
+    var width = 1;
+    while (width < length) {
+        var merged = [];
+        var i = 1;
+        var doubledWidth = width * 2;
+        while (i <= length) {
+            var leftEnd = i + width - 1;
+            if (leftEnd > length) {
+                leftEnd = length;
+            }
+            var rightStart = leftEnd + 1;
+            var rightEnd = rightStart + width - 1;
+            if (rightEnd > length) {
+                rightEnd = length;
+            }
+
+            if (rightStart > length) {
+                // No right run — copy the remainder verbatim.
+                for (var k = i; k <= leftEnd; k++) {
+                    arrayAppend(merged, work[k]);
                 }
             } else {
-                if (val1 < val2) {
-                    shouldSwap = true;
+                var l = i;
+                var r = rightStart;
+                while (l <= leftEnd && r <= rightEnd) {
+                    if (_sortShouldComeBefore(work[l], work[r], sortOrder)) {
+                        arrayAppend(merged, work[l]);
+                        l = l + 1;
+                    } else {
+                        arrayAppend(merged, work[r]);
+                        r = r + 1;
+                    }
+                }
+                while (l <= leftEnd) {
+                    arrayAppend(merged, work[l]);
+                    l = l + 1;
+                }
+                while (r <= rightEnd) {
+                    arrayAppend(merged, work[r]);
+                    r = r + 1;
                 }
             }
-            
-            if (shouldSwap) {
-                var temp = array[j];
-                array[j] = array[j+1];
-                array[j+1] = temp;
-            }
+            i = i + doubledWidth;
         }
+        work = merged;
+        width = doubledWidth;
+    }
+
+    // Copy the sorted run back into the caller's array in place.
+    for (var n = 1; n <= length; n++) {
+        array[n] = work[n];
     }
     return true;
 }
@@ -687,6 +800,24 @@ function arrayGetMetadata(array) {
     return { "datatype": "any", "dimensions": 1 };
 }
 
+/**
+ * Stable comparison helper for arraySort / structSort.
+ *
+ * Returns true when `a` should be emitted before `b` during a merge pass.
+ * Uses `<=` / `>=` (never strict `<` / `>`) so that equal elements keep the
+ * left-hand (earlier) position — this is what makes the merge sort stable,
+ * matching the previous bubble sort, which only swapped on strict
+ * inequality. The VM's `<=` / `>=` operators share the same
+ * number/datetime/string fallback as `<` / `>`, so ordering is preserved
+ * for every value type.
+ */
+function _sortShouldComeBefore(a, b, sortOrder) {
+    if (sortOrder == "asc") {
+        return a <= b;
+    }
+    return a >= b;
+}
+
 // --- Struct BIFs ---
 
 /**
@@ -825,35 +956,64 @@ function structFindValue(struct, value) {
 }
 
 /**
- * Sorts struct keys and returns them as an array.
+ * Sorts struct keys and returns them as an array, ordered by the value each
+ * key maps to. Uses an O(n log n) stable merge sort operating on the key
+ * array; values are looked up by key during comparison so semantics match
+ * the previous bubble-sort implementation.
  */
 function structSort(struct, sortType = "text", sortOrder = "asc") {
     var keys = structKeyArray(struct);
-    var length = structCount(keys);
-    for (var i = 1; i <= length; i++) {
-        for (var j = 1; j <= length - i; j++) {
-            var key1 = keys[j];
-            var key2 = keys[j+1];
-            var val1 = struct[key1];
-            var val2 = struct[key2];
-            
-            var shouldSwap = false;
-            if (sortOrder == "asc") {
-                if (val1 > val2) {
-                    shouldSwap = true;
+    var length = len(keys);
+    if (length < 2) {
+        return keys;
+    }
+
+    var work = arraySlice(keys, 1, length);
+    var width = 1;
+    while (width < length) {
+        var merged = [];
+        var i = 1;
+        var doubledWidth = width * 2;
+        while (i <= length) {
+            var leftEnd = i + width - 1;
+            if (leftEnd > length) {
+                leftEnd = length;
+            }
+            var rightStart = leftEnd + 1;
+            var rightEnd = rightStart + width - 1;
+            if (rightEnd > length) {
+                rightEnd = length;
+            }
+
+            if (rightStart > length) {
+                for (var k = i; k <= leftEnd; k++) {
+                    arrayAppend(merged, work[k]);
                 }
             } else {
-                if (val1 < val2) {
-                    shouldSwap = true;
+                var l = i;
+                var r = rightStart;
+                while (l <= leftEnd && r <= rightEnd) {
+                    if (_sortShouldComeBefore(struct[work[l]], struct[work[r]], sortOrder)) {
+                        arrayAppend(merged, work[l]);
+                        l = l + 1;
+                    } else {
+                        arrayAppend(merged, work[r]);
+                        r = r + 1;
+                    }
+                }
+                while (l <= leftEnd) {
+                    arrayAppend(merged, work[l]);
+                    l = l + 1;
+                }
+                while (r <= rightEnd) {
+                    arrayAppend(merged, work[r]);
+                    r = r + 1;
                 }
             }
-            
-            if (shouldSwap) {
-                var temp = keys[j];
-                keys[j] = keys[j+1];
-                keys[j+1] = temp;
-            }
+            i = i + doubledWidth;
         }
+        work = merged;
+        width = doubledWidth;
     }
-    return keys;
+    return work;
 }

@@ -19,13 +19,13 @@ if (len(result) < 1) { throw "expandPath dot failed"; }
 // ============================================================
 // getCanonicalPath
 // ============================================================
-result = getCanonicalPath("/tmp");
+result = getCanonicalPath(".");
 if (len(result) < 1) { throw "getCanonicalPath failed"; }
 
 // ============================================================
 // createTempFile
 // ============================================================
-var tmpFile = createTempFile("/tmp", "test_", ".txt");
+var tmpFile = createTempFile(".", "test_", ".txt");
 if (len(tmpFile) < 1) { throw "createTempFile failed"; }
 if (!fileExists(tmpFile)) { throw "createTempFile file should exist"; }
 fileDelete(tmpFile);
@@ -72,7 +72,7 @@ if (!rejectedTempTraversal) { throw "createTempFile should reject path traversal
 // ============================================================
 // createTempDirectory
 // ============================================================
-var tmpDir = createTempDirectory("/tmp", "testdir_");
+var tmpDir = createTempDirectory(".", "testdir_");
 if (len(tmpDir) < 1) { throw "createTempDirectory failed"; }
 if (!directoryExists(tmpDir)) { throw "createTempDirectory dir should exist"; }
 directoryDelete(tmpDir, false);
@@ -80,20 +80,20 @@ directoryDelete(tmpDir, false);
 // ============================================================
 // fileGetMimeType
 // ============================================================
-result = fileGetMimeType("/tmp/test.html", false);
+result = fileGetMimeType("test.html", false);
 if (result != "text/html") { throw "fileGetMimeType html failed: got '" & result & "'"; }
 
-result = fileGetMimeType("/tmp/test.json", false);
+result = fileGetMimeType("test.json", false);
 if (result != "application/json") { throw "fileGetMimeType json failed: got '" & result & "'"; }
 
-result = fileGetMimeType("/tmp/test.unknown", false);
+result = fileGetMimeType("test.unknown", false);
 if (result != "application/octet-stream") { throw "fileGetMimeType unknown failed: got '" & result & "'"; }
 
 // ============================================================
 // directoryCopy
 // ============================================================
-var srcDir = "/tmp/matchbox_test_dirCopy_src";
-var dstDir = "/tmp/matchbox_test_dirCopy_dst";
+var srcDir = "matchbox_test_dirCopy_src";
+var dstDir = "matchbox_test_dirCopy_dst";
 directoryCreate(srcDir, true);
 fileWrite(srcDir & "/file1.txt", "hello");
 directoryCopy(srcDir, dstDir, true);
@@ -106,8 +106,8 @@ directoryDelete(dstDir, true);
 // ============================================================
 // directoryMove
 // ============================================================
-var moveSrc = "/tmp/matchbox_test_dirMove_src";
-var moveDst = "/tmp/matchbox_test_dirMove_dst";
+var moveSrc = "matchbox_test_dirMove_src";
+var moveDst = "matchbox_test_dirMove_dst";
 directoryCreate(moveSrc, true);
 fileWrite(moveSrc & "/file1.txt", "world");
 directoryMove(moveSrc, moveDst);
@@ -118,7 +118,7 @@ directoryDelete(moveDst, true);
 // ============================================================
 // propertyFile
 // ============================================================
-var propPath = "/tmp/matchbox_test.properties";
+var propPath = "matchbox_test.properties";
 fileWrite(propPath, "key1=value1" & chr(10) & "key2=value2" & chr(10) & "key3=value3");
 var props = propertyFile(propPath);
 if (props.key1 != "value1") { throw "propertyFile key1 failed: got '" & props.key1 & "'"; }

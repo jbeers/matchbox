@@ -1,27 +1,155 @@
 use crate::ast::*;
 use crate::tokenizer::*;
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 pub mod template;
+
+/// A user-facing BoxLang parse error.
+///
+/// Carries the optional filename, the source span where the error occurred,
+/// a human-readable message, and (when available) a copy of the source text
+/// so that `Display` can render a snippet with a caret pointing at the
+/// offending column.
+#[derive(Debug, Clone)]
+pub struct ParseError {
+    pub filename: Option<String>,
+    pub span: Span,
+    pub message: String,
+    pub source: Option<String>,
+}
+
+impl ParseError {
+    pub fn new(filename: Option<&str>, span: Span, message: impl Into<String>) -> Self {
+        Self {
+            filename: filename.map(|s| s.to_string()),
+            span,
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Attach source text so the rendered error can show a snippet.
+    pub fn with_source(mut self, source: &str) -> Self {
+        self.source = Some(source.to_string());
+        self
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let location = match &self.filename {
+            Some(name) => format!("{}:{}:{}", name, self.span.line, self.span.col),
+            None => format!("line {}:{}", self.span.line, self.span.col),
+        };
+        write!(f, "error: {}\n  --> {}", self.message, location)?;
+        if let Some(source) = &self.source {
+            if let Some(snippet) = render_snippet(source, self.span) {
+                write!(f, "\n{}", snippet)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+/// Render a `  | source line\n  |     ^^^ label` snippet for the given span, if
+/// the line falls within `source`.
+fn render_snippet(source: &str, span: Span) -> Option<String> {
+    let line_idx = span.line.checked_sub(1)? as usize;
+    let line = source.lines().nth(line_idx)?;
+    let gutter_width = span.line.to_string().len();
+    let pad = " ".repeat(gutter_width);
+    let col = span.col.max(1) as usize;
+    // Caret length: at least 1, capped by remaining line width.
+    let span_len = span.end.saturating_sub(span.start).max(1) as usize;
+    let caret_len = span_len.min(line.len().saturating_sub(col - 1).max(1));
+    let caret_pad = " ".repeat(col - 1);
+    let caret = "^".repeat(caret_len);
+    Some(format!(
+        "{pad} |\n{lineno} | {line}\n{pad} | {caret_pad}{caret}",
+        pad = pad,
+        lineno = span.line,
+        line = line,
+        caret_pad = caret_pad,
+        caret = caret
+    ))
+}
+
+pub type ParseResult<T> = std::result::Result<T, ParseError>;
 
 pub fn parse_bxm(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
     template::parse_template(source, filename)
 }
 
-pub fn parse(source: &str, _filename: Option<&str>) -> Result<Vec<Statement>> {
+pub fn parse(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
     let lexed = lex(source);
-    Parser::new(source, lexed.tokens()).parse_program()
+    match Parser::new(source, lexed.tokens(), filename).parse_program() {
+        Ok(stmts) => Ok(stmts),
+        Err(err) => {
+            // If the underlying error is a ParseError without source text,
+            // attach the source so the rendered message can show a snippet.
+            if let Some(parse_err) = err.downcast_ref::<ParseError>() {
+                if parse_err.source.is_none() {
+                    let mut enriched = parse_err.clone();
+                    enriched.source = Some(source.to_string());
+                    return Err(enriched.into());
+                }
+            }
+            Err(err)
+        }
+    }
+}
+
+/// Parse `source` as if it began at `line_offset` blank lines. Used by the
+/// template parser so that script-island parse errors report line numbers
+/// relative to the template rather than relative to the island's content.
+///
+/// The implementation prepends `line_offset` newlines so the lexer assigns
+/// the same text the right line numbers while preserving column offsets.
+/// Any returned `ParseError` has its `source` field cleared so the caller
+/// (the template parser) can attach the *full template* source instead of
+/// the padded reparse input — otherwise snippets would show leading blank
+/// lines.
+pub fn parse_with_line_offset(
+    source: &str,
+    filename: Option<&str>,
+    line_offset: u32,
+) -> Result<Vec<Statement>> {
+    if line_offset == 0 {
+        return parse(source, filename);
+    }
+    let mut padded = String::with_capacity(source.len() + line_offset as usize);
+    for _ in 0..line_offset {
+        padded.push('\n');
+    }
+    padded.push_str(source);
+    match parse(&padded, filename) {
+        Ok(stmts) => Ok(stmts),
+        Err(err) => {
+            // Strip the padded source so the caller can reattach the real
+            // template source for snippet rendering.
+            if let Some(parse_err) = err.downcast_ref::<ParseError>() {
+                let mut stripped = parse_err.clone();
+                stripped.source = None;
+                Err(stripped.into())
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 struct Parser<'a> {
     source: &'a str,
     tokens: &'a [SyntaxToken],
     pos: usize,
+    filename: Option<&'a str>,
 }
 
 impl<'a> Parser<'a> {
-    fn new(source: &'a str, tokens: &'a [SyntaxToken]) -> Self {
-        Self { source, tokens, pos: 0 }
+    fn new(source: &'a str, tokens: &'a [SyntaxToken], filename: Option<&'a str>) -> Self {
+        Self { source, tokens, pos: 0, filename }
     }
 
     fn kind(&self, offset: usize) -> Option<TokenKind> {
@@ -38,6 +166,35 @@ impl<'a> Parser<'a> {
 
     fn peek_line(&self) -> u32 {
         self.tokens.get(self.pos).map(|t| t.span.line).unwrap_or(0)
+    }
+
+    /// Span of the token under the cursor. Falls back to a zero-length span at
+    /// end of source when no token is available (EOF). For EOF, the position
+    /// is one past the end of the last token so the caret sits at true
+    /// end-of-input rather than re-pointing at the previously-consumed token.
+    fn current_span(&self) -> Span {
+        if let Some(tok) = self.tokens.get(self.pos) {
+            return tok.span;
+        }
+        // No current token: synthesize an EOF span just past the last token.
+        let eof_byte = self.source.len();
+        match self.tokens.last() {
+            Some(last) => {
+                let last_len = last.span.end.saturating_sub(last.span.start) as u32;
+                Span {
+                    start: eof_byte,
+                    end: eof_byte,
+                    line: last.span.line,
+                    col: last.span.col.saturating_add(last_len),
+                }
+            }
+            None => Span {
+                start: eof_byte,
+                end: eof_byte,
+                line: 1,
+                col: 1,
+            },
+        }
     }
 
     fn peek_is(&self, kind: TokenKind) -> bool {
@@ -57,6 +214,29 @@ impl<'a> Parser<'a> {
             .map(|t| self.source[t.span.start..t.span.end].to_string());
         self.pos += 1;
         lexeme
+    }
+
+    /// Build a parse error at the current token's span.
+    fn error_current(&self, message: impl Into<String>) -> ParseError {
+        let span = self.current_span();
+        ParseError::new(self.filename, span, message).with_source(self.source)
+    }
+
+    /// Build a parse error describing "expected X, found Y" at the current
+    /// token. Uses `TokenKind`'s human-readable `Display`, not Rust Debug.
+    fn error_expected(&self, expected: TokenKind) -> ParseError {
+        let found_kind = self.peek_kind();
+        let found_desc = match found_kind {
+            Some(k) => k.to_string(),
+            None => "end of input".to_string(),
+        };
+        let span = self.current_span();
+        ParseError::new(
+            self.filename,
+            span,
+            format!("expected {}, found {}", expected, found_desc),
+        )
+        .with_source(self.source)
     }
 
     fn binary_operator_lexeme(&self, kind: TokenKind, raw: &str) -> String {
@@ -137,23 +317,22 @@ impl<'a> Parser<'a> {
         line
     }
 
-    fn expect(&mut self, kind: TokenKind) -> Result<()> {
+    fn expect(&mut self, kind: TokenKind) -> ParseResult<()> {
         if self.peek_kind() == Some(kind) {
             self.pos += 1;
             Ok(())
         } else {
-            let found = self.peek_kind();
-            bail!("Expected {:?}, found {:?} at line {}", kind, found, self.peek_line());
+            Err(self.error_expected(kind))
         }
     }
 
-    fn expect_get(&mut self, kind: TokenKind) -> Result<String> {
+    fn expect_get(&mut self, kind: TokenKind) -> ParseResult<String> {
         if self.peek_kind() == Some(kind) {
             let lexeme = self.peek_lexeme().unwrap_or("").to_string();
             self.pos += 1;
             Ok(lexeme)
         } else {
-            bail!("Expected {:?}, found {:?}", kind, self.peek_kind());
+            Err(self.error_expected(kind))
         }
     }
 
@@ -211,7 +390,7 @@ impl<'a> Parser<'a> {
                 if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
                 Ok(Statement::new(StatementKind::Expression(expr), line))
             }
-            None => bail!("Unexpected EOF"),
+            None => return Err(self.error_current("unexpected end of input").into()),
         }
     }
 
@@ -324,7 +503,9 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     if s.len() >= 2 { s[1..s.len() - 1].to_string() } else { s }
                 } else {
-                    bail!("Expected string value for '{}'", attr_name);
+                    return Err(self
+                        .error_current(format!("expected string value for '{}'", attr_name))
+                        .into());
                 };
                 match attr_name.as_str() {
                     "extends" => extends = Some(val),
@@ -678,7 +859,7 @@ impl<'a> Parser<'a> {
 
     fn parse_statement_no_if(&mut self) -> Result<Statement> {
         if self.peek_is(TokenKind::If) {
-            bail!("Unexpected 'if' in single-statement context");
+            return Err(self.error_current("unexpected 'if' in single-statement context").into());
         }
         self.parse_statement()
     }
@@ -852,7 +1033,7 @@ impl<'a> Parser<'a> {
                     }
                     default_case = Some(body);
                 }
-                _ => bail!("Expected case or default in switch"),
+                _ => return Err(self.error_current("expected case or default in switch").into()),
             }
         }
         self.pos += 1; // }
@@ -874,7 +1055,9 @@ impl<'a> Parser<'a> {
             let bin_op = op[..op.len() - 1].to_string();
             (Some(bin_op), self.parse_expression()?)
         } else {
-            bail!("Expected '=' or compound assignment after var target");
+            return Err(self
+                .error_current("expected '=' or compound assignment after var target")
+                .into());
         };
         if self.peek_is(TokenKind::Semicolon) { self.pos += 1; }
 
@@ -894,7 +1077,7 @@ impl<'a> Parser<'a> {
         if let AssignmentTarget::Identifier(name) = target {
             Ok(Statement::new(StatementKind::VariableDecl { name, value: final_value }, line))
         } else {
-            bail!("'var' only supports simple identifiers");
+            Err(self.error_current("'var' only supports simple identifiers").into())
         }
     }
 
@@ -979,7 +1162,7 @@ impl<'a> Parser<'a> {
         if !has_accessors {
             Ok(AssignmentTarget::Identifier(name))
         } else {
-            bail!("'var' only supports simple identifiers");
+            Err(self.error_current("'var' only supports simple identifiers").into())
         }
     }
 
@@ -1394,7 +1577,11 @@ impl<'a> Parser<'a> {
                         ExpressionKind::Identifier(name) => vec![FunctionParam {
                             name: name.clone(), type_name: None, required: false, default_value: None,
                         }],
-                        _ => bail!("Expected identifier before =>"),
+                        _ => {
+                            return Err(self
+                                .error_current("expected identifier before =>")
+                                .into());
+                        }
                     };
                     return Ok(Expression::new(
                         ExpressionKind::Literal(Literal::Function { params, body }),
@@ -1438,7 +1625,15 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RightBracket)?;
                 Ok(Expression::new(ExpressionKind::Literal(Literal::Array(items)), line))
             }
-            _ => bail!("Unexpected token in expression: {:?}", self.peek_kind()),
+            _ => {
+                let found = self
+                    .peek_kind()
+                    .map(|k| k.to_string())
+                    .unwrap_or_else(|| "end of input".to_string());
+                return Err(self
+                    .error_current(format!("unexpected token in expression: {}", found))
+                    .into());
+            }
         }
     }
 
@@ -1456,7 +1651,9 @@ impl<'a> Parser<'a> {
             } else {
                 let key = self.parse_expression()?;
                 if !matches!(self.peek_kind(), Some(TokenKind::Colon) | Some(TokenKind::Equal)) {
-                    bail!("Expected ':' or '=' in struct literal");
+                    return Err(self
+                        .error_current("expected ':' or '=' in struct literal")
+                        .into());
                 }
                 self.pos += 1;
                 let value = self.parse_expression()?;
@@ -1654,7 +1851,7 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
             }
             if !expr.is_empty() {
                 let lexed = crate::tokenizer::lex(&expr);
-                let mut p = Parser::new(&expr, lexed.tokens());
+                let mut p = Parser::new(&expr, lexed.tokens(), None);
                 if let Ok(e) = p.parse_expression() {
                     parts.push(StringPart::Expression(e));
                 }
@@ -1695,7 +1892,11 @@ fn expr_to_assignment_target(expr: &Expression) -> Result<AssignmentTarget> {
         ExpressionKind::ArrayAccess { base, index } => Ok(AssignmentTarget::Index {
             base: base.clone(), index: index.clone(),
         }),
-        _ => bail!("Invalid assignment target"),
+        _ => {
+            // No parser context here; report against the expression's line.
+            let span = Span { start: 0, end: 0, line: expr.line, col: 1 };
+            Err(ParseError::new(None, span, "invalid assignment target").into())
+        }
     }
 }
 

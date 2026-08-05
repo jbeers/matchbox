@@ -4,8 +4,21 @@ use anyhow::Result;
 
 pub fn parse_template(source: &str, filename: Option<&str>) -> Result<Vec<Statement>> {
     let lexed = lex_template(source);
-    let _ = filename;
-    TemplateParser::new(source, lexed.tokens()).parse()
+    match TemplateParser::new(source, lexed.tokens(), filename).parse() {
+        Ok(stmts) => Ok(stmts),
+        Err(err) => {
+            // Attach source text so snippet rendering can show the offending
+            // line, mirroring the script parser's behavior.
+            if let Some(parse_err) = err.downcast_ref::<crate::parser::ParseError>() {
+                if parse_err.source.is_none() {
+                    let mut enriched = parse_err.clone();
+                    enriched.source = Some(source.to_string());
+                    return Err(enriched.into());
+                }
+            }
+            Err(err)
+        }
+    }
 }
 
 struct TemplateParser<'a> {
@@ -13,15 +26,17 @@ struct TemplateParser<'a> {
     tokens: &'a [SyntaxToken],
     pos: usize,
     pending: Vec<Statement>,
+    filename: Option<&'a str>,
 }
 
 impl<'a> TemplateParser<'a> {
-    fn new(source: &'a str, tokens: &'a [SyntaxToken]) -> Self {
+    fn new(source: &'a str, tokens: &'a [SyntaxToken], filename: Option<&'a str>) -> Self {
         Self {
             source,
             tokens,
             pos: 0,
             pending: Vec::new(),
+            filename,
         }
     }
 
@@ -31,6 +46,17 @@ impl<'a> TemplateParser<'a> {
 
     fn peek_lexeme(&self) -> Option<&str> {
         self.tokens.get(self.pos).map(|t| &self.source[t.span.start..t.span.end])
+    }
+
+    /// Line number of the token under the cursor, falling back to the last
+    /// token's line at end of input. Used so template AST nodes carry real
+    /// line numbers instead of the hardcoded `0`.
+    fn peek_line(&self) -> u32 {
+        self.tokens
+            .get(self.pos)
+            .map(|t| t.span.line)
+            .or_else(|| self.tokens.last().map(|t| t.span.line))
+            .unwrap_or(1)
     }
 
     fn advance_lexeme(&mut self) -> Option<String> {
@@ -59,6 +85,8 @@ impl<'a> TemplateParser<'a> {
     fn parse_template_statement(&mut self) -> Result<Option<Statement>> {
         match self.peek_kind() {
             Some(TokenKind::ContentText) => {
+                // Use the line of the first text token for the whole run.
+                let line = self.peek_line();
                 let mut parts = Vec::new();
                 while self.peek_kind() == Some(TokenKind::ContentText) {
                     if let Some(lexeme) = self.advance_lexeme() {
@@ -71,10 +99,10 @@ impl<'a> TemplateParser<'a> {
                 if parts.is_empty() {
                     return Ok(None);
                 }
-                let expr = Expression::new(ExpressionKind::Literal(Literal::String(parts)), 0);
+                let expr = Expression::new(ExpressionKind::Literal(Literal::String(parts)), line);
                 Ok(Some(Statement::new(
                     StatementKind::BufferOutput(expr),
-                    0,
+                    line,
                 )))
             }
             Some(TokenKind::ScriptStart) => {
@@ -90,14 +118,15 @@ impl<'a> TemplateParser<'a> {
                 Ok(None)
             }
             Some(TokenKind::Less) => {
+                let line = self.peek_line();
                 self.pos += 1;
                 let expr = Expression::new(
                     ExpressionKind::Literal(Literal::String(vec![StringPart::Text(
                         "<".to_string(),
                     )])),
-                    0,
+                    line,
                 );
-                Ok(Some(Statement::new(StatementKind::BufferOutput(expr), 0)))
+                Ok(Some(Statement::new(StatementKind::BufferOutput(expr), line)))
             }
             Some(TokenKind::ComponentClose)
             | Some(TokenKind::ComponentSelfClose)
@@ -145,13 +174,15 @@ impl<'a> TemplateParser<'a> {
     }
 
     fn parse_output_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
         let expr = self.parse_output_expression()?;
         self.skip_closing("output");
-        Ok(Some(Statement::new(StatementKind::BufferOutput(expr), 0)))
+        Ok(Some(Statement::new(StatementKind::BufferOutput(expr), line)))
     }
 
     fn parse_output_expression(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
         let mut parts = Vec::new();
         let mut text = String::new();
 
@@ -196,18 +227,19 @@ impl<'a> TemplateParser<'a> {
 
         Ok(Expression::new(
             ExpressionKind::Literal(Literal::String(parts)),
-            0,
+            line,
         ))
     }
 
     fn parse_interpolation_expression(&mut self) -> Result<Expression> {
+        let line = self.peek_line();
         let expr_text = self.collect_text_until(TokenKind::InterpEnd);
         self.skip_expected(TokenKind::InterpEnd);
 
         if expr_text.trim().is_empty() {
             return Ok(Expression::new(
                 ExpressionKind::Literal(Literal::Null),
-                0,
+                line,
             ));
         }
 
@@ -223,7 +255,7 @@ impl<'a> TemplateParser<'a> {
                 }
             })
             .unwrap_or_else(|| {
-                Expression::new(ExpressionKind::Literal(Literal::Null), 0)
+                Expression::new(ExpressionKind::Literal(Literal::Null), line)
             });
 
         Ok(expr)
@@ -231,6 +263,11 @@ impl<'a> TemplateParser<'a> {
 
     fn parse_script_island(&mut self) -> Result<()> {
         self.skip_expected(TokenKind::ScriptStart);
+        // Line of the first content token, used as the offset so errors inside
+        // the island line up with the template. The opener (`<bx:script>`)
+        // and the content may be on the same or different lines; the token
+        // under the cursor after skipping the opener tells us the truth.
+        let content_start_line = self.peek_line();
         let script_text = self.collect_text_until(TokenKind::ScriptEnd);
         self.skip_expected(TokenKind::ScriptEnd);
 
@@ -238,7 +275,14 @@ impl<'a> TemplateParser<'a> {
             return Ok(());
         }
 
-        let mut stmts = crate::parser::parse(&script_text, None)?;
+        // Re-parse the island content treating its first line as
+        // `content_start_line` in the template. parse_with_line_offset handles
+        // the translation; the returned ParseError already has correct lines.
+        let mut stmts = crate::parser::parse_with_line_offset(
+            &script_text,
+            self.filename,
+            content_start_line.saturating_sub(1),
+        )?;
         stmts.reverse();
         self.pending.extend(stmts);
         Ok(())
@@ -275,6 +319,7 @@ impl<'a> TemplateParser<'a> {
     }
 
     fn parse_if_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         // Collect condition expression
         let mut cond_text = String::new();
         loop {
@@ -336,12 +381,12 @@ impl<'a> TemplateParser<'a> {
         }
 
         let condition = condition.unwrap_or_else(|| Expression::new(
-            ExpressionKind::Literal(Literal::Boolean(true)), 0,
+            ExpressionKind::Literal(Literal::Boolean(true)), line,
         ));
 
         Ok(Some(Statement::new(
             StatementKind::If { condition, then_branch, else_branch },
-            0,
+            line,
         )))
     }
 
@@ -371,15 +416,16 @@ impl<'a> TemplateParser<'a> {
     fn parse_loop_tag(&mut self) -> Result<Option<Statement>> {
         // <bx:loop array="#arr#" item="val"> body </bx:loop>
         // <bx:loop condition="expr"> body </bx:loop>
+        let line = self.peek_line();
         self.skip_to_close();
         let body = self.parse_template_body(&["loop"])?;
         // Skip closing </bx:loop>
         self.skip_closing("loop");
         // For now, just wrap in a stub
         Ok(Some(Statement::new(StatementKind::WhileLoop {
-            condition: Expression::new(ExpressionKind::Literal(Literal::Boolean(true)), 0),
+            condition: Expression::new(ExpressionKind::Literal(Literal::Boolean(true)), line),
             body,
-        }, 0)))
+        }, line)))
     }
 
     fn parse_return_tag(&mut self) -> Result<Option<Statement>> {
@@ -400,17 +446,19 @@ impl<'a> TemplateParser<'a> {
         } else if let Ok(stmts) = crate::parser::parse(&expr_text, None) {
             stmts.into_iter().next().and_then(|s| if let StatementKind::Expression(e) = s.kind { Some(e) } else { None })
         } else { None };
-        Ok(Some(Statement::new(StatementKind::Return(expr), 0)))
+        Ok(Some(Statement::new(StatementKind::Return(expr), self.peek_line())))
     }
 
     fn parse_break_continue(&mut self, is_break: bool) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
         Ok(Some(Statement::new(
-            if is_break { StatementKind::Break } else { StatementKind::Continue }, 0,
+            if is_break { StatementKind::Break } else { StatementKind::Continue }, line,
         )))
     }
 
     fn parse_try_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
         let try_branch = self.parse_template_body(&["catch", "finally", "try"])?;
         let mut catches = Vec::new();
@@ -436,11 +484,12 @@ impl<'a> TemplateParser<'a> {
             break;
         }
         self.skip_closing("try");
-        Ok(Some(Statement::new(StatementKind::TryCatch { try_branch, catches, finally_branch }, 0)))
+        Ok(Some(Statement::new(StatementKind::TryCatch { try_branch, catches, finally_branch }, line)))
     }
 
     fn parse_switch_tag(&mut self) -> Result<Option<Statement>> {
         // <bx:switch expression="#expr#"> <bx:case value="1">...</bx:case> <bx:defaultcase>...</bx:defaultcase> </bx:switch>
+        let line = self.peek_line();
         self.skip_to_close();
         let mut cases = Vec::new();
         let mut default_case = None;
@@ -481,36 +530,41 @@ impl<'a> TemplateParser<'a> {
         }
         self.skip_closing("switch");
         Ok(Some(Statement::new(StatementKind::Switch {
-            value: Expression::new(ExpressionKind::Literal(Literal::Null), 0),
+            value: Expression::new(ExpressionKind::Literal(Literal::Null), line),
             cases, default_case,
-        }, 0)))
+        }, line)))
     }
 
     fn parse_include_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
         Ok(Some(Statement::new(
             StatementKind::Include(Expression::new(
-                ExpressionKind::Literal(Literal::String(vec![StringPart::Text(String::new())])), 0,
-            )), 0,
+                ExpressionKind::Literal(Literal::String(vec![StringPart::Text(String::new())])), line,
+            )), line,
         )))
     }
 
     fn parse_import_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
-        Ok(Some(Statement::new(StatementKind::Import { path: String::new(), alias: None }, 0)))
+        Ok(Some(Statement::new(StatementKind::Import { path: String::new(), alias: None }, line)))
     }
 
     fn parse_throw_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
-        Ok(Some(Statement::new(StatementKind::Throw(None), 0)))
+        Ok(Some(Statement::new(StatementKind::Throw(None), line)))
     }
 
     fn parse_simple_tag(&mut self, kind: StatementKind) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
-        Ok(Some(Statement::new(kind, 0)))
+        Ok(Some(Statement::new(kind, line)))
     }
 
     fn parse_function_tag(&mut self) -> Result<Option<Statement>> {
+        let line = self.peek_line();
         self.skip_to_close();
         let body = self.parse_template_body(&["function"])?;
         self.skip_closing("function");
@@ -521,7 +575,7 @@ impl<'a> TemplateParser<'a> {
             return_type: None,
             params: vec![],
             body: FunctionBody::Block(body),
-        }, 0)))
+        }, line)))
     }
 
     fn collect_text_until(&mut self, end_kind: TokenKind) -> String {
