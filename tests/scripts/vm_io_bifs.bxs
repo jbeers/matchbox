@@ -30,6 +30,37 @@ if (len(tmpFile) < 1) { throw "createTempFile failed"; }
 if (!fileExists(tmpFile)) { throw "createTempFile file should exist"; }
 fileDelete(tmpFile);
 
+var exclusiveFile = createTempFile("/tmp", "matchbox-exclusive-", ".txt");
+fileDelete(exclusiveFile);
+fileWriteExclusive(exclusiveFile, "first", "0600");
+var exclusiveRejected = false;
+try {
+    fileWriteExclusive(exclusiveFile, "second", "0600");
+} catch (error) {
+    exclusiveRejected = true;
+}
+if (!exclusiveRejected) { throw "fileWriteExclusive should reject an existing path"; }
+if (fileRead(exclusiveFile) != "first") { throw "fileWriteExclusive overwrote an existing file"; }
+fileDelete(exclusiveFile);
+
+var publishSource = createTempFile("/tmp", "matchbox-publish-", ".txt");
+var publishTarget = publishSource & ".published";
+fileWrite(publishSource, "complete");
+filePublishExclusive(publishSource, publishTarget);
+if (fileExists(publishSource)) { throw "filePublishExclusive should remove the source name"; }
+if (fileRead(publishTarget) != "complete") { throw "filePublishExclusive content mismatch"; }
+var publishRejected = false;
+var secondSource = createTempFile("/tmp", "matchbox-publish-", ".txt");
+try {
+    filePublishExclusive(secondSource, publishTarget);
+} catch (error) {
+    publishRejected = true;
+}
+if (!publishRejected) { throw "filePublishExclusive should reject an existing target"; }
+if (!fileExists(secondSource)) { throw "filePublishExclusive should preserve a rejected source"; }
+fileDelete(secondSource);
+fileDelete(publishTarget);
+
 var rejectedTempTraversal = false;
 try {
     createTempFile("/tmp", "../escape", ".txt");

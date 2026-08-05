@@ -660,7 +660,9 @@ impl Compiler {
                 finally_branch,
             } => {
                 let push_handler_idx = self.chunk.code.len();
-                self.chunk.emit1(op::PUSH_HANDLER, 0, stmt.line as u32);
+                // The handler stores absolute catch/finally instruction pointers. A zero
+                // catch target means that this is a try/finally with no catch branch.
+                self.chunk.emit2(op::PUSH_HANDLER, 0, 0, stmt.line as u32);
 
                 self.begin_scope();
                 for s in try_branch {
@@ -673,11 +675,11 @@ impl Compiler {
                 let jump_to_finally_idx = self.chunk.code.len();
                 self.chunk.emit1(op::JUMP, 0, stmt.line as u32);
 
-                let catch_target = self.chunk.code.len();
-                let offset = catch_target - push_handler_idx - 1;
-                self.chunk.code[push_handler_idx] =
-                    op::PUSH_HANDLER as u32 | ((offset as u32) << 8);
-
+                let catch_target = if catches.is_empty() {
+                    0
+                } else {
+                    self.chunk.code.len()
+                };
                 if !catches.is_empty() {
                     let first_catch = &catches[0];
                     self.begin_scope();
@@ -693,8 +695,10 @@ impl Compiler {
                     self.catch_exception_slots.pop();
                     self.end_scope();
                     catch_result?;
-                } else {
-                    self.chunk.emit0(op::THROW, stmt.line as u32);
+                    // Keep the handler active while the catch body runs so a throw or
+                    // return from catch still enters finally. Normal catch completion
+                    // consumes it before falling through to the shared finalizer.
+                    self.chunk.emit0(op::POP_HANDLER, stmt.line as u32);
                 }
 
                 let finally_target = self.chunk.code.len();
@@ -702,12 +706,21 @@ impl Compiler {
                 self.chunk.code[jump_to_finally_idx] =
                     op::JUMP as u32 | ((jump_offset as u32) << 8);
 
+                self.chunk.code[push_handler_idx] =
+                    op::PUSH_HANDLER as u32 | ((catch_target as u32) << 8);
+                self.chunk.code[push_handler_idx + 1] = if finally_branch.is_some() {
+                    finally_target as u32
+                } else {
+                    0
+                };
+
                 if let Some(finally_stmts) = finally_branch {
                     self.begin_scope();
                     for s in finally_stmts {
                         self.compile_statement(s, false)?;
                     }
                     self.end_scope();
+                    self.chunk.emit0(op::END_FINALLY, stmt.line as u32);
                 }
 
                 Ok(())

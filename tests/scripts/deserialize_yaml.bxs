@@ -1,0 +1,33 @@
+var payload = deserializeYAML("{name: Matchbox, version: 1.5, active: true, missing: null, items: [one, 2], flags: [true, false], metadata: {owner: Jacob}}");
+
+if (!isStruct(payload)) { throw "deserializeYAML mapping failed"; }
+if (payload.name != "Matchbox") { throw "deserializeYAML string failed"; }
+if (payload.version != 1.5) { throw "deserializeYAML number failed"; }
+if (payload.active != true) { throw "deserializeYAML boolean failed"; }
+if (!isNull(payload.missing)) { throw "deserializeYAML null failed"; }
+if (!isArray(payload.items) || payload.items[1] != "one" || payload.items[2] != 2) {
+    throw "deserializeYAML sequence failed";
+}
+if (payload.flags[1] != true || payload.flags[2] != false) {
+    throw "deserializeYAML boolean sequence failed";
+}
+if (payload.metadata.owner != "Jacob") { throw "deserializeYAML nested mapping failed"; }
+
+var nullValue = deserializeyaml("null");
+if (!isNull(nullValue)) { throw "deserializeyaml case-insensitive lookup failed"; }
+
+var stringError = false;
+try {
+    deserializeYAML(42);
+} catch (e) {
+    stringError = e.message contains "expects a string argument";
+}
+if (!stringError) { throw "deserializeYAML should reject non-string input"; }
+
+var keyError = false;
+try {
+    deserializeYAML("{1: value}");
+} catch (e) {
+    keyError = e.message contains "only supports string mapping keys";
+}
+if (!keyError) { throw "deserializeYAML should reject non-string mapping keys"; }

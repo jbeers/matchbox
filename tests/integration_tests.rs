@@ -77,6 +77,7 @@ macro_rules! script_test {
 
 script_test!(arrays, "arrays.bxs");
 script_test!(bifs, "bifs.bxs");
+script_test!(deserialize_yaml, "deserialize_yaml.bxs");
 script_test!(bytes_bifs, "bytes_bifs.bxs");
 script_test!(for_in_loops, "for_in_loops.bxs");
 script_test!(for_loop, "for_loop.bxs");
@@ -92,17 +93,52 @@ script_test!(vm_basic, "vm_basic.bxs");
 script_test!(vm_classes, "vm_classes.bxs");
 script_test!(vm_complex_types, "vm_complex_types.bxs");
 script_test!(vm_exceptions, "vm_exceptions.bxs");
+script_test!(vm_try_finally, "vm_try_finally.bxs");
 script_test!(
     vm_throw_structured_exception,
     "vm_throw_structured_exception.bxs"
 );
 script_test!(vm_functions, "vm_functions.bxs");
+
+#[test]
+fn vm_locals_survive_stack_reallocation() {
+    let mut source = String::from("function probe() {\n");
+    for index in 0..600 {
+        source.push_str(&format!("var local{index} = {index};\n"));
+    }
+    source.push_str(
+        "if (local0 != 0 || local255 != 255 || local599 != 599) { throw \"local slot corruption\"; }\n}\nprobe();\n",
+    );
+    let directory = tempfile::tempdir().expect("create temporary source directory");
+    let path = directory.path().join("local_reallocation.bxs");
+    fs::write(&path, source).expect("write local reallocation script");
+    process_file(
+        &path,
+        false,
+        None,
+        Vec::new(),
+        false,
+        false,
+        false,
+        None,
+        &[],
+        false,
+        None,
+        false,
+        false,
+        false,
+    )
+    .expect("locals should remain valid after stack growth");
+}
 script_test!(vm_if, "vm_if.bxs");
 script_test!(vm_loop, "vm_loop.bxs");
 script_test!(vm_struct_assign, "vm_struct_assign.bxs");
 script_test!(vm_struct_iter, "vm_struct_iter.bxs");
 script_test!(vm_struct_iter_single_var, "vm_struct_iter_single_var.bxs");
-script_test!(vm_struct_is_case_sensitive, "vm_struct_is_case_sensitive.bxs");
+script_test!(
+    vm_struct_is_case_sensitive,
+    "vm_struct_is_case_sensitive.bxs"
+);
 script_test!(vm_struct_is_ordered, "vm_struct_is_ordered.bxs");
 script_test!(vm_struct_equals, "vm_struct_equals.bxs");
 script_test!(vm_struct_get_metadata, "vm_struct_get_metadata.bxs");

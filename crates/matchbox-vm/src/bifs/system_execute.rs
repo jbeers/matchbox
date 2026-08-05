@@ -5,7 +5,7 @@ use regex::Regex;
 #[cfg(not(any(target_family = "wasm", target_os = "espidf")))]
 use std::fs::File;
 #[cfg(not(any(target_family = "wasm", target_os = "espidf")))]
-use std::io::Read;
+use std::io::{Read, Write};
 #[cfg(not(any(target_family = "wasm", target_os = "espidf")))]
 use std::process::{Command, Stdio};
 #[cfg(not(any(target_family = "wasm", target_os = "espidf")))]
@@ -94,11 +94,20 @@ pub fn system_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
             "systemExecute() inheritIO cannot be combined with output or error files".to_string(),
         );
     }
+    let input = args
+        .get(10)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value));
+    if inherit_io && input.is_some() {
+        return Err("systemExecute() inheritIO cannot be combined with input".to_string());
+    }
 
     if inherit_io {
         command.stdin(Stdio::inherit());
         command.stdout(Stdio::inherit());
         command.stderr(Stdio::inherit());
+    } else if input.is_some() {
+        command.stdin(Stdio::piped());
     } else {
         command.stdin(Stdio::null());
     }
@@ -122,6 +131,17 @@ pub fn system_execute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     let mut child = command
         .spawn()
         .map_err(|error| format!("systemExecute() could not execute '{executable}': {error}"))?;
+    if let Some(input) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(error) = stdin.write_all(input.as_bytes()) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "systemExecute() failed writing process input: {error}"
+                ));
+            }
+        }
+    }
     let pid = child.id();
     let stdout_thread = child.stdout.take().map(spawn_stream_reader);
     let stderr_thread = child.stderr.take().map(spawn_stream_reader);
@@ -267,11 +287,7 @@ fn coerce_non_negative_long(
     let number = if value.is_number() {
         value.as_number()
     } else if value.is_bool() {
-        if value.as_bool() {
-            1.0
-        } else {
-            0.0
-        }
+        if value.as_bool() { 1.0 } else { 0.0 }
     } else if vm.is_string_value(*value) {
         vm.to_string(*value)
             .parse::<f64>()

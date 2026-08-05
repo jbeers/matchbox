@@ -2,10 +2,10 @@
 use crate::types::{BxVM, BxValue};
 #[cfg(feature = "bif-io")]
 use std::fs;
-#[cfg(feature = "bif-io")]
-use std::path::Path;
 #[cfg(all(feature = "bif-io", unix))]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(feature = "bif-io")]
+use std::path::Path;
 #[cfg(feature = "bif-io")]
 use uuid::Uuid;
 
@@ -128,6 +128,26 @@ pub fn file_move(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
 
     fs_extra::file::move_file(&src, &dest, &fs_extra::file::CopyOptions::new())
         .map_err(|e| e.to_string())?;
+
+    Ok(BxValue::new_bool(true))
+}
+
+#[cfg(feature = "bif-io")]
+pub fn file_publish_exclusive(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err(
+            "filePublishExclusive() expects 2 arguments: (source, destination)".to_string(),
+        );
+    }
+    let src = vm.to_string(args[0]);
+    let dest = vm.to_string(args[1]);
+
+    // hard_link publishes the complete same-filesystem file atomically and fails if dest exists.
+    fs::hard_link(&src, &dest).map_err(|e| e.to_string())?;
+    if let Err(error) = fs::remove_file(&src) {
+        let _ = fs::remove_file(&dest);
+        return Err(error.to_string());
+    }
 
     Ok(BxValue::new_bool(true))
 }
@@ -267,6 +287,39 @@ pub fn file_write(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
 }
 
 #[cfg(feature = "bif-io")]
+pub fn file_write_exclusive(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err(
+            "fileWriteExclusive() expects at least 2 arguments: (path, content, mode)".to_string(),
+        );
+    }
+    let path = vm.to_string(args[0]);
+    let content = vm.to_string(args[1]);
+    let mode = args
+        .get(2)
+        .map(|value| vm.to_string(*value))
+        .unwrap_or_else(|| "0600".to_string());
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mode = u32::from_str_radix(&mode, 8)
+            .map_err(|_| format!("Invalid POSIX mode string: {mode}"))?;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let mut file = options
+        .open(&path)
+        .map_err(|error| format!("Could not exclusively create file '{path}': {error}"))?;
+    use std::io::Write;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("Could not write file '{path}': {error}"))?;
+    Ok(BxValue::new_bool(true))
+}
+
+#[cfg(feature = "bif-io")]
 pub fn file_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("fileAppend() expects 2 arguments: (path, content)".to_string());
@@ -294,7 +347,11 @@ pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let relative = path.strip_prefix(&cwd).unwrap_or(path);
     let result = relative.to_string_lossy().to_string();
-    let result = if result.is_empty() { ".".to_string() } else { result };
+    let result = if result.is_empty() {
+        ".".to_string()
+    } else {
+        result
+    };
     let s_id = vm.string_new(result);
     Ok(BxValue::new_ptr(s_id))
 }
@@ -361,7 +418,9 @@ pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
         || suffix.contains('/')
         || suffix.contains('\\')
     {
-        return Err("createTempFile() prefix and suffix must not contain path separators".to_string());
+        return Err(
+            "createTempFile() prefix and suffix must not contain path separators".to_string(),
+        );
     }
 
     let base = Path::new(&directory);
@@ -390,7 +449,8 @@ pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
             Err(error) => return Err(error.to_string()),
         }
     }
-    let file_path = file_path.ok_or_else(|| "Could not create a unique temporary file".to_string())?;
+    let file_path =
+        file_path.ok_or_else(|| "Could not create a unique temporary file".to_string())?;
     let canonical = file_path
         .canonicalize()
         .unwrap_or(file_path)
@@ -403,13 +463,27 @@ pub fn create_temp_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
 #[cfg(feature = "bif-io")]
 pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
-        return Err("directoryCopy() expects at least 2 arguments: (source, destination)".to_string());
+        return Err(
+            "directoryCopy() expects at least 2 arguments: (source, destination)".to_string(),
+        );
     }
     let source = vm.to_string(args[0]);
     let dest = vm.to_string(args[1]);
-    let recurse = if args.len() > 2 { args[2].as_bool() } else { false };
-    let create_path = if args.len() > 4 { args[4].as_bool() } else { true };
-    let overwrite = if args.len() > 5 { args[5].as_bool() } else { false };
+    let recurse = if args.len() > 2 {
+        args[2].as_bool()
+    } else {
+        false
+    };
+    let create_path = if args.len() > 4 {
+        args[4].as_bool()
+    } else {
+        true
+    };
+    let overwrite = if args.len() > 5 {
+        args[5].as_bool()
+    } else {
+        false
+    };
 
     let src_path = Path::new(&source);
     if !src_path.exists() || !src_path.is_dir() {
@@ -424,7 +498,10 @@ pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     if recurse {
         for entry in WalkDir::new(src_path).min_depth(1) {
             let entry = entry.map_err(|e| e.to_string())?;
-            let rel = entry.path().strip_prefix(src_path).map_err(|e| e.to_string())?;
+            let rel = entry
+                .path()
+                .strip_prefix(src_path)
+                .map_err(|e| e.to_string())?;
             let target = dest_path.join(rel);
             if entry.file_type().is_dir() {
                 if !target.exists() {
@@ -465,7 +542,11 @@ pub fn directory_move(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     }
     let source = vm.to_string(args[0]);
     let dest = vm.to_string(args[1]);
-    let create_path = if args.len() > 2 { args[2].as_bool() } else { true };
+    let create_path = if args.len() > 2 {
+        args[2].as_bool()
+    } else {
+        true
+    };
 
     let dest_path = Path::new(&dest);
     if create_path {
@@ -517,7 +598,11 @@ pub fn file_get_mime_type(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
         return Err("fileGetMimeType() expects 1 argument".to_string());
     }
     let path_str = vm.to_string(args[0]);
-    let strict = if args.len() > 1 { args[1].as_bool() } else { true };
+    let strict = if args.len() > 1 {
+        args[1].as_bool()
+    } else {
+        true
+    };
 
     let path = Path::new(&path_str);
     if strict {
@@ -658,7 +743,10 @@ pub fn file_set_attribute(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
         }
         "archive" | "hidden" | "system" => {}
         _ => {
-            return Err(format!("The attribute provided [{}] is not valid", attribute));
+            return Err(format!(
+                "The attribute provided [{}] is not valid",
+                attribute
+            ));
         }
     }
 

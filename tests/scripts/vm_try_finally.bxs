@@ -1,0 +1,93 @@
+var return_finally_ran = false;
+function return_from_try() {
+    try {
+        return "returned";
+    } finally {
+        return_finally_ran = true;
+    }
+}
+
+if (return_from_try() != "returned") { throw "return value was lost through finally"; }
+if (!return_finally_ran) { throw "finally did not run for return"; }
+
+var caught_finally_ran = false;
+try {
+    throw "caught";
+} catch (e) {
+    if (e.message != "caught") { throw "caught value was lost"; }
+} finally {
+    caught_finally_ran = true;
+}
+if (!caught_finally_ran) { throw "finally did not run after catch"; }
+
+var uncaught_finally_ran = false;
+try {
+    try {
+        throw "uncaught";
+    } finally {
+        uncaught_finally_ran = true;
+    }
+} catch (e) {
+    if (e.message != "uncaught") { throw "uncaught value was lost through finally"; }
+}
+if (!uncaught_finally_ran) { throw "finally did not run for uncaught throw"; }
+
+var catch_throw_finally_ran = false;
+try {
+    try {
+        throw "initial";
+    } catch (e) {
+        throw "from catch";
+    } finally {
+        catch_throw_finally_ran = true;
+    }
+} catch (e) {
+    if (e.message != "from catch") { throw "catch throw was lost through finally"; }
+}
+if (!catch_throw_finally_ran) { throw "finally did not run for throw from catch"; }
+
+var bif_finally_ran = false;
+try {
+    try {
+        deserializeYAML(42);
+    } finally {
+        bif_finally_ran = true;
+    }
+} catch (e) {
+    if (!e.message contains "expects a string argument") {
+        throw "BIF exception was not preserved through finally";
+    }
+}
+if (!bif_finally_ran) { throw "finally did not run for BIF exception"; }
+
+var catch_only_rethrow_ran = false;
+try {
+    try {
+        throw "first";
+    } catch (e) {
+        throw "second";
+    }
+} catch (e) {
+    if (e.message != "second") { throw "catch-only rethrow value was lost"; }
+    catch_only_rethrow_ran = true;
+}
+if (!catch_only_rethrow_ran) { throw "catch-only rethrow was swallowed"; }
+
+var normal_finally_ran = false;
+try {
+    var normal_value = 1;
+} finally {
+    normal_finally_ran = true;
+}
+if (!normal_finally_ran) { throw "finally did not run after normal completion"; }
+
+var switch_finally_ran = false;
+try {
+    switch (1) {
+        case 1:
+            break;
+    }
+} finally {
+    switch_finally_ran = true;
+}
+if (!switch_finally_ran) { throw "finally did not run after switch break"; }

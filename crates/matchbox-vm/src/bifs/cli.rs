@@ -118,6 +118,66 @@ pub fn cli_read(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 }
 
 #[cfg(feature = "bif-cli")]
+pub fn cli_read_password(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let prompt = args
+        .first()
+        .map(|value| vm.to_string(*value))
+        .unwrap_or_else(|| "Secret value: ".to_string());
+
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "espidf")))]
+    {
+        use crossterm::{
+            event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+
+        enable_raw_mode().map_err(|error| error.to_string())?;
+        print!("{prompt}");
+        let _ = io::stdout().flush();
+        let result = (|| -> Result<String, String> {
+            let mut input = String::new();
+            loop {
+                if let Event::Key(KeyEvent {
+                    code,
+                    modifiers,
+                    kind,
+                    ..
+                }) = event::read().map_err(|error| error.to_string())?
+                {
+                    if kind == KeyEventKind::Release {
+                        continue;
+                    }
+                    match code {
+                        KeyCode::Enter => return Ok(input),
+                        KeyCode::Backspace => {
+                            input.pop();
+                        }
+                        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            return Err("Secret input cancelled".to_string());
+                        }
+                        KeyCode::Char(character)
+                            if !modifiers.intersects(
+                                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                            ) =>
+                        {
+                            input.push(character);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        })();
+        disable_raw_mode().map_err(|error| error.to_string())?;
+        println!();
+        let input = result?;
+        return Ok(BxValue::new_ptr(vm.string_new(input)));
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "espidf"))]
+    Err("cliReadPassword is not supported on this target".to_string())
+}
+
+#[cfg(feature = "bif-cli")]
 pub fn cli_confirm(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let prompt = if args.len() >= 1 {
         vm.to_string(args[0])
@@ -172,7 +232,7 @@ pub fn cli_select(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
             event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
             execute,
             style::{Color, Print, ResetColor, SetForegroundColor},
-            terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
+            terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode},
         };
         use std::io::stdout;
 

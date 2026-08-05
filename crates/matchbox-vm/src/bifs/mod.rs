@@ -29,23 +29,24 @@ mod jni {
     }
 }
 mod binary;
+mod cache;
 mod cli;
+mod conversion;
 mod crypto;
 #[cfg(feature = "bif-datasource")]
 mod datasource;
 mod fs;
 mod http;
+mod i18n;
 mod json;
-mod conversion;
 mod list_query_extra;
 mod math_datetime;
+mod set;
 mod system_execute;
 mod system_output;
 mod type_format;
-mod set;
-mod i18n;
 mod watcher;
-mod cache;
+mod yaml;
 mod zip;
 
 pub fn register_all() -> HashMap<String, BxNativeFunction> {
@@ -244,12 +245,18 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("snakecase".to_string(), snake_case_bif as BxNativeFunction);
     bifs.insert("kebabcase".to_string(), kebab_case_bif as BxNativeFunction);
     bifs.insert("camelcase".to_string(), camel_case_bif as BxNativeFunction);
-    bifs.insert("pascalcase".to_string(), pascal_case_bif as BxNativeFunction);
+    bifs.insert(
+        "pascalcase".to_string(),
+        pascal_case_bif as BxNativeFunction,
+    );
     bifs.insert(
         "replacelist".to_string(),
         replace_list_bif as BxNativeFunction,
     );
-    bifs.insert("repeatstring".to_string(), repeat_string as BxNativeFunction);
+    bifs.insert(
+        "repeatstring".to_string(),
+        repeat_string as BxNativeFunction,
+    );
     bifs.insert("find".to_string(), find_bif as BxNativeFunction);
     bifs.insert(
         "findnocase".to_string(),
@@ -295,7 +302,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     );
     bifs.insert("slugify".to_string(), slugify_bif as BxNativeFunction);
     bifs.insert("wrap".to_string(), wrap_bif as BxNativeFunction);
-    bifs.insert("stringbind".to_string(), string_bind_bif as BxNativeFunction);
+    bifs.insert(
+        "stringbind".to_string(),
+        string_bind_bif as BxNativeFunction,
+    );
     bifs.insert(
         "querystringtostruct".to_string(),
         query_string_to_struct_bif as BxNativeFunction,
@@ -381,10 +391,22 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     {
         bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
         bifs.insert("hmac".to_string(), crypto::hmac_bif as BxNativeFunction);
-        bifs.insert("generatesecretkey".to_string(), crypto::generate_secret_key as BxNativeFunction);
-        bifs.insert("generatepbkdfkey".to_string(), crypto::generate_pbkdf_key as BxNativeFunction);
-        bifs.insert("encrypt".to_string(), crypto::encrypt_bif as BxNativeFunction);
-        bifs.insert("decrypt".to_string(), crypto::decrypt_bif as BxNativeFunction);
+        bifs.insert(
+            "generatesecretkey".to_string(),
+            crypto::generate_secret_key as BxNativeFunction,
+        );
+        bifs.insert(
+            "generatepbkdfkey".to_string(),
+            crypto::generate_pbkdf_key as BxNativeFunction,
+        );
+        bifs.insert(
+            "encrypt".to_string(),
+            crypto::encrypt_bif as BxNativeFunction,
+        );
+        bifs.insert(
+            "decrypt".to_string(),
+            crypto::decrypt_bif as BxNativeFunction,
+        );
     }
 
     // System BIFs
@@ -418,6 +440,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             cli::cli_get_args as BxNativeFunction,
         );
         bifs.insert("cliread".to_string(), cli::cli_read as BxNativeFunction);
+        bifs.insert(
+            "clireadpassword".to_string(),
+            cli::cli_read_password as BxNativeFunction,
+        );
         bifs.insert(
             "cliconfirm".to_string(),
             cli::cli_confirm as BxNativeFunction,
@@ -457,6 +483,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             fs::file_delete as BxNativeFunction,
         );
         bifs.insert("filemove".to_string(), fs::file_move as BxNativeFunction);
+        bifs.insert(
+            "filepublishexclusive".to_string(),
+            fs::file_publish_exclusive as BxNativeFunction,
+        );
         bifs.insert("filecopy".to_string(), fs::file_copy as BxNativeFunction);
         bifs.insert("fileinfo".to_string(), fs::file_info as BxNativeFunction);
         bifs.insert(
@@ -470,28 +500,77 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         bifs.insert("fileread".to_string(), fs::file_read as BxNativeFunction);
         bifs.insert("filewrite".to_string(), fs::file_write as BxNativeFunction);
         bifs.insert(
+            "filewriteexclusive".to_string(),
+            fs::file_write_exclusive as BxNativeFunction,
+        );
+        bifs.insert(
             "fileappend".to_string(),
             fs::file_append as BxNativeFunction,
         );
-        bifs.insert("contractpath".to_string(), fs::contract_path as BxNativeFunction);
-        bifs.insert("createtempdirectory".to_string(), fs::create_temp_directory as BxNativeFunction);
-        bifs.insert("createtempfile".to_string(), fs::create_temp_file as BxNativeFunction);
-        bifs.insert("directorycopy".to_string(), fs::directory_copy as BxNativeFunction);
-        bifs.insert("directorymove".to_string(), fs::directory_move as BxNativeFunction);
-        bifs.insert("expandpath".to_string(), fs::expand_path as BxNativeFunction);
+        bifs.insert(
+            "contractpath".to_string(),
+            fs::contract_path as BxNativeFunction,
+        );
+        bifs.insert(
+            "createtempdirectory".to_string(),
+            fs::create_temp_directory as BxNativeFunction,
+        );
+        bifs.insert(
+            "createtempfile".to_string(),
+            fs::create_temp_file as BxNativeFunction,
+        );
+        bifs.insert(
+            "directorycopy".to_string(),
+            fs::directory_copy as BxNativeFunction,
+        );
+        bifs.insert(
+            "directorymove".to_string(),
+            fs::directory_move as BxNativeFunction,
+        );
+        bifs.insert(
+            "expandpath".to_string(),
+            fs::expand_path as BxNativeFunction,
+        );
         bifs.insert("fileclose".to_string(), fs::file_close as BxNativeFunction);
-        bifs.insert("filegetmimetype".to_string(), fs::file_get_mime_type as BxNativeFunction);
+        bifs.insert(
+            "filegetmimetype".to_string(),
+            fs::file_get_mime_type as BxNativeFunction,
+        );
         bifs.insert("fileiseof".to_string(), fs::file_is_eof as BxNativeFunction);
         bifs.insert("fileopen".to_string(), fs::file_open as BxNativeFunction);
-        bifs.insert("filereadline".to_string(), fs::file_read_line as BxNativeFunction);
+        bifs.insert(
+            "filereadline".to_string(),
+            fs::file_read_line as BxNativeFunction,
+        );
         bifs.insert("fileseek".to_string(), fs::file_seek as BxNativeFunction);
-        bifs.insert("filesetaccessmode".to_string(), fs::file_set_access_mode as BxNativeFunction);
-        bifs.insert("filesetattribute".to_string(), fs::file_set_attribute as BxNativeFunction);
-        bifs.insert("filesetlastmodified".to_string(), fs::file_set_last_modified as BxNativeFunction);
-        bifs.insert("filewriteline".to_string(), fs::file_write_line as BxNativeFunction);
-        bifs.insert("getcanonicalpath".to_string(), fs::get_canonical_path as BxNativeFunction);
-        bifs.insert("getdirectoryfrompath".to_string(), fs::get_directory_from_path as BxNativeFunction);
-        bifs.insert("propertyfile".to_string(), fs::property_file as BxNativeFunction);
+        bifs.insert(
+            "filesetaccessmode".to_string(),
+            fs::file_set_access_mode as BxNativeFunction,
+        );
+        bifs.insert(
+            "filesetattribute".to_string(),
+            fs::file_set_attribute as BxNativeFunction,
+        );
+        bifs.insert(
+            "filesetlastmodified".to_string(),
+            fs::file_set_last_modified as BxNativeFunction,
+        );
+        bifs.insert(
+            "filewriteline".to_string(),
+            fs::file_write_line as BxNativeFunction,
+        );
+        bifs.insert(
+            "getcanonicalpath".to_string(),
+            fs::get_canonical_path as BxNativeFunction,
+        );
+        bifs.insert(
+            "getdirectoryfrompath".to_string(),
+            fs::get_directory_from_path as BxNativeFunction,
+        );
+        bifs.insert(
+            "propertyfile".to_string(),
+            fs::property_file as BxNativeFunction,
+        );
     }
 
     // HTTP BIFs
@@ -502,14 +581,24 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     #[cfg(feature = "bif-zip")]
     {
         bifs.insert("extract".to_string(), zip::zip_extract as BxNativeFunction);
-        bifs.insert("compress".to_string(), zip::zip_compress as BxNativeFunction);
-        bifs.insert("iszipfile".to_string(), zip::zip_is_zip_file as BxNativeFunction);
+        bifs.insert(
+            "compress".to_string(),
+            zip::zip_compress as BxNativeFunction,
+        );
+        bifs.insert(
+            "iszipfile".to_string(),
+            zip::zip_is_zip_file as BxNativeFunction,
+        );
     }
 
     // JSON BIFs
     bifs.insert(
         "deserializejson".to_string(),
         json::json_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
+        "deserializeyaml".to_string(),
+        yaml::yaml_deserialize as BxNativeFunction,
     );
     bifs.insert(
         "jsondeserialize".to_string(),
@@ -530,15 +619,42 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     );
 
     // Conversion BIFs
-    bifs.insert("datanavigate".to_string(), conversion::data_navigate as BxNativeFunction);
-    bifs.insert("jsonprettify".to_string(), conversion::json_prettify as BxNativeFunction);
-    bifs.insert("parsenumber".to_string(), conversion::parse_number as BxNativeFunction);
-    bifs.insert("tobase64".to_string(), conversion::to_base64 as BxNativeFunction);
-    bifs.insert("tobinary".to_string(), conversion::to_binary as BxNativeFunction);
-    bifs.insert("tomodifiable".to_string(), conversion::to_modifiable as BxNativeFunction);
-    bifs.insert("tonumeric".to_string(), conversion::to_numeric as BxNativeFunction);
-    bifs.insert("toscript".to_string(), conversion::to_script as BxNativeFunction);
-    bifs.insert("tounmodifiable".to_string(), conversion::to_unmodifiable as BxNativeFunction);
+    bifs.insert(
+        "datanavigate".to_string(),
+        conversion::data_navigate as BxNativeFunction,
+    );
+    bifs.insert(
+        "jsonprettify".to_string(),
+        conversion::json_prettify as BxNativeFunction,
+    );
+    bifs.insert(
+        "parsenumber".to_string(),
+        conversion::parse_number as BxNativeFunction,
+    );
+    bifs.insert(
+        "tobase64".to_string(),
+        conversion::to_base64 as BxNativeFunction,
+    );
+    bifs.insert(
+        "tobinary".to_string(),
+        conversion::to_binary as BxNativeFunction,
+    );
+    bifs.insert(
+        "tomodifiable".to_string(),
+        conversion::to_modifiable as BxNativeFunction,
+    );
+    bifs.insert(
+        "tonumeric".to_string(),
+        conversion::to_numeric as BxNativeFunction,
+    );
+    bifs.insert(
+        "toscript".to_string(),
+        conversion::to_script as BxNativeFunction,
+    );
+    bifs.insert(
+        "tounmodifiable".to_string(),
+        conversion::to_unmodifiable as BxNativeFunction,
+    );
 
     // Datasource BIFs
     #[cfg(feature = "bif-datasource")]
@@ -792,7 +908,9 @@ fn compare_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
 
 fn remove_chars_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 3 {
-        return Err("removeChars() expects exactly 3 arguments: (string, start, count)".to_string());
+        return Err(
+            "removeChars() expects exactly 3 arguments: (string, start, count)".to_string(),
+        );
     }
     let input = vm.to_string(args[0]);
     let start = args[1].as_number() as usize;
@@ -822,14 +940,25 @@ fn strip_cr_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
 fn uc_first_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() || args.len() > 3 {
-        return Err("ucFirst() expects 1 to 3 arguments: (string, doAll?, doLowerIfAllUppercase?)".to_string());
+        return Err(
+            "ucFirst() expects 1 to 3 arguments: (string, doAll?, doLowerIfAllUppercase?)"
+                .to_string(),
+        );
     }
     let input = vm.to_string(args[0]);
     if input.is_empty() {
         return Ok(BxValue::new_ptr(vm.string_new(String::new())));
     }
-    let do_all = if args.len() > 1 { args[1].as_bool() } else { false };
-    let do_lower = if args.len() > 2 { args[2].as_bool() } else { false };
+    let do_all = if args.len() > 1 {
+        args[1].as_bool()
+    } else {
+        false
+    };
+    let do_lower = if args.len() > 2 {
+        args[2].as_bool()
+    } else {
+        false
+    };
     let words: Vec<&str> = input.split_whitespace().collect();
     let mut result_parts: Vec<String> = Vec::new();
     for word in words {
@@ -871,9 +1000,7 @@ fn replace_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         let search_chars: Vec<char> = search_lower.chars().collect();
         let search_len = search_chars.len();
         while i < chars.len() {
-            if i + search_len <= chars.len()
-                && chars_lower[i..i + search_len] == search_chars[..]
-            {
+            if i + search_len <= chars.len() && chars_lower[i..i + search_len] == search_chars[..] {
                 result.push_str(&replacement);
                 i += search_len;
             } else {
@@ -884,7 +1011,12 @@ fn replace_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         result
     } else {
         if let Some(pos) = input_lower.find(&search_lower) {
-            format!("{}{}{}", &input[..pos], replacement, &input[pos + search.len()..])
+            format!(
+                "{}{}{}",
+                &input[..pos],
+                replacement,
+                &input[pos + search.len()..]
+            )
         } else {
             input
         }
@@ -894,7 +1026,9 @@ fn replace_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
 
 fn string_ends_with_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 {
-        return Err("stringEndsWithNoCase() expects exactly 2 arguments: (string, suffix)".to_string());
+        return Err(
+            "stringEndsWithNoCase() expects exactly 2 arguments: (string, suffix)".to_string(),
+        );
     }
     let input = vm.to_string(args[0]).to_lowercase();
     let suffix = vm.to_string(args[1]).to_lowercase();
@@ -903,7 +1037,9 @@ fn string_ends_with_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<B
 
 fn string_starts_with_no_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 {
-        return Err("stringStartsWithNoCase() expects exactly 2 arguments: (string, prefix)".to_string());
+        return Err(
+            "stringStartsWithNoCase() expects exactly 2 arguments: (string, prefix)".to_string(),
+        );
     }
     let input = vm.to_string(args[0]).to_lowercase();
     let prefix = vm.to_string(args[1]).to_lowercase();
@@ -947,7 +1083,9 @@ fn find_one_of_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 
 fn insert_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 3 {
-        return Err("insert() expects exactly 3 arguments: (substring, string, position)".to_string());
+        return Err(
+            "insert() expects exactly 3 arguments: (substring, string, position)".to_string(),
+        );
     }
     let substring = vm.to_string(args[0]);
     let input = vm.to_string(args[1]);
@@ -994,7 +1132,9 @@ fn yes_no_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     } else {
         false
     };
-    Ok(BxValue::new_ptr(vm.string_new(if is_true { "Yes" } else { "No" }.to_string())))
+    Ok(BxValue::new_ptr(vm.string_new(
+        if is_true { "Yes" } else { "No" }.to_string(),
+    )))
 }
 
 fn snake_case_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -1093,7 +1233,9 @@ fn to_case(input: &str, separator: char) -> String {
 
 fn replace_list_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 3 {
-        return Err("replaceList() expects at least 3 arguments: (string, list1, list2)".to_string());
+        return Err(
+            "replaceList() expects at least 3 arguments: (string, list1, list2)".to_string(),
+        );
     }
     let mut input = vm.to_string(args[0]);
     let list1 = vm.to_string(args[1]);
@@ -1157,15 +1299,15 @@ fn val_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("val() expects exactly 1 argument".to_string());
     }
     let input = vm.to_string(args[0]);
-    
+
     if input.is_empty() {
         return Ok(BxValue::new_number(0.0));
     }
-    
+
     let mut result = String::new();
     let mut found_dot = false;
     let mut found_digit = false;
-    
+
     for (i, c) in input.chars().enumerate() {
         // Only allow digits, one dot, and minus at the start
         if c.is_ascii_digit() {
@@ -1180,16 +1322,16 @@ fn val_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
             break;
         }
     }
-    
+
     if !found_digit {
         return Ok(BxValue::new_number(0.0));
     }
-    
+
     // Remove trailing dot if present
     if result.ends_with('.') {
         result.pop();
     }
-    
+
     let num: f64 = result.parse().unwrap_or(0.0);
     Ok(BxValue::new_number(num))
 }
@@ -2919,7 +3061,11 @@ fn struct_to_query_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxV
     for key in &keys {
         let val = vm.struct_get(id, key);
         let val_str = vm.to_string(val);
-        parts.push(format!("{}={}", percent_encode(key), percent_encode(&val_str)));
+        parts.push(format!(
+            "{}={}",
+            percent_encode(key),
+            percent_encode(&val_str)
+        ));
     }
     let qs = parts.join(&delimiter);
     let qs_id = vm.string_new(qs);
@@ -3012,9 +3158,9 @@ fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
             if let Some(nested_id) = val.as_gc_id() {
                 if vm.is_struct_value(val) {
                     let rest_str = BxValue::new_ptr(vm.string_new(rest_key.to_string()));
-                    let scope_str = BxValue::new_ptr(vm.string_new(
-                        if scope_all { "all" } else { "one" }.to_string(),
-                    ));
+                    let scope_str = BxValue::new_ptr(
+                        vm.string_new(if scope_all { "all" } else { "one" }.to_string()),
+                    );
                     let nested_args = vec![BxValue::new_ptr(nested_id), rest_str, scope_str];
                     let nested_result = struct_find_key_bif(vm, &nested_args)?;
                     if let Some(nested_arr_id) = nested_result.as_gc_id() {
@@ -3061,9 +3207,9 @@ fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
             if let Some(nested_id) = val.as_gc_id() {
                 if vm.is_struct_value(val) {
                     let rest_str = BxValue::new_ptr(vm.string_new(search_key.clone()));
-                    let scope_str = BxValue::new_ptr(vm.string_new(
-                        if scope_all { "all" } else { "one" }.to_string(),
-                    ));
+                    let scope_str = BxValue::new_ptr(
+                        vm.string_new(if scope_all { "all" } else { "one" }.to_string()),
+                    );
                     let nested_args = vec![BxValue::new_ptr(nested_id), rest_str, scope_str];
                     let nested_result = struct_find_key_bif(vm, &nested_args)?;
                     if let Some(nested_arr_id) = nested_result.as_gc_id() {
@@ -3074,8 +3220,7 @@ fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
                                 if vm.is_struct_value(item) {
                                     let path = vm.struct_get(item_id, "path");
                                     let path_str = vm.to_string(path);
-                                    let new_path =
-                                        vm.string_new(format!("{}.{}", key, path_str));
+                                    let new_path = vm.string_new(format!("{}.{}", key, path_str));
                                     vm.struct_set(item_id, "path", BxValue::new_ptr(new_path));
                                     vm.struct_set(item_id, "owner", BxValue::new_ptr(nested_id));
                                 }
@@ -3911,7 +4056,8 @@ fn string_bind_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
         return Err("stringBind() second argument must be a struct".to_string());
     }
 
-    let re = regex::Regex::new(r"\$\{([^:}]+)(?::([^}]+))?\}").map_err(|e| format!("stringBind() regex error: {}", e))?;
+    let re = regex::Regex::new(r"\$\{([^:}]+)(?::([^}]+))?\}")
+        .map_err(|e| format!("stringBind() regex error: {}", e))?;
     let result = re
         .replace_all(&input, |caps: &regex::Captures| {
             let placeholder = &caps[1];
@@ -3989,7 +4135,12 @@ fn charset_decode_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         "utf-8" | "utf8" => input.as_bytes().to_vec(),
         "ascii" | "us-ascii" => input.as_bytes().to_vec(),
         "iso-8859-1" | "latin1" | "latin-1" => input.as_bytes().to_vec(),
-        _ => return Err(format!("charsetDecode() unsupported encoding: {}", encoding)),
+        _ => {
+            return Err(format!(
+                "charsetDecode() unsupported encoding: {}",
+                encoding
+            ));
+        }
     };
 
     let id = vm.bytes_new(bytes);
@@ -4013,7 +4164,12 @@ fn charset_encode_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         "utf-8" | "utf8" => String::from_utf8_lossy(&bytes).to_string(),
         "ascii" | "us-ascii" => String::from_utf8_lossy(&bytes).to_string(),
         "iso-8859-1" | "latin1" | "latin-1" => String::from_utf8_lossy(&bytes).to_string(),
-        _ => return Err(format!("charsetEncode() unsupported encoding: {}", encoding)),
+        _ => {
+            return Err(format!(
+                "charsetEncode() unsupported encoding: {}",
+                encoding
+            ));
+        }
     };
 
     Ok(BxValue::new_ptr(vm.string_new(result)))
@@ -4029,14 +4185,40 @@ fn sql_prettify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
 
     let sql_keywords = [
-        "ALTER TABLE", "CREATE TABLE", "CASE", "NULLIF", "DELETE", "DROP TABLE",
-        "FROM", "GROUP BY", "HAVING", "INSERT INTO", "LIMIT", "ORDER BY",
-        "OFFSET", "SELECT", "UNION", "UPDATE", "WHERE",
+        "ALTER TABLE",
+        "CREATE TABLE",
+        "CASE",
+        "NULLIF",
+        "DELETE",
+        "DROP TABLE",
+        "FROM",
+        "GROUP BY",
+        "HAVING",
+        "INSERT INTO",
+        "LIMIT",
+        "ORDER BY",
+        "OFFSET",
+        "SELECT",
+        "UNION",
+        "UPDATE",
+        "WHERE",
     ];
     let sql_indented_keywords = [
-        "FULL JOIN", "INNER JOIN", "JOIN", "LEFT JOIN", "OUTER JOIN", "LIKE",
-        "BETWEEN", "IS NULL", "IS NOT NULL", "EXISTS", "DISTINCT", "UNION ALL",
-        "INTERSECT", "MINUS", "EXCEPT",
+        "FULL JOIN",
+        "INNER JOIN",
+        "JOIN",
+        "LEFT JOIN",
+        "OUTER JOIN",
+        "LIKE",
+        "BETWEEN",
+        "IS NULL",
+        "IS NOT NULL",
+        "EXISTS",
+        "DISTINCT",
+        "UNION ALL",
+        "INTERSECT",
+        "MINUS",
+        "EXCEPT",
     ];
     let sql_logical_operators = ["AND", "OR", "NOT"];
     let indent = "  ";
@@ -4046,19 +4228,25 @@ fn sql_prettify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     for keyword in &sql_keywords {
         let pattern = format!(r"(?i)\b{}\b", regex::escape(keyword));
         let re = regex::Regex::new(&pattern).unwrap();
-        result = re.replace_all(&result, format!("\n{}\n{}", keyword.to_uppercase(), indent)).to_string();
+        result = re
+            .replace_all(&result, format!("\n{}\n{}", keyword.to_uppercase(), indent))
+            .to_string();
     }
 
     for keyword in &sql_indented_keywords {
         let pattern = format!(r"(?i)\b{}\b", regex::escape(keyword));
         let re = regex::Regex::new(&pattern).unwrap();
-        result = re.replace_all(&result, format!("\n{}{}", indent, keyword.to_uppercase())).to_string();
+        result = re
+            .replace_all(&result, format!("\n{}{}", indent, keyword.to_uppercase()))
+            .to_string();
     }
 
     for op in &sql_logical_operators {
         let pattern = format!(r"(?i)\b{}\b", regex::escape(op));
         let re = regex::Regex::new(&pattern).unwrap();
-        result = re.replace_all(&result, format!("{}\n", op.to_uppercase())).to_string();
+        result = re
+            .replace_all(&result, format!("{}\n", op.to_uppercase()))
+            .to_string();
     }
 
     let multi_newline = regex::Regex::new(r"\n\s*\n").unwrap();

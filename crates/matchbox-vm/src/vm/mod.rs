@@ -370,14 +370,28 @@ unsafe extern "C" {
     ) -> i32;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
+pub struct ExceptionHandler {
+    pub catch_ip: Option<usize>,
+    pub finally_ip: Option<usize>,
+    pub saved_stack_len: usize,
+    catch_enabled: bool,
+}
+
+#[derive(Clone, Copy)]
+enum PendingCompletion {
+    Return(BxValue),
+    Throw(BxValue),
+}
+
 pub struct CallFrame {
     pub function: Rc<BxCompiledFunction>,
     pub chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
     pub ip: usize,
     pub stack_base: usize,
     pub receiver: Option<BxValue>,
-    pub handlers: Vec<(usize, usize)>,
+    pub handlers: Vec<ExceptionHandler>,
+    pending_completion: Option<PendingCompletion>,
     pub promoted_constants: Vec<Option<BxValue>>,
 }
 
@@ -1665,6 +1679,7 @@ impl VM {
                 stack_base: 1,
                 receiver,
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: Vec::new(),
             }],
             variables: self.current_variables_scope(),
@@ -2401,6 +2416,7 @@ impl VM {
                 stack_base: 0,
                 receiver: None,
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: Vec::new(),
             }],
 
@@ -2448,6 +2464,7 @@ impl VM {
                 stack_base: 0,
                 receiver: None,
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: Vec::new(),
             }],
 
@@ -2590,6 +2607,7 @@ impl VM {
                 stack_base: 0,
                 receiver: None,
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: Vec::new(),
             }],
             variables: Self::new_variables_scope(),
@@ -2822,6 +2840,7 @@ impl VM {
                 stack_base: 1,
                 receiver,
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: Vec::new(),
             }],
             variables: self.current_variables_scope(),
@@ -3018,9 +3037,9 @@ impl VM {
         let mut code_len: usize = 0;
         let mut promoted_ptr: *mut Vec<Option<BxValue>> = std::ptr::null_mut();
         // Pointer to the base of the current frame's locals on the value stack.
-        // Refreshed whenever frame_changed is true. Avoids the double pointer
-        // chase (fibers[idx] → stack Vec → slot) in hot opcode arms.
-        let mut locals_ptr: *mut BxValue = std::ptr::null_mut();
+        // Refreshed before every dispatch because any preceding opcode may have
+        // reallocated the stack Vec.
+        let mut locals_ptr: *mut BxValue;
         // Counter used to throttle Instant::now() at safe points.
         // We only call the (expensive) system clock every 1024 backward branches
         // to avoid the ~20–50ns syscall cost on every loop iteration.
@@ -3083,21 +3102,20 @@ impl VM {
                     .last_mut()
                     .unwrap()
                     .promoted_constants as *mut _;
-                // Reserve headroom so that push() within this frame's execution
-                // won't reallocate the stack Vec and invalidate locals_ptr.
-                // 256 slots is generous; expression temporaries rarely exceed ~20.
+                // Reserve headroom to avoid reallocating the stack for ordinary
+                // expression temporaries. locals_ptr is still refreshed below.
                 self.fibers[fiber_idx].stack.reserve(256);
-                // SAFETY: stack is not reallocated within a single frame's dispatch
-                // (reserve above guarantees capacity). Any op that changes frames
-                // (CALL / RETURN / THROW / NEW) sets frame_changed = true, which
-                // refreshes locals_ptr on the next iteration before any access.
-                unsafe {
-                    locals_ptr = self.fibers[fiber_idx].stack.as_mut_ptr().add(stack_base);
-                }
             }
 
             if ip >= code_len {
                 return Ok(Some(BxValue::new_null()));
+            }
+
+            // Any preceding opcode may grow and reallocate the value stack. Refresh
+            // the frame-local base before every dispatch rather than relying on fixed
+            // reserve headroom to keep a raw Vec pointer valid.
+            unsafe {
+                locals_ptr = self.fibers[fiber_idx].stack.as_mut_ptr().add(stack_base);
             }
 
             // Periodic GC check: on ESP32 (and elsewhere), long-running fibers in tight
@@ -4004,33 +4022,49 @@ impl VM {
                     }
                 }
                 op::RETURN => {
-                    let fiber = &mut self.fibers[fiber_idx];
-                    let frame = fiber.frames.pop().unwrap();
-                    let result = if fiber.stack.len() > frame.stack_base {
-                        fiber.stack.pop().unwrap()
-                    } else {
-                        BxValue::new_null()
+                    let result = {
+                        let fiber = &mut self.fibers[fiber_idx];
+                        let stack_base = fiber.frames.last().unwrap().stack_base;
+                        if fiber.stack.len() > stack_base {
+                            fiber.stack.pop().unwrap()
+                        } else {
+                            BxValue::new_null()
+                        }
                     };
 
-                    if fiber.frames.is_empty() {
+                    if let Some(result) = self.handle_return(fiber_idx, result)? {
                         return Ok(Some(result));
                     }
 
-                    fiber.stack.truncate(frame.stack_base);
-
-                    if frame.function.name.ends_with(".constructor") {
-                        let instance = fiber.stack.pop().unwrap();
-                        fiber.stack.push(instance);
-                    } else {
-                        // For regular function calls, the function itself was at stack_base - 1
-                        if frame.stack_base > 0 {
-                            fiber.stack.pop();
-                        }
-                        fiber.stack.push(result);
-                    }
-                    // Reload frame state for the caller on the next iteration.
+                    // Either a finally block was entered or the result was delivered to
+                    // a caller frame. Reload the active frame before dispatching again.
                     frame_changed = true;
                     continue 'quantum;
+                }
+                op::END_FINALLY => {
+                    let pending = self.fibers[fiber_idx]
+                        .frames
+                        .last_mut()
+                        .unwrap()
+                        .pending_completion
+                        .take();
+
+                    match pending {
+                        Some(PendingCompletion::Return(result)) => {
+                            if let Some(result) = self.handle_return(fiber_idx, result)? {
+                                return Ok(Some(result));
+                            }
+                            frame_changed = true;
+                            continue 'quantum;
+                        }
+                        Some(PendingCompletion::Throw(value)) => {
+                            flush_ip!();
+                            self.throw_value(fiber_idx, value)?;
+                            frame_changed = true;
+                            continue 'quantum;
+                        }
+                        None => {}
+                    }
                 }
 
                 // --- Global / Scope Opcodes ---
@@ -5401,6 +5435,7 @@ impl VM {
                                 stack_base: class_idx + 1 + arg_count as usize,
                                 receiver: Some(instance_val),
                                 handlers: Vec::new(),
+                                pending_completion: None,
                                 promoted_constants: vec![None; constant_count],
                             };
                             flush_ip!();
@@ -5815,15 +5850,20 @@ impl VM {
                     }
                 }
                 op::PUSH_HANDLER => {
-                    let offset = op0;
-                    let target_ip = ip + offset as usize;
+                    let catch_ip = (op0 != 0).then_some(op0 as usize);
+                    let finally_ip = next_word!();
                     let saved_stack_len = self.fibers[fiber_idx].stack.len();
                     self.fibers[fiber_idx]
                         .frames
                         .last_mut()
                         .unwrap()
                         .handlers
-                        .push((target_ip, saved_stack_len));
+                        .push(ExceptionHandler {
+                            catch_ip,
+                            finally_ip: (finally_ip != 0).then_some(finally_ip as usize),
+                            saved_stack_len,
+                            catch_enabled: catch_ip.is_some(),
+                        });
                 }
                 op::POP_HANDLER => {
                     self.fibers[fiber_idx]
@@ -6161,6 +6201,58 @@ impl VM {
         String::new()
     }
 
+    fn handle_return(&mut self, fiber_idx: usize, result: BxValue) -> Result<Option<BxValue>> {
+        // A direct return from a finally block replaces the completion that entered it.
+        self.fibers[fiber_idx]
+            .frames
+            .last_mut()
+            .unwrap()
+            .pending_completion = None;
+
+        loop {
+            let handler = self.fibers[fiber_idx]
+                .frames
+                .last_mut()
+                .unwrap()
+                .handlers
+                .pop();
+
+            let Some(handler) = handler else {
+                break;
+            };
+
+            if let Some(finally_ip) = handler.finally_ip {
+                let frame = self.fibers[fiber_idx].frames.last_mut().unwrap();
+                frame.pending_completion = Some(PendingCompletion::Return(result));
+                frame.ip = finally_ip;
+                self.fibers[fiber_idx]
+                    .stack
+                    .truncate(handler.saved_stack_len);
+                return Ok(None);
+            }
+        }
+
+        let fiber = &mut self.fibers[fiber_idx];
+        let frame = fiber.frames.pop().unwrap();
+        if fiber.frames.is_empty() {
+            return Ok(Some(result));
+        }
+
+        fiber.stack.truncate(frame.stack_base);
+        if frame.function.name.ends_with(".constructor") {
+            let instance = fiber.stack.pop().unwrap();
+            fiber.stack.push(instance);
+        } else {
+            // For regular function calls, the function itself was at stack_base - 1.
+            if frame.stack_base > 0 {
+                fiber.stack.pop();
+            }
+            fiber.stack.push(result);
+        }
+
+        Ok(None)
+    }
+
     fn throw_value(&mut self, fiber_idx: usize, val: BxValue) -> Result<()> {
         let mut source_context = String::new();
 
@@ -6180,17 +6272,44 @@ impl VM {
 
         while !self.fibers[fiber_idx].frames.is_empty() {
             let frame_idx = self.fibers[fiber_idx].frames.len() - 1;
-            if !self.fibers[fiber_idx].frames[frame_idx].handlers.is_empty() {
-                let (handler_ip, saved_stack_len) = self.fibers[fiber_idx].frames[frame_idx]
-                    .handlers
-                    .pop()
-                    .unwrap();
-                self.fibers[fiber_idx].frames[frame_idx].ip = handler_ip;
+            let handler = self.fibers[fiber_idx].frames[frame_idx]
+                .handlers
+                .last()
+                .copied();
 
-                self.fibers[fiber_idx].stack.truncate(saved_stack_len);
-                self.fibers[fiber_idx].stack.push(val);
-                return Ok(());
+            if let Some(handler) = handler {
+                if handler.catch_enabled {
+                    let catch_ip = handler.catch_ip.unwrap();
+                    let frame = &mut self.fibers[fiber_idx].frames[frame_idx];
+                    frame.handlers.last_mut().unwrap().catch_enabled = false;
+                    frame.pending_completion = None;
+                    frame.ip = catch_ip;
+
+                    self.fibers[fiber_idx]
+                        .stack
+                        .truncate(handler.saved_stack_len);
+                    self.fibers[fiber_idx].stack.push(val);
+                    return Ok(());
+                }
+
+                if let Some(finally_ip) = handler.finally_ip {
+                    let frame = &mut self.fibers[fiber_idx].frames[frame_idx];
+                    frame.handlers.pop();
+                    frame.pending_completion = Some(PendingCompletion::Throw(val));
+                    frame.ip = finally_ip;
+
+                    self.fibers[fiber_idx]
+                        .stack
+                        .truncate(handler.saved_stack_len);
+                    return Ok(());
+                }
+
+                // A catch-only handler that is already in its catch body is no longer
+                // eligible to catch another exception; continue unwinding outward.
+                self.fibers[fiber_idx].frames[frame_idx].handlers.pop();
+                continue;
             }
+
             self.fibers[fiber_idx].frames.pop();
         }
         let val_str = self.exception_summary(val);
@@ -6332,6 +6451,7 @@ impl VM {
                             stack_base: 1,
                             receiver: Some(receiver),
                             handlers: Vec::new(),
+                            pending_completion: None,
                             promoted_constants: vec![None; constant_count],
                         }],
                         variables: self.current_variables_scope(),
@@ -6421,6 +6541,7 @@ impl VM {
                 stack_base: 1,
                 receiver: Some(instance_val),
                 handlers: Vec::new(),
+                pending_completion: None,
                 promoted_constants: vec![None; constant_count],
             }],
             variables: self.current_variables_scope(),
@@ -6737,6 +6858,7 @@ impl VM {
                         stack_base: 0,
                         receiver: self.fibers[fiber_idx].frames.last().unwrap().receiver,
                         handlers: Vec::new(),
+                        pending_completion: None,
                         promoted_constants: vec![None; constant_count],
                     };
                     // Let's be consistent: stack_base is where first arg is. Function is at stack_base - 1.
@@ -7110,6 +7232,7 @@ impl VM {
                             stack_base,
                             receiver: Some(receiver_val),
                             handlers: Vec::new(),
+                            pending_completion: None,
                             promoted_constants: vec![None; constant_count],
                         };
                         self.fibers[fiber_idx].frames.push(frame);
@@ -7141,6 +7264,7 @@ impl VM {
                             stack_base: self.fibers[fiber_idx].stack.len() - 2,
                             receiver: Some(receiver_val),
                             handlers: Vec::new(),
+                            pending_completion: None,
                             promoted_constants: vec![None; constant_count],
                         };
 

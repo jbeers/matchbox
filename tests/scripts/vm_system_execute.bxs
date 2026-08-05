@@ -22,6 +22,21 @@ environmentResult = systemExecute(
 )
 if ( environmentResult.output != "environment value" ) { throw "systemExecute environment failed" }
 
+inputResult = systemExecute(
+	"sh",
+	[ "-c", 'IFS= read -r value; printf ''%s'' "$value"' ],
+	0,
+	false,
+	null,
+	null,
+	null,
+	true,
+	{},
+	false,
+	"input value" & char(10)
+)
+if ( inputResult.output != "input value" ) { throw "systemExecute input failed" }
+
 timeoutResult = systemExecute( "sleep", [ "2" ], 1, true )
 if ( !timeoutResult.timeout ) { throw "systemExecute timeout failed" }
 if ( !timeoutResult.terminated ) { throw "systemExecute terminateOnTimeout failed" }

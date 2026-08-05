@@ -67,7 +67,7 @@ pub mod op {
     pub const NOT: u8 = 56;
     pub const ITER_NEXT: u8 = 57; // 3-word: op0=collection_slot, w1=cursor_slot|(has_index<<31), w2=exit_offset
     pub const LOCAL_JUMP_IF_NE_CONST: u8 = 58; // 3-word: op0=slot, w1=const_idx, w2=offset
-    pub const PUSH_HANDLER: u8 = 59;
+    pub const PUSH_HANDLER: u8 = 59; // 2-word: op0=absolute catch ip or 0, w1=absolute finally ip or 0
     pub const POP_HANDLER: u8 = 60;
     pub const THROW: u8 = 61;
     pub const PRINT: u8 = 62;
@@ -95,6 +95,7 @@ pub mod op {
     pub const CASTAS: u8 = 83;
     pub const CALL_NAMED_SPREAD: u8 = 84; // 1-word: op0=arg_entry_count
     pub const INVOKE_NAMED_SPREAD: u8 = 85; // 3-word: op0=name_idx, w1=arg_entry_count, w2=unused
+    pub const END_FINALLY: u8 = 86;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -185,6 +186,7 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::CASTAS => "CASTAS",
         op::CALL_NAMED_SPREAD => "CALL_NAMED_SPREAD",
         op::INVOKE_NAMED_SPREAD => "INVOKE_NAMED_SPREAD",
+        op::END_FINALLY => "END_FINALLY",
         _ => "UNKNOWN",
     }
 }

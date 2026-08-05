@@ -531,10 +531,13 @@ MatchBox includes a small standard library of BIFs compiled into every program. 
 | `arrayAppend(arr, val)` | Append to an array |
 | `arrayMap(arr, fn)` | Map over an array |
 | `arrayToList(arr, delim)` | Join array as string |
+| `deserializeYAML(yaml)` | Convert YAML null, boolean, number, string, sequence, and string-keyed mapping values to native BoxLang values |
+| `fileWriteExclusive(path, content, mode)` | Create and write a new file atomically, failing if the path already exists (`bif-io`) |
 | `abs(n)` | Absolute value |
 | `min(a, b)` | Minimum of two numbers |
 | `max(a, b)` | Maximum of two numbers |
 | `sleep(ms)` | Pause for `ms` milliseconds |
 | `runAsync(fn)` | Run function on the fiber scheduler |
-| `systemExecute(name, arguments, timeout, terminateOnTimeout, directory, output, error, inheritEnvironment, environment, inheritIO)` | Execute a native process with BoxLang-compatible output, timeout, directory, environment, and terminal inheritance options (native hosts only) |
+| `systemExecute(name, arguments, timeout, terminateOnTimeout, directory, output, error, inheritEnvironment, environment, inheritIO, input)` | Execute a native process with BoxLang-compatible output, timeout, directory, environment, terminal inheritance, and optional stdin content (native hosts only) |
 | `systemOutput(obj, addNewLine, doErrorStream)` | Write to the process output or error stream |
+| `cliReadPassword(prompt)` | Read terminal input with echo disabled (`bif-cli`, native terminals only) |
