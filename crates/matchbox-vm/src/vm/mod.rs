@@ -2439,6 +2439,7 @@ impl VM {
                     "endswith" => Some("stringendswith".to_string()),
                     "startswith" => Some("stringstartswith".to_string()),
                      "val" => Some("val".to_string()),
+                     "urlencodedformat" => Some("urlencodedformat".to_string()),
                      "todatetime" => Some("parsedatetime".to_string()),
                      "tojson" => Some("serializejson".to_string()),
                     "fromjson" => Some("deserializejson".to_string()),

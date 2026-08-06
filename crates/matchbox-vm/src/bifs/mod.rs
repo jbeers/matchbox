@@ -48,6 +48,7 @@ mod math_datetime;
 mod set;
 mod system_execute;
 mod system_output;
+mod system;
 mod type_format;
 mod watcher;
 mod yaml;
@@ -63,6 +64,14 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert(
         "systemoutput".to_string(),
         system_output::system_output as BxNativeFunction,
+    );
+    bifs.insert(
+        "urlencodedformat".to_string(),
+        system::url_encoded_format as BxNativeFunction,
+    );
+    bifs.insert(
+        "getfilefrompath".to_string(),
+        system::get_file_from_path as BxNativeFunction,
     );
 
     // Math BIFs
