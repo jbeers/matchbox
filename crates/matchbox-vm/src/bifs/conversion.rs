@@ -71,18 +71,13 @@ pub fn parse_number(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
     let num_str = vm.to_string(args[0]).trim().to_string();
 
-    let radix_str = if args.len() > 1 {
-        let s = vm.to_string(args[1]).to_lowercase();
-        if ["bin", "oct", "dec", "hex"].contains(&s.as_str()) {
-            Some(s)
-        } else if args.len() > 2 {
-            Some(vm.to_string(args[2]).to_lowercase())
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let second = args.get(1).map(|value| vm.to_string(*value));
+    let second_lower = second.as_deref().map(str::to_ascii_lowercase);
+    let radix_str = second_lower
+        .as_deref()
+        .filter(|value| ["bin", "oct", "dec", "hex"].contains(value))
+        .map(str::to_string)
+        .or_else(|| args.get(2).map(|value| vm.to_string(*value).to_ascii_lowercase()));
 
     if let Some(radix) = radix_str {
         let radix_num = match radix.as_str() {
@@ -103,7 +98,27 @@ pub fn parse_number(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
         return Ok(BxValue::new_number(n as f64));
     }
 
-    let n: f64 = num_str
+    let localized = second_lower
+        .as_deref()
+        .is_some_and(|locale| locale.starts_with("de_")
+            || locale.starts_with("fr_")
+            || locale.starts_with("it_")
+            || locale.starts_with("es_")
+            || locale.starts_with("pt_")
+            || locale.starts_with("da_")
+            || locale.starts_with("nl_")
+            || locale.starts_with("el_")
+            || locale.starts_with("tr_")
+            || locale.starts_with("ru_")
+            || locale.starts_with("pl_")
+            || locale.starts_with("cs_")
+            || locale.starts_with("hu_"));
+    let normalized = if localized {
+        num_str.replace('.', "").replace(',', ".")
+    } else {
+        num_str.replace(',', "")
+    };
+    let n: f64 = normalized
         .parse()
         .map_err(|_| format!("Cannot parse [{}] as a number", num_str))?;
     Ok(BxValue::new_number(n))

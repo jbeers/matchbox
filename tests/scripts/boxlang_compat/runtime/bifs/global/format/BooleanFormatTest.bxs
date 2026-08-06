@@ -32,9 +32,9 @@ try {
 assert threw : "testStringMember invalid-string";
 
 // testNumericMember
-assert javacast( "integer", 0 ).booleanFormat() == "false" : "testNumericMember zero";
-assert javacast( "integer", -1 ).booleanFormat() == "true" : "testNumericMember negative";
-assert javacast( "integer", 1 ).booleanFormat() == "true" : "testNumericMember one";
+assert ( 0 ).booleanFormat() == "false" : "testNumericMember zero";
+assert ( -1 ).booleanFormat() == "true" : "testNumericMember negative";
+assert ( 1 ).booleanFormat() == "true" : "testNumericMember one";
 
 // testDeprecatedTrueFalseFormatAlias
 assert trueFalseFormat( "true" ) == "true" : "testDeprecatedTrueFalseFormatAlias true-string";

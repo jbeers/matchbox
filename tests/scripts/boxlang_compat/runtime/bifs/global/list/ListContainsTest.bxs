@@ -5,6 +5,7 @@ assert listContains( list, "b" ) : "testCanSearch b";
 list = "1.234,2.345,3.456";
 assert listContains( list, 3.456 ) : "testCanSearch number";
 // testCanSearchNoCase
+list = "a,b,c";
 assert listContains( list, "B" ) == false : "testCanSearchNoCase case-sensitive";
 assert listContainsNoCase( list, "B" ) : "testCanSearchNoCase nocase";
 assert listContainsNoCase( "sheep,goat,foo,bar,goo", "oO" ) : "testCanSearchNoCase oo";

@@ -1,3 +1,9 @@
 // boxlang_compat: ortus/boxlang/runtime/bifs/global/string/InsertTest.java
 assert insert( "BoxLang", " is cool", 0 ) == "BoxLang is cool" : "testInsertAtStart";
-assert insert( "BoxLang", " is cool", 10 ) == "BoxLang is cool" : "testInsertPastEnd";
+threw = false;
+try {
+    insert( "BoxLang", " is cool", 10 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testInsertPastEnd";

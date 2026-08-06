@@ -2335,7 +2335,13 @@ impl VM {
 
     fn resolve_member_method(&self, receiver: &BxValue, method_name: &str) -> Option<String> {
         let name = method_name.to_ascii_lowercase();
-        if receiver.is_number() {
+        if receiver.is_bool() {
+            return match name.as_str() {
+                "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
+                _ => None,
+            };
+        }
+        if receiver.is_number() || receiver.is_int() {
             return match name.as_str() {
                 "len" | "length" => Some("len".to_string()),
                 "abs" => Some("abs".to_string()),
@@ -2349,6 +2355,8 @@ impl VM {
                 "sgn" => Some("sgn".to_string()),
                 "sqr" => Some("sqr".to_string()),
                 "decimalformat" => Some("decimalformat".to_string()),
+                "numberformat" => Some("numberformat".to_string()),
+                "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
                 "log" => Some("log".to_string()),
                 "log10" => Some("log10".to_string()),
                 "exp" => Some("exp".to_string()),
@@ -2411,7 +2419,8 @@ impl VM {
                     "mid" => Some("mid".to_string()),
                     "reverse" => Some("reverse".to_string()),
                     "spanexcluding" => Some("spanexcluding".to_string()),
-                    "spanincluding" => Some("spanincluding".to_string()),
+                     "spanincluding" => Some("spanincluding".to_string()),
+                     "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
                     "replace" => Some("replace".to_string()),
                      "listlen" => Some("listlen".to_string()),
                      "listavg" => Some("listavg".to_string()),
@@ -2464,8 +2473,8 @@ impl VM {
                      "append" | "add" => Some("arrayappend".to_string()),
                      "avg" => Some("arrayavg".to_string()),
                      "chunk" => Some("arraychunk".to_string()),
-                     "contains" => Some("arraycontains".to_string()),
-                     "containsnocase" => Some("arraycontainsnocase".to_string()),
+                      "contains" => Some("arraycontains".to_string()),
+                      "containsnocase" => Some("arraycontainsnocase".to_string()),
                      "delete" => Some("arraydelete".to_string()),
                      "deletenocase" => Some("arraydeletenocase".to_string()),
                      "deleteat" => Some("arraydeleteat".to_string()),

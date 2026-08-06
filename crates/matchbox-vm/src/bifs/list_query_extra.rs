@@ -123,7 +123,7 @@ pub fn list_contains(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
         args.get(4).is_some_and(BxValue::as_bool),
     );
     let value = vm.to_string(args[1]);
-    Ok(BxValue::new_bool(items.iter().any(|item| item == &value)))
+    Ok(BxValue::new_bool(items.iter().any(|item| item.contains(&value))))
 }
 
 pub fn list_contains_nocase(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -136,7 +136,7 @@ pub fn list_contains_nocase(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVal
     );
     let value = vm.to_string(args[1]).to_ascii_lowercase();
     Ok(BxValue::new_bool(
-        items.iter().any(|item| item.to_ascii_lowercase() == value),
+        items.iter().any(|item| item.to_ascii_lowercase().contains(&value)),
     ))
 }
 

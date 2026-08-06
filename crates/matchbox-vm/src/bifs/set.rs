@@ -18,6 +18,8 @@ pub fn register_set_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
 
     bifs.insert("boxsetcontains".to_string(), box_set_contains as BxNativeFunction);
     bifs.insert("boxsetcontainsall".to_string(), box_set_contains_all as BxNativeFunction);
+    bifs.insert("arraycontains".to_string(), array_contains as BxNativeFunction);
+    bifs.insert("arraycontainsnocase".to_string(), array_contains_nocase as BxNativeFunction);
     bifs.insert("boxsetisempty".to_string(), box_set_is_empty as BxNativeFunction);
     bifs.insert("boxsetequals".to_string(), box_set_equals as BxNativeFunction);
     bifs.insert("boxsetissubsetof".to_string(), box_set_is_subset_of as BxNativeFunction);
@@ -59,6 +61,25 @@ fn set_contains(vm: &dyn BxVM, set_id: usize, value: BxValue) -> bool {
         }
     }
     false
+}
+
+fn array_contains(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("arrayContains() expects 2 arguments".to_string());
+    }
+    let array_id = get_set_id(args, 0, "arrayContains")?;
+    Ok(BxValue::new_bool(set_contains(vm, array_id, args[1])))
+}
+
+fn array_contains_nocase(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("arrayContainsNoCase() expects 2 arguments".to_string());
+    }
+    let array_id = get_set_id(args, 0, "arrayContainsNoCase")?;
+    let value = vm.to_string(args[1]).to_ascii_lowercase();
+    Ok(BxValue::new_bool((0..vm.array_len(array_id)).any(|index| {
+        vm.to_string(vm.array_get(array_id, index)).to_ascii_lowercase() == value
+    })))
 }
 
 fn set_add_unique(vm: &mut dyn BxVM, set_id: usize, value: BxValue) {

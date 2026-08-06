@@ -1,5 +1,11 @@
 // boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructFindTest.java
 myStruct = { flea: "bar" };
 assert StructFind( myStruct, "flea" ) == "bar" : "testFind";
-assert StructFind( myStruct, "foo" ) == "" : "testFindMissing";
+threw = false;
+try {
+    StructFind( myStruct, "foo" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testFindMissing";
 assert StructFind( myStruct, "foo", "default" ) == "default" : "testFindDefault";

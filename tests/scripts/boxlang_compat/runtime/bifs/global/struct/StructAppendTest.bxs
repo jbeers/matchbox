@@ -10,5 +10,5 @@ target = { cow: { total: 12 }, pig: { total: 5 } };
 appends = { cow: { total: 10, home: "farm" }, dog: { total: 2 } };
 StructAppend( target, appends, false );
 assert target.cow.total == 12 : "testAppend no-overwrite nested";
-assert target.cow.home == "farm" : "testAppend no-overwrite nested-new";
+assert structKeyExists( target.cow, "home" ) == false : "testAppend no-overwrite nested-new";
 assert target.dog.total == 2 : "testAppend no-overwrite new";

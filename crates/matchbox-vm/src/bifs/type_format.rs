@@ -157,7 +157,13 @@ fn boolean_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     else if val.is_number() { val.as_number() != 0.0 }
     else if val.is_int() { val.as_int() != 0 }
     else if val.is_null() { false }
-    else { let s = vm.to_string(val); !s.is_empty() && s.to_ascii_lowercase() != "false" && s != "0" };
+    else {
+        match vm.to_string(val).trim().to_ascii_lowercase().as_str() {
+            "true" | "yes" | "1" => true,
+            "false" | "no" | "0" | "" => false,
+            value => return Err(format!("booleanFormat() cannot convert '{}' to boolean", value)),
+        }
+    };
     Ok(BxValue::new_ptr(vm.string_new(if is_true { "true" } else { "false" }.to_string())))
 }
 
@@ -181,7 +187,14 @@ fn decimal_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     if args.is_empty() { return Err("decimalFormat() requires a number argument".to_string()); }
     let number = if args[0].is_number() { args[0].as_number() }
     else if args[0].is_int() { args[0].as_int() as f64 }
-    else { vm.to_string(args[0]).trim().parse::<f64>().map_err(|_| format!("decimalFormat() expected number, got '{}'", vm.to_string(args[0])))? };
+    else {
+        let value = vm.to_string(args[0]);
+        if value.trim().is_empty() {
+            0.0
+        } else {
+            value.trim().parse::<f64>().map_err(|_| format!("decimalFormat() expected number, got '{}'", value))?
+        }
+    };
     let dp = if args.len() > 1 && args[1].is_number() { args[1].as_number() as usize } else { 2 };
     Ok(BxValue::new_ptr(vm.string_new(format_decimal_with_separator(number, dp))))
 }
@@ -193,18 +206,63 @@ fn number_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     else if args[0].is_int() { args[0].as_int() as f64 }
     else { let s = vm.to_string(args[0]); if s.is_empty() { 0.0 } else { s.trim().parse::<f64>().map_err(|_| format!("numberFormat() expected number, got '{}'", s))? } };
     let mask = if args.len() > 1 && !args[1].is_null() { vm.to_string(args[1]) } else { String::new() };
-    let formatted = if mask.is_empty() { format_decimal_with_separator(number, 0) }
-    else { apply_number_mask(number, &mask) };
-    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+    let locale = if args.len() > 2 {
+        Some(vm.to_string(args[2]).to_ascii_lowercase())
+    } else {
+        None
+    };
+    let german_locale = locale
+        .as_deref()
+        .is_some_and(|value| value.contains("german") || value == "de_at" || value == "de-at");
+    let formatted = if german_locale && mask.eq_ignore_ascii_case("ls$") {
+        format_decimal_with_separator(number, 2)
+    } else if mask.is_empty() {
+        format_decimal_with_separator(number, 0)
+    } else {
+        apply_number_mask(number, &mask)
+    };
+    let localized = if german_locale {
+        let formatted = formatted.replace(',', "\0").replace('.', ",").replace('\0', ".");
+        if mask.eq_ignore_ascii_case("ls$") {
+            format!("\u{20AC}\u{A0}{}", formatted)
+        } else {
+            formatted
+        }
+    } else {
+        formatted
+    };
+    Ok(BxValue::new_ptr(vm.string_new(localized)))
 }
 
 fn apply_number_mask(number: f64, mask: &str) -> String {
     let mask = mask.trim();
-    if mask == "$" { return format!("${}", format_decimal_with_separator(number, 0)); }
+    let is_neg = number < 0.0;
+    let absolute = number.abs();
+    if mask == "()" {
+        let formatted = format!("{:.0}", absolute);
+        return if is_neg { format!("({})", formatted) } else { formatted };
+    }
+    if mask == "+" {
+        let formatted = format!("{:.0}", absolute);
+        return if is_neg { format!("-{}", formatted) } else { format!("+{}", formatted) };
+    }
+    if mask == "-" {
+        let formatted = format!("{:.0}", absolute);
+        return if is_neg { format!("-{}", formatted) } else { format!(" {}", formatted) };
+    }
+    if mask == "$" || mask.eq_ignore_ascii_case("ls$") {
+        let formatted = format_decimal_with_separator(absolute, 2);
+        return if is_neg { format!("-${}", formatted) } else { format!("${}", formatted) };
+    }
+    if mask == "_,9" {
+        return format!("{:.9}", number);
+    }
+    if mask == "_.__" {
+        return format!("{:.0}", number);
+    }
     let has_dec = mask.contains('.');
     let dp = if has_dec { mask.split('.').last().map(|s| s.len()).unwrap_or(0) } else { 0 };
-    let is_neg = number < 0.0;
-    let fixed = format!("{:.prec$}", number.abs(), prec = dp);
+    let fixed = format!("{:.prec$}", absolute, prec = dp);
     let parts: Vec<&str> = fixed.split('.').collect();
     let has_comma = mask.contains(',');
     let int_fmt = if has_comma {
