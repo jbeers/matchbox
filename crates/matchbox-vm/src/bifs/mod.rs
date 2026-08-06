@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 static MATH_RNG: OnceLock<Mutex<StdRng>> = OnceLock::new();
 static UNSYNCHRONIZED_ARRAYS: OnceLock<Mutex<HashSet<(usize, usize)>>> = OnceLock::new();
+static ARRAY_DIMENSIONS: OnceLock<Mutex<HashMap<(usize, usize), usize>>> = OnceLock::new();
 
 fn math_rng() -> &'static Mutex<StdRng> {
     MATH_RNG.get_or_init(|| Mutex::new(StdRng::seed_from_u64(0)))
@@ -2994,6 +2995,17 @@ fn array_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 fn array_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let id = vm.array_new();
     let key = (vm as *mut dyn BxVM as *mut () as usize, id);
+    let dimensions = args
+        .first()
+        .filter(|value| value.is_number() || value.is_int())
+        .map(|value| value.as_number() as usize)
+        .unwrap_or(1)
+        .max(1);
+    ARRAY_DIMENSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "Array dimension metadata lock poisoned".to_string())?
+        .insert(key, dimensions);
     let arrays = UNSYNCHRONIZED_ARRAYS.get_or_init(|| Mutex::new(HashSet::new()));
     let mut arrays = arrays.lock().map_err(|_| "Array metadata lock poisoned".to_string())?;
     if args.len() > 1 && !args[1].as_bool() {
@@ -4253,7 +4265,37 @@ fn is_array_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     if args.is_empty() {
         return Ok(BxValue::new_bool(false));
     }
-    Ok(BxValue::new_bool(vm.is_array_value(args[0])))
+    let is_array = vm.is_array_value(args[0]);
+    if !is_array || args.len() < 2 {
+        return Ok(BxValue::new_bool(is_array));
+    }
+    let dimension = vm.to_string(args[1]).parse::<usize>().unwrap_or(0);
+    if let Some(id) = args[0].as_gc_id() {
+        let key = (vm as *mut dyn BxVM as *mut () as usize, id);
+        if let Some(declared) = ARRAY_DIMENSIONS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| "Array dimension metadata lock poisoned".to_string())?
+            .get(&key)
+            .copied()
+        {
+            return Ok(BxValue::new_bool(dimension == declared));
+        }
+    }
+    Ok(BxValue::new_bool(dimension > 0 && array_depth(vm, args[0]) == dimension))
+}
+
+fn array_depth(vm: &dyn BxVM, value: BxValue) -> usize {
+    if !vm.is_array_value(value) {
+        return 0;
+    }
+    let Some(id) = value.as_gc_id() else {
+        return 0;
+    };
+    if vm.array_len(id) == 0 {
+        return 1;
+    }
+    1 + array_depth(vm, vm.array_get(id, 0))
 }
 
 fn is_struct_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

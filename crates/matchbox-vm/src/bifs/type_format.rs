@@ -49,8 +49,6 @@ fn is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
         let len = val.as_gc_id().map(|id| vm.get_len(id)).unwrap_or(0);
         return Ok(BxValue::new_bool(len == 0));
     }
-    if val.is_number() { return Ok(BxValue::new_bool(val.as_number() == 0.0)); }
-    if val.is_bool() { return Ok(BxValue::new_bool(!val.as_bool())); }
     Ok(BxValue::new_bool(false))
 }
 
@@ -64,6 +62,9 @@ fn is_file_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 
 fn is_ipv6_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Ok(BxValue::new_bool(false)); }
+    if vm.is_array_value(args[0]) || vm.is_struct_value(args[0]) {
+        return Err("isIPv6() expects a string hostname".to_string());
+    }
     let s = vm.to_string(args[0]);
     Ok(BxValue::new_bool(!s.is_empty() && s.parse::<std::net::Ipv6Addr>().is_ok()))
 }
@@ -73,12 +74,15 @@ fn is_leap_year_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     let val = args[0];
     let year = if val.is_number() { val.as_number() as i32 }
     else if val.is_int() { val.as_int() }
-    else { vm.to_string(val).trim().parse::<i32>().map_err(|_| format!("isLeapYear() expected numeric, got '{}'", vm.to_string(val)))? };
+    else { vm.to_string(val).trim().parse::<f64>().map(|year| year as i32).map_err(|_| format!("isLeapYear() expected numeric, got '{}'", vm.to_string(val)))? };
     Ok(BxValue::new_bool((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)))
 }
 
 fn is_local_host_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Ok(BxValue::new_bool(false)); }
+    if vm.is_array_value(args[0]) || vm.is_struct_value(args[0]) {
+        return Err("isLocalHost() expects a string hostname".to_string());
+    }
     let s = vm.to_string(args[0]);
     if s.is_empty() { return Ok(BxValue::new_bool(false)); }
     let lower = s.to_ascii_lowercase();
@@ -101,6 +105,16 @@ fn is_query_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     }
     let _ = vm;
     Ok(BxValue::new_bool(false))
+}
+
+fn is_range_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(
+        vm.type_name_from_value(args[0])
+            .is_some_and(|name| name.eq_ignore_ascii_case("range")),
+    ))
 }
 
 fn is_valid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -395,6 +409,7 @@ pub fn register_type_format_bifs(bifs: &mut std::collections::HashMap<String, Bx
     bifs.insert("isleapyear".to_string(), is_leap_year_bif as BxNativeFunction);
     bifs.insert("islocalhost".to_string(), is_local_host_bif as BxNativeFunction);
     bifs.insert("isquery".to_string(), is_query_bif as BxNativeFunction);
+    bifs.insert("isrange".to_string(), is_range_bif as BxNativeFunction);
     bifs.insert("isvalid".to_string(), is_valid_bif as BxNativeFunction);
     bifs.insert("isxml".to_string(), is_xml_bif as BxNativeFunction);
     bifs.insert("isxmlattribute".to_string(), is_xml_attribute_bif as BxNativeFunction);

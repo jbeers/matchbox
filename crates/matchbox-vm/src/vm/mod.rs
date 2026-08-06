@@ -2421,6 +2421,7 @@ impl VM {
                     "spanexcluding" => Some("spanexcluding".to_string()),
                      "spanincluding" => Some("spanincluding".to_string()),
                      "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
+                     "isempty" => Some("isempty".to_string()),
                     "replace" => Some("replace".to_string()),
                      "listlen" => Some("listlen".to_string()),
                      "listavg" => Some("listavg".to_string()),
