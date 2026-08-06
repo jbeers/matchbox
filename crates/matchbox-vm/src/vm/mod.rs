@@ -4730,7 +4730,7 @@ impl VM {
                     }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
-                op::INDEX => {
+                op::INDEX | op::SAFE_INDEX => {
                     let index_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
                     if let Some(id) = base_val.as_gc_id() {
@@ -4781,10 +4781,14 @@ impl VM {
                                         raw_index - 1
                                     };
                                     if resolved_index < 0 || resolved_index >= arr.len() as i64 {
-                                        flush_ip!();
-                                        self.throw_error(fiber_idx, "Array index out of bounds")?;
-                                        frame_changed = true;
-                                        continue 'quantum;
+                                        if opcode == op::SAFE_INDEX {
+                                            self.fibers[fiber_idx].stack.push(BxValue::new_null());
+                                        } else {
+                                            flush_ip!();
+                                            self.throw_error(fiber_idx, "Array index out of bounds")?;
+                                            frame_changed = true;
+                                            continue 'quantum;
+                                        }
                                     } else {
                                         self.fibers[fiber_idx]
                                             .stack

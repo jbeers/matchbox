@@ -2045,6 +2045,21 @@ impl Compiler {
                         self.chunk.emit1(op::CONSTANT, null_idx, expr.line);
                         return Ok(());
                     }
+                    if lower_name == "isnull"
+                        && args.len() == 1
+                        && args[0].name.is_none()
+                    {
+                        self.compile_expression(&base)?;
+                        if let ExpressionKind::ArrayAccess { base, index } = &args[0].value.kind {
+                            self.compile_expression(base)?;
+                            self.compile_expression(index)?;
+                            self.chunk.emit0(op::SAFE_INDEX, expr.line);
+                        } else {
+                            self.compile_expression(&args[0].value)?;
+                        }
+                        self.chunk.emit1(op::CALL, 1, expr.line);
+                        return Ok(());
+                    }
                 }
 
                 // BoxLang compatibility: unqualified method calls inside a class

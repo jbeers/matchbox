@@ -1565,6 +1565,7 @@ impl JitState {
                 | op::ARRAY
                 | op::STRUCT
                 | op::INDEX
+                | op::SAFE_INDEX
                 | op::SET_INDEX
                 | op::MEMBER
                 | op::SET_MEMBER

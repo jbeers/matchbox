@@ -4302,6 +4302,9 @@ fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         return Ok(BxValue::new_bool(false));
     }
     let value = args[0];
+    let is_query = value
+        .as_gc_id()
+        .is_some_and(|id| vm.native_object_query_row_count(id).is_some());
     let is_object = if value.is_null()
         || value.is_bool()
         || value.is_number()
@@ -4309,12 +4312,13 @@ fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         || vm.is_array_value(value)
         || vm.is_struct_value(value)
         || vm.is_bytes(value)
+        || is_query
     {
         false
     } else if let Some(type_name) = vm.type_name_from_value(value) {
         !matches!(
             type_name.to_ascii_lowercase().as_str(),
-            "datetime" | "range"
+            "datetime" | "query" | "range"
         )
     } else {
         value.as_gc_id().is_some()
@@ -4341,7 +4345,21 @@ fn is_numeric_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     if val.is_null() {
         return Ok(BxValue::new_bool(false));
     }
-    let s = vm.to_string(*val);
+    let mut s = vm.to_string(*val).trim().to_string();
+    if let Some(locale) = args.get(1).map(|value| vm.to_string(*value).to_ascii_lowercase()) {
+        let comma_decimal = [
+            "de_", "fr_", "it_", "es_", "pt_", "da_", "nl_", "el_", "tr_", "ru_", "pl_",
+            "cs_", "hu_",
+        ]
+        .iter()
+        .any(|prefix| locale.starts_with(prefix));
+        s = s.replace('\u{00a0}', "").replace(' ', "");
+        if comma_decimal {
+            s = s.replace('.', "").replace(',', ".");
+        } else {
+            s = s.replace(',', "");
+        }
+    }
     let is_num = s.parse::<f64>().is_ok() || s.parse::<i64>().is_ok();
     Ok(BxValue::new_bool(is_num))
 }

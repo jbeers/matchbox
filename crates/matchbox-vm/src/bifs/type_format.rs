@@ -1,4 +1,6 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
+use chrono::NaiveTime;
+use super::parse_datetime_input;
 
 fn is_closure_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
@@ -114,26 +116,126 @@ fn is_valid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
             else if value.is_null() { false }
             else { matches!(vm.to_string(value).to_ascii_lowercase().as_str(), "true" | "false" | "yes" | "no" | "1" | "0") }
         }
-        "date" | "datetime" => vm.type_name_from_value(value).map(|n| n.eq_ignore_ascii_case("datetime")).unwrap_or(false),
+        "date" | "datetime" => vm
+            .type_name_from_value(value)
+            .map(|n| n.eq_ignore_ascii_case("datetime"))
+            .unwrap_or(false)
+            || (!value.is_null() && parse_datetime_input(&vm.to_string(value), None, None).is_ok()),
         "email" => { let s = vm.to_string(value); s.contains('@') && s.contains('.') }
-        "float" => { if value.is_number() { value.as_number().fract() != 0.0 } else { vm.to_string(value).parse::<f64>().map(|n| n.fract() != 0.0).unwrap_or(false) } }
-        "function" | "closure" => vm.value_matches_type_name(value, "function"),
+        "float" => {
+            if value.is_bool() || value.is_null() {
+                false
+            } else if value.is_number() {
+                true
+            } else {
+                vm.to_string(value).trim().parse::<f64>().is_ok()
+            }
+        }
+        "function" | "closure" | "lambda" => vm.value_matches_type_name(value, "function"),
         "guid" | "uuid" => { let s = vm.to_string(value).trim().to_string(); s.len() == 36 && { let b = s.as_bytes(); b[8]==b'-' && b[13]==b'-' && b[18]==b'-' && b[23]==b'-' && s.replace('-',"").chars().all(|c| c.is_ascii_hexdigit()) } }
-        "hex" => { let s = vm.to_string(value); !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()) }
-        "integer" | "int" => { if value.is_int() { true } else if value.is_number() { value.as_number().fract() == 0.0 } else { vm.to_string(value).trim().parse::<i64>().is_ok() } }
+        "hex" => {
+            let input = vm.to_string(value).trim().to_string();
+            let digits = input
+                .strip_prefix("0x")
+                .or_else(|| input.strip_prefix("0X"))
+                .unwrap_or(&input);
+            !digits.is_empty() && digits.chars().all(|c| c.is_ascii_hexdigit())
+        }
+        "integer" | "int" => {
+            if value.is_bool() || value.is_null() {
+                false
+            } else if value.is_int() {
+                true
+            } else if value.is_number() {
+                value.as_number().fract() == 0.0
+            } else {
+                vm.to_string(value)
+                    .trim()
+                    .parse::<f64>()
+                    .map(|number| number.fract() == 0.0)
+                    .unwrap_or(false)
+            }
+        }
         "numeric" | "number" => { if value.is_number() { true } else if value.is_null() { false } else { vm.to_string(value).trim().parse::<f64>().is_ok() } }
         "query" => { if !value.is_ptr() { false } else { #[cfg(not(target_arch = "wasm32"))] { value.as_gc_id().and_then(|id| vm.native_object_query_row_count(id)).is_some() } #[cfg(target_arch = "wasm32")] { false } } }
-        "range" => { if args.len() >= 4 { let n = if value.is_number() { value.as_number() } else { return Ok(BxValue::new_bool(false)) }; let mn = if args[2].is_number() { args[2].as_number() } else { return Ok(BxValue::new_bool(false)) }; let mx = if args[3].is_number() { args[3].as_number() } else { return Ok(BxValue::new_bool(false)) }; n >= mn && n <= mx } else { false } }
-        "regex" | "regular_expression" => { let p = if args.len() >= 3 { vm.to_string(args[2]) } else { return Err("isValid() regex requires pattern".to_string()) }; regex::Regex::new(&p).map(|re| re.is_match(&vm.to_string(value))).unwrap_or(false) }
+        "range" => {
+            if args.len() >= 4 {
+                let parse_number = |candidate: BxValue| {
+                    if candidate.is_number() {
+                        Some(candidate.as_number())
+                    } else {
+                        vm.to_string(candidate).trim().parse::<f64>().ok()
+                    }
+                };
+                match (parse_number(value), parse_number(args[2]), parse_number(args[3])) {
+                    (Some(number), Some(minimum), Some(maximum)) => number >= minimum && number <= maximum,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        }
+        "regex" | "regular_expression" => {
+            let pattern = if args.len() >= 3 {
+                vm.to_string(args[2])
+            } else {
+                return Err("isValid() regex requires pattern".to_string());
+            };
+            let input = vm.to_string(value);
+            regex::Regex::new(&pattern)
+                .ok()
+                .and_then(|regex| regex.find(&input))
+                .is_some_and(|matched| matched.start() == 0 && matched.end() == input.len())
+        }
         "ssn" | "social_security_number" => { let d: String = vm.to_string(value).chars().filter(|c| c.is_ascii_digit()).collect(); d.len() == 9 }
         "string" => vm.is_string_value(value),
         "struct" => vm.is_struct_value(value),
+        "time" => {
+            let input = vm.to_string(value);
+            !input.trim().is_empty()
+                && ["%H:%M", "%H:%M:%S", "%H:%M:%S%.f", "%I:%M %p"]
+                    .iter()
+                    .any(|format| NaiveTime::parse_from_str(&input, format).is_ok())
+        }
         "telephone" => { let d: String = vm.to_string(value).chars().filter(|c| c.is_ascii_digit()).collect(); d.len() >= 7 && d.len() <= 15 }
         "url" => { let s = vm.to_string(value); s.starts_with("http://") || s.starts_with("https://") }
-        "variablename" => { let s = vm.to_string(value); let mut c = s.chars(); match c.next() { Some(ch) if ch.is_ascii_alphabetic() || ch == '_' || ch == '$' => c.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'), _ => false } }
+        "variablename" => {
+            if value.is_null() {
+                false
+            } else {
+                let s = vm.to_string(value);
+                let mut chars = s.chars();
+                match chars.next() {
+                    Some(ch) if ch.is_ascii_alphabetic() || ch == '_' || ch == '$' => {
+                        chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '$')
+                    }
+                    _ => false,
+                }
+            }
+        }
         "xml" => false,
         "zipcode" => { let d: String = vm.to_string(value).chars().filter(|c| c.is_ascii_digit()).collect(); d.len() == 5 || d.len() == 9 }
-        "creditcard" => { let d: String = vm.to_string(value).chars().filter(|c| c.is_ascii_digit()).collect(); d.len() >= 13 && d.len() <= 19 }
+        "creditcard" => {
+            let raw = vm.to_string(value);
+            let valid_chars = raw.chars().all(|c| c.is_ascii_digit() || matches!(c, ' ' | '-' | '_'));
+            let digits: Vec<u32> = raw.chars().filter_map(|c| c.to_digit(10)).collect();
+            if !valid_chars || !(12..=19).contains(&digits.len()) {
+                false
+            } else {
+                let mut sum = 0;
+                let mut alternate = false;
+                for digit in digits.iter().rev() {
+                    let mut value = *digit;
+                    if alternate {
+                        value *= 2;
+                        if value > 9 { value = (value % 10) + 1; }
+                    }
+                    sum += value;
+                    alternate = !alternate;
+                }
+                sum % 10 == 0
+            }
+        }
         "component" | "class" => { value.is_ptr() && !vm.is_string_value(value) && !vm.is_array_value(value) && !vm.is_struct_value(value) && !vm.is_bytes(value) }
         _ => false,
     };
