@@ -153,7 +153,7 @@ pub fn to_binary(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
 
     let input = vm.to_string(val).trim().to_string();
 
-    let mut cleaned = input;
+    let mut cleaned = input.trim_end_matches('=').to_string();
     let padding = cleaned.len() % 4;
     if padding != 0 {
         cleaned.push_str(&"=".repeat(4 - padding));

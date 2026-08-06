@@ -2372,6 +2372,7 @@ impl VM {
         if receiver.is_bool() {
             return match name.as_str() {
                 "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
+                "tojson" => Some("serializejson".to_string()),
                 _ => None,
             };
         }
@@ -2401,6 +2402,7 @@ impl VM {
                 "acos" => Some("acos".to_string()),
                 "atan" => Some("atan".to_string()),
                 "atn" => Some("atan".to_string()),
+                "tojson" => Some("serializejson".to_string()),
                 _ => None,
             };
         }
@@ -2436,8 +2438,9 @@ impl VM {
                     "findnocase" => Some("stringfindnocase".to_string()),
                     "endswith" => Some("stringendswith".to_string()),
                     "startswith" => Some("stringstartswith".to_string()),
-                    "val" => Some("val".to_string()),
-                    "tojson" => Some("serializejson".to_string()),
+                     "val" => Some("val".to_string()),
+                     "todatetime" => Some("parsedatetime".to_string()),
+                     "tojson" => Some("serializejson".to_string()),
                     "fromjson" => Some("deserializejson".to_string()),
                     "rematch" => Some("rematch".to_string()),
                     "rematchnocase" => Some("rematchnocase".to_string()),
@@ -2570,10 +2573,12 @@ impl VM {
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
                      "find" => Some("structfind".to_string()),
                      "append" => Some("structappend".to_string()),
-                    "isempty" => Some("structisempty".to_string()),
-                    "each" => Some("structeach".to_string()),
-                    "tojson" => Some("serializejson".to_string()),
-                    "duplicate" => Some("duplicate".to_string()),
+                     "isempty" => Some("structisempty".to_string()),
+                     "each" => Some("structeach".to_string()),
+                     "tojson" => Some("serializejson".to_string()),
+                     "tomodifiable" => Some("tomodifiable".to_string()),
+                     "tounmodifiable" => Some("tounmodifiable".to_string()),
+                     "duplicate" => Some("duplicate".to_string()),
                     "iscasesensitive" => Some("structiscasesensitive".to_string()),
                     "isordered" => Some("structisordered".to_string()),
                     "equals" => Some("structequals".to_string()),
