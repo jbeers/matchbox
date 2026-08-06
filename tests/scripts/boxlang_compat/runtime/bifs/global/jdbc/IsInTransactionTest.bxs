@@ -1,5 +1,17 @@
 // boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/IsInTransactionTest.java
 
+host = getSystemSetting( "MATCHBOX_TEST_DB_HOST", "localhost" );
+datasourceRegister( "transactionTest", {
+    driver: "postgresql",
+    host: host,
+    port: 5432,
+    database: "matchbox_test",
+    username: "matchbox",
+    password: "matchbox_test",
+    maxConnections: 2
+} );
+queryExecute( "CREATE TABLE IF NOT EXISTS developers ( id INTEGER )", [], { datasource: "transactionTest" } );
+
 // testWithinTransaction
 // MatchBox does not currently parse the BoxLang transaction tag syntax, so
 // use the source-level transaction BIFs to keep this behavior test parseable.
@@ -9,7 +21,7 @@ transactionRollback();
 assert result == true : "testWithinTransaction";
 
 // testNotWithinTransaction
-queryExecute( "SELECT 1 FROM developers" );
+queryExecute( "SELECT 1 FROM developers", [], { datasource: "transactionTest" } );
 result = isWithinTransaction();
 assert result == false : "testNotWithinTransaction";
 
@@ -20,6 +32,6 @@ transactionRollback();
 assert result == true : "testInTransaction";
 
 // testNotInTransaction
-queryExecute( "SELECT 1 FROM developers" );
+queryExecute( "SELECT 1 FROM developers", [], { datasource: "transactionTest" } );
 result = isInTransaction();
 assert result == false : "testNotInTransaction";

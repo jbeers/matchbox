@@ -88,7 +88,7 @@ impl BxNativeObject for BxQuery {
     ) -> Result<BxValue, String> {
         match name.to_lowercase().as_str() {
             "len" | "length" | "size" => Ok(BxValue::new_number(self.record_count as f64)),
-            "columnlist" => {
+            "columnlist" | "getcolumnlist" => {
                 let list: String = self
                     .columns
                     .iter()
@@ -137,6 +137,31 @@ impl BxNativeObject for BxQuery {
                 }
                 Ok(BxValue::new_ptr(struct_id))
             }
+            "getrowasstruct" => {
+                if args.is_empty() {
+                    return Err("getRowAsStruct() requires a row number argument (0-based)".to_string());
+                }
+                let row_idx = args[0].as_number() as usize;
+                if row_idx >= self.record_count {
+                    return Err(format!(
+                        "Row {} out of range (0..{})",
+                        row_idx,
+                        self.record_count.saturating_sub(1)
+                    ));
+                }
+                let struct_id = vm.struct_new();
+                for (col_idx, col) in self.columns.iter().enumerate() {
+                    let value = self
+                        .data
+                        .get(col_idx)
+                        .and_then(|column| column.get(row_idx))
+                        .cloned()
+                        .unwrap_or(SqlValue::Null);
+                    let bx_value = sql_to_bx(vm, &value);
+                    vm.struct_set(struct_id, &col.name, bx_value);
+                }
+                Ok(BxValue::new_ptr(struct_id))
+            }
             "addrow" => {
                 // args[0]: struct of {colName: value, ...}
                 if args.is_empty() {
@@ -162,13 +187,45 @@ impl BxNativeObject for BxQuery {
                 self.record_count = 0;
                 Ok(BxValue::new_ptr(_id)) // return the query itself
             }
-            "columnarray" => {
+            "columnarray" | "getcolumnnames" => {
                 let arr_id = vm.array_new();
                 for col in &self.columns {
                     let s_id = vm.string_new(col.name.clone());
                     vm.array_push(arr_id, BxValue::new_ptr(s_id));
                 }
                 Ok(BxValue::new_ptr(arr_id))
+            }
+            "toarrayofstructs" => {
+                let arr_id = vm.array_new();
+                for row_idx in 0..self.record_count {
+                    let struct_id = vm.struct_new();
+                    for (col_idx, col) in self.columns.iter().enumerate() {
+                        let value = self
+                            .data
+                            .get(col_idx)
+                            .and_then(|column| column.get(row_idx))
+                            .cloned()
+                            .unwrap_or(SqlValue::Null);
+                        let bx_value = sql_to_bx(vm, &value);
+                        vm.struct_set(struct_id, &col.name, bx_value);
+                    }
+                    vm.array_push(arr_id, BxValue::new_ptr(struct_id));
+                }
+                Ok(BxValue::new_ptr(arr_id))
+            }
+            "getcolumnmeta" => {
+                let meta_id = vm.struct_new();
+                for col in &self.columns {
+                    let info_id = vm.struct_new();
+                    let type_name = vm.string_new(col_type_name(&col.col_type).to_string());
+                    vm.struct_set(info_id, "type", BxValue::new_ptr(type_name));
+                    vm.struct_set(info_id, "nullable", BxValue::new_bool(true));
+                    vm.struct_set(info_id, "readOnly", BxValue::new_bool(false));
+                    vm.struct_set(info_id, "decimals", BxValue::new_number(0.0));
+                    vm.struct_set(info_id, "maxLength", BxValue::new_number(0.0));
+                    vm.struct_set(meta_id, &col.name, BxValue::new_ptr(info_id));
+                }
+                Ok(BxValue::new_ptr(meta_id))
             }
             "columncount" => Ok(BxValue::new_number(self.columns.len() as f64)),
             "columnexists" => {
@@ -218,23 +275,29 @@ impl BxNativeObject for BxQuery {
                         "slice() requires at least 1 argument: (offset [, length])".to_string()
                     );
                 }
-                let offset = args[0].as_number() as usize;
-                if offset == 0 || offset > self.record_count {
+                let offset = args[0].as_number() as isize;
+                let mut start_idx = offset - 1;
+                if start_idx < 0 {
+                    start_idx += self.record_count as isize;
+                }
+                if start_idx < 0 || start_idx >= self.record_count as isize {
                     return Err(format!(
                         "slice() offset out of range (1..{})",
                         self.record_count
                     ));
                 }
-                let start_idx = offset - 1;
                 let length = if args.len() > 1 {
-                    args[1].as_number() as usize
+                    args[1].as_number() as isize
                 } else {
                     0
                 };
-                let end_idx = if length > 0 && start_idx + length <= self.record_count {
+                if length < 0 || (length > 0 && start_idx + length > self.record_count as isize) {
+                    return Err("slice() length is outside the query row range".to_string());
+                }
+                let end_idx = if length > 0 {
                     start_idx + length
                 } else {
-                    self.record_count
+                    self.record_count as isize
                 };
 
                 let mut new_query = BxQuery {
@@ -244,10 +307,10 @@ impl BxNativeObject for BxQuery {
                     current_row: 0,
                 };
                 for col_data in &self.data {
-                    let sliced: Vec<SqlValue> = col_data[start_idx..end_idx].to_vec();
+                    let sliced: Vec<SqlValue> = col_data[start_idx as usize..end_idx as usize].to_vec();
                     new_query.data.push(sliced);
                 }
-                new_query.record_count = end_idx - start_idx;
+                new_query.record_count = (end_idx - start_idx) as usize;
 
                 let id = vm.native_object_new(Rc::new(RefCell::new(new_query)));
                 Ok(BxValue::new_ptr(id))
@@ -305,6 +368,12 @@ impl BxNativeObject for BxQuery {
                 } else {
                     vec![SqlValue::Null; self.record_count]
                 };
+                if default_data.len() > self.record_count {
+                    for column in &mut self.data {
+                        column.resize(default_data.len(), SqlValue::Null);
+                    }
+                    self.record_count = default_data.len();
+                }
                 self.data.push(default_data);
                 Ok(BxValue::new_ptr(_id))
             }
@@ -426,10 +495,11 @@ impl BxNativeObject for BxQuery {
                             .to_string(),
                     );
                 }
-                let source_id = args[0].as_gc_id().ok_or_else(|| {
-                    "insertAt() first argument must be a query object".to_string()
-                })?;
-                let position = args[1].as_number() as usize;
+                let position = if args[0].is_number() {
+                    args[0].as_number() as usize
+                } else {
+                    args[1].as_number() as usize
+                };
                 if position == 0 || position > self.record_count + 1 {
                     return Err(format!(
                         "insertAt() position {} out of range (1..{})",
@@ -437,6 +507,22 @@ impl BxNativeObject for BxQuery {
                         self.record_count + 1
                     ));
                 }
+                if args[0].is_number() {
+                    let row_id = args[1]
+                        .as_gc_id()
+                        .filter(|_| vm.is_struct_value(args[1]))
+                        .ok_or_else(|| "insertAt() row must be a struct".to_string())?;
+                    let insert_idx = position - 1;
+                    for (col_idx, col) in self.columns.iter().enumerate() {
+                        let value = bx_to_sql(vm, vm.struct_get(row_id, &col.name));
+                        self.data[col_idx].insert(insert_idx, value);
+                    }
+                    self.record_count += 1;
+                    return Ok(BxValue::new_ptr(_id));
+                }
+                let source_id = args[0].as_gc_id().ok_or_else(|| {
+                    "insertAt() first argument must be a query object".to_string()
+                })?;
                 let source_cols = vm
                     .native_object_query_columns(source_id)
                     .ok_or_else(|| "insertAt() source is not a query object".to_string())?;
@@ -459,6 +545,43 @@ impl BxNativeObject for BxQuery {
                         }
                     }
                     self.record_count += 1;
+                }
+                Ok(BxValue::new_ptr(_id))
+            }
+            "sortcolumn" => {
+                if args.is_empty() {
+                    return Err("sort() requires a column name".to_string());
+                }
+                let col_name = vm.to_string(args[0]);
+                let col_idx = self
+                    .col_index(&col_name)
+                    .ok_or_else(|| format!("Column '{}' not found", col_name))?;
+                let descending = args
+                    .get(1)
+                    .map(|value| vm.to_string(*value).eq_ignore_ascii_case("desc"))
+                    .unwrap_or(false);
+                let numeric = args
+                    .get(2)
+                    .map(|value| vm.to_string(*value).eq_ignore_ascii_case("numeric"))
+                    .unwrap_or(false);
+                let mut order: Vec<usize> = (0..self.record_count).collect();
+                order.sort_by(|left, right| {
+                    let lhs = self.data[col_idx].get(*left).unwrap_or(&SqlValue::Null);
+                    let rhs = self.data[col_idx].get(*right).unwrap_or(&SqlValue::Null);
+                    let ordering = if numeric {
+                        sql_number(lhs)
+                            .partial_cmp(&sql_number(rhs))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    } else {
+                        sql_text(lhs).cmp(&sql_text(rhs))
+                    };
+                    if descending { ordering.reverse() } else { ordering }
+                });
+                for column in &mut self.data {
+                    let old = column.clone();
+                    for (new_index, old_index) in order.iter().enumerate() {
+                        column[new_index] = old[*old_index].clone();
+                    }
                 }
                 Ok(BxValue::new_ptr(_id))
             }
@@ -595,6 +718,27 @@ impl BxNativeObject for BxQuery {
                 .cloned()
                 .unwrap_or(SqlValue::Null),
         )
+    }
+}
+
+fn sql_number(value: &SqlValue) -> f64 {
+    match value {
+        SqlValue::Int(value) => *value as f64,
+        SqlValue::Float(value) => *value,
+        SqlValue::Bool(value) => *value as u8 as f64,
+        SqlValue::Text(value) => value.parse::<f64>().unwrap_or(f64::NAN),
+        SqlValue::Null | SqlValue::Bytes(_) => f64::NAN,
+    }
+}
+
+fn sql_text(value: &SqlValue) -> String {
+    match value {
+        SqlValue::Null => String::new(),
+        SqlValue::Bool(value) => value.to_string(),
+        SqlValue::Int(value) => value.to_string(),
+        SqlValue::Float(value) => value.to_string(),
+        SqlValue::Text(value) => value.clone(),
+        SqlValue::Bytes(value) => String::from_utf8_lossy(value).into_owned(),
     }
 }
 

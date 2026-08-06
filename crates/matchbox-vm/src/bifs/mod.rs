@@ -90,6 +90,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Array BIFs
     bifs.insert("arrayappend".to_string(), array_append as BxNativeFunction);
+    bifs.insert("arraymap".to_string(), array_map as BxNativeFunction);
     bifs.insert("arraylen".to_string(), len as BxNativeFunction);
     bifs.insert("arraynew".to_string(), array_new as BxNativeFunction);
     bifs.insert(
@@ -217,6 +218,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         write_output_bif as BxNativeFunction,
     );
     bifs.insert("echo".to_string(), write_output_bif as BxNativeFunction);
+    bifs.insert(
+        "preservesinglequotes".to_string(),
+        preserve_single_quotes_bif as BxNativeFunction,
+    );
     bifs.insert("duplicate".to_string(), duplicate_bif as BxNativeFunction);
     bifs.insert(
         "createobject".to_string(),
@@ -707,6 +712,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             datasource::datasource_register as BxNativeFunction,
         );
         bifs.insert(
+            "datasourceunregister".to_string(),
+            datasource::datasource_unregister as BxNativeFunction,
+        );
+        bifs.insert(
             "queryexecute".to_string(),
             datasource::query_execute as BxNativeFunction,
         );
@@ -822,6 +831,14 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             "transactionrollback".to_string(),
             datasource::transaction_rollback as BxNativeFunction,
         );
+        bifs.insert(
+            "iswithintransaction".to_string(),
+            datasource::is_within_transaction as BxNativeFunction,
+        );
+        bifs.insert(
+            "isintransaction".to_string(),
+            datasource::is_in_transaction as BxNativeFunction,
+        );
     }
 
     // Extra module registrations
@@ -837,6 +854,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 }
 
 // --- Implementation ---
+
+fn preserve_single_quotes_bif(
+    _vm: &mut dyn BxVM,
+    args: &[BxValue],
+) -> Result<BxValue, String> {
+    args.first()
+        .copied()
+        .ok_or_else(|| "preserveSingleQuotes() expects a string argument".to_string())
+}
 
 #[derive(Debug)]
 struct StringBuilderObject {
@@ -2940,6 +2966,29 @@ fn array_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     } else {
         Err("arrayAppend() expects an array as the first argument".to_string())
     }
+}
+
+fn array_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("arrayMap() expects an array and callback".to_string());
+    }
+    let array_id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "arrayMap() expects an array as the first argument".to_string())?;
+    let chunk = vm
+        .current_chunk()
+        .ok_or_else(|| "arrayMap() requires an active execution chunk".to_string())?;
+    let result_id = vm.array_new();
+    for index in 0..vm.array_len(array_id) {
+        let value = vm.array_get(array_id, index);
+        let mapped = vm.call_function_by_value(
+            &args[1],
+            vec![value, BxValue::new_number((index + 1) as f64)],
+            chunk.clone(),
+        )?;
+        vm.array_push(result_id, mapped);
+    }
+    Ok(BxValue::new_ptr(result_id))
 }
 
 fn array_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

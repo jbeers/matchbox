@@ -1,6 +1,6 @@
 use r2d2::Pool;
 use r2d2_postgres::{postgres::NoTls, PostgresConnectionManager};
-use postgres::types::ToSql;
+use postgres::types::{ToSql, Type};
 
 use crate::datasource::traits::{
     DbDriver, DatasourceConfig, QueryColumn, QueryColumnType, QueryParam, QueryResult, SqlValue,
@@ -39,23 +39,37 @@ impl DbDriver for PostgresDriver {
         // Convert JDBC-style ? placeholders to PostgreSQL $1, $2, ...
         let converted_sql = convert_placeholders(sql);
 
-        // Build boxed ToSql params
+        let statement = conn
+            .prepare(converted_sql.as_str())
+            .map_err(|e| format!("Query failed: {}", e))?;
+
+        // Use PostgreSQL's inferred type for each placeholder. This matters for
+        // reused named parameters appearing in columns with different types.
         let pg_params: Vec<Box<dyn ToSql + Sync>> = params
             .iter()
-            .map(|p| sql_value_to_pg(&p.value))
+            .enumerate()
+            .map(|(index, param)| {
+                let parameter_type = statement.params().get(index).unwrap_or(&Type::UNKNOWN);
+                sql_value_to_pg(&param.value, parameter_type)
+            })
             .collect();
         let pg_refs: Vec<&(dyn ToSql + Sync)> = pg_params.iter().map(|p| p.as_ref()).collect();
 
-        let rows = conn
-            .query(converted_sql.as_str(), pg_refs.as_slice())
-            .map_err(|e| format!("Query failed: {}", e))?;
-
-        if rows.is_empty() {
-            // Could be a non-SELECT statement; return empty result
-            return Ok(QueryResult { columns: vec![], rows: vec![] });
+        if statement.columns().is_empty() {
+            let affected = conn
+                .execute(&statement, pg_refs.as_slice())
+                .map_err(|e| format!("Query failed: {}", e))?;
+            return Ok(QueryResult {
+                columns: vec![],
+                rows: vec![vec![]; affected as usize],
+            });
         }
 
-        let columns: Vec<QueryColumn> = rows[0]
+        let rows = conn
+            .query(&statement, pg_refs.as_slice())
+            .map_err(|e| format!("Query failed: {}", e))?;
+
+        let columns: Vec<QueryColumn> = statement
             .columns()
             .iter()
             .map(|col| QueryColumn {
@@ -63,6 +77,10 @@ impl DbDriver for PostgresDriver {
                 col_type: pg_type_to_col_type(col.type_()),
             })
             .collect();
+
+        if rows.is_empty() {
+            return Ok(QueryResult { columns, rows: vec![] });
+        }
 
         let result_rows: Vec<Vec<SqlValue>> = rows
             .iter()
@@ -104,14 +122,73 @@ fn convert_placeholders(sql: &str) -> String {
     result
 }
 
-fn sql_value_to_pg(v: &SqlValue) -> Box<dyn ToSql + Sync> {
-    match v {
-        SqlValue::Null => Box::new(Option::<String>::None),
-        SqlValue::Bool(b) => Box::new(*b),
-        SqlValue::Int(i) => Box::new(*i),
-        SqlValue::Float(f) => Box::new(*f),
-        SqlValue::Text(s) => Box::new(s.clone()),
-        SqlValue::Bytes(b) => Box::new(b.clone()),
+fn sql_value_to_pg(v: &SqlValue, parameter_type: &Type) -> Box<dyn ToSql + Sync> {
+    if matches!(v, SqlValue::Null) {
+        return Box::new(Option::<String>::None);
+    }
+    match parameter_type {
+        &Type::BOOL => Box::new(sql_value_as_bool(v)),
+        &Type::INT2 => Box::new(sql_value_as_int(v) as i16),
+        &Type::INT4 => Box::new(sql_value_as_int(v) as i32),
+        &Type::INT8 => Box::new(sql_value_as_int(v)),
+        &Type::FLOAT4 => Box::new(sql_value_as_float(v) as f32),
+        &Type::FLOAT8 | &Type::NUMERIC => Box::new(sql_value_as_float(v)),
+        &Type::VARCHAR | &Type::CHAR | &Type::BPCHAR | &Type::TEXT | &Type::NAME => {
+            Box::new(sql_value_as_text(v))
+        }
+        &Type::BYTEA => match v {
+            SqlValue::Bytes(bytes) => Box::new(bytes.clone()),
+            _ => Box::new(sql_value_as_text(v)),
+        },
+        _ => match v {
+            SqlValue::Null => Box::new(Option::<String>::None),
+            SqlValue::Bool(value) => Box::new(*value),
+            SqlValue::Int(value) => Box::new(*value as i32),
+            SqlValue::Float(value) => Box::new(*value),
+            SqlValue::Text(value) => Box::new(value.clone()),
+            SqlValue::Bytes(value) => Box::new(value.clone()),
+        },
+    }
+}
+
+fn sql_value_as_text(value: &SqlValue) -> String {
+    match value {
+        SqlValue::Null => String::new(),
+        SqlValue::Bool(value) => value.to_string(),
+        SqlValue::Int(value) => value.to_string(),
+        SqlValue::Float(value) => value.to_string(),
+        SqlValue::Text(value) => value.clone(),
+        SqlValue::Bytes(value) => String::from_utf8_lossy(value).into_owned(),
+    }
+}
+
+fn sql_value_as_int(value: &SqlValue) -> i64 {
+    match value {
+        SqlValue::Int(value) => *value,
+        SqlValue::Float(value) => *value as i64,
+        SqlValue::Text(value) => value.parse::<i64>().unwrap_or_default(),
+        SqlValue::Bool(value) => *value as i64,
+        SqlValue::Null | SqlValue::Bytes(_) => 0,
+    }
+}
+
+fn sql_value_as_float(value: &SqlValue) -> f64 {
+    match value {
+        SqlValue::Float(value) => *value,
+        SqlValue::Int(value) => *value as f64,
+        SqlValue::Text(value) => value.parse::<f64>().unwrap_or_default(),
+        SqlValue::Bool(value) => *value as u8 as f64,
+        SqlValue::Null | SqlValue::Bytes(_) => 0.0,
+    }
+}
+
+fn sql_value_as_bool(value: &SqlValue) -> bool {
+    match value {
+        SqlValue::Bool(value) => *value,
+        SqlValue::Int(value) => *value != 0,
+        SqlValue::Float(value) => *value != 0.0,
+        SqlValue::Text(value) => matches!(value.to_ascii_lowercase().as_str(), "true" | "1" | "yes"),
+        SqlValue::Null | SqlValue::Bytes(_) => false,
     }
 }
 

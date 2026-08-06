@@ -4,5 +4,6 @@ queryAddRow( q, { a: 1 } );
 queryAddRow( q, { a: 2 } );
 queryAddRow( q, { a: 3 } );
 r = querySlice( q, 2, 2 );
-assert queryRecordCount( r ) == 1 : "testSlice count";
+assert queryRecordCount( r ) == 2 : "testSlice count";
 assert queryGetCell( r, "a", 1 ) == 2 : "testSlice value";
+assert queryGetCell( r, "a", 2 ) == 3 : "testSlice second value";

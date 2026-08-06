@@ -1,6 +1,10 @@
 use crate::types::{BxVM, BxValue, BxNativeFunction};
 use super::{join_list, parse_list_items};
+use crate::datasource::traits::QueryColumn;
+use crate::datasource::BxQuery;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
     bifs.insert("gettoken".to_string(), get_token as BxNativeFunction);
@@ -487,27 +491,120 @@ pub fn string_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 
 #[cfg(feature = "bif-datasource")]
 pub fn query_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryEach() not yet implemented".to_string())
+    if args.len() < 2 { return Err("queryEach() expects 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        query_callback(
+            vm,
+            &args[1],
+            vec![row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![row],
+            chunk.clone(),
+        )?;
+    }
+    Ok(BxValue::new_null())
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryEvery() not yet implemented".to_string())
+    if args.len() < 2 { return Err("queryEvery() expects 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        let result = query_callback(
+            vm,
+            &args[1],
+            vec![row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![row],
+            chunk.clone(),
+        )?;
+        if !result.as_bool() { return Ok(BxValue::new_bool(false)); }
+    }
+    Ok(BxValue::new_bool(true))
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_filter(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryFilter() not yet implemented".to_string())
+    if args.len() < 2 { return Err("queryFilter() expects 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let columns = query_columns(vm, query_id)?;
+    let result_id = new_query(vm, &columns);
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        let keep = query_callback(
+            vm,
+            &args[1],
+            vec![row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![row],
+            chunk.clone(),
+        )?;
+        if keep.as_bool() {
+            vm.native_object_call_method(result_id, "setrow", &[row])?;
+        }
+    }
+    Ok(BxValue::new_ptr(result_id))
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryMap() not yet implemented".to_string())
+    if args.len() < 2 { return Err("queryMap() expects 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let columns = query_columns(vm, query_id)?;
+    let result_id = new_query(vm, &columns);
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        let mapped = query_callback(
+            vm,
+            &args[1],
+            vec![row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![row],
+            chunk.clone(),
+        )?;
+        let mapped_row = vm.struct_new();
+        if let Some(mapped_id) = mapped.as_gc_id().filter(|_| vm.is_struct_value(mapped)) {
+            for column in &columns {
+                vm.struct_set(mapped_row, &column.name, vm.struct_get(mapped_id, &column.name));
+            }
+        } else if let Some(first) = columns.first() {
+            vm.struct_set(mapped_row, &first.name, mapped);
+        }
+        vm.native_object_call_method(result_id, "setrow", &[BxValue::new_ptr(mapped_row)])?;
+    }
+    Ok(BxValue::new_ptr(result_id))
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_none(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryNone() not yet implemented".to_string())
+    Ok(BxValue::new_bool(!query_some(vm, args)?.as_bool()))
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_reduce(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("queryReduce() not yet implemented".to_string())
+    if args.len() < 3 { return Err("queryReduce() expects 3 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    let mut accumulator = args[2];
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        accumulator = query_callback(
+            vm,
+            &args[1],
+            vec![accumulator, row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![accumulator, row],
+            chunk.clone(),
+        )?;
+    }
+    Ok(accumulator)
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_register_function(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -515,9 +612,78 @@ pub fn query_register_function(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<Bx
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_some(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("querySome() not yet implemented".to_string())
+    if args.len() < 2 { return Err("querySome() expects 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    let row_count = query_row_count(vm, query_id)?;
+    let query = BxValue::new_ptr(query_id);
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for row_index in 0..row_count {
+        let row = query_row(vm, query_id, row_index)?;
+        let result = query_callback(
+            vm,
+            &args[1],
+            vec![row, BxValue::new_number((row_index + 1) as f64), query],
+            vec![row],
+            chunk.clone(),
+        )?;
+        if result.as_bool() { return Ok(BxValue::new_bool(true)); }
+    }
+    Ok(BxValue::new_bool(false))
 }
 #[cfg(feature = "bif-datasource")]
 pub fn query_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    Err("querySort() not yet implemented".to_string())
+    if args.len() < 2 { return Err("querySort() expects at least 2 arguments".to_string()); }
+    let query_id = query_id(args)?;
+    vm.native_object_call_method(query_id, "sortcolumn", &args[1..])
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_id(args: &[BxValue]) -> Result<usize, String> {
+    args[0]
+        .as_gc_id()
+        .ok_or_else(|| "first argument must be a query object".to_string())
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_row_count(vm: &mut dyn BxVM, query_id: usize) -> Result<usize, String> {
+    Ok(vm
+        .native_object_call_method(query_id, "recordcount", &[])?
+        .as_number() as usize)
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_row(vm: &mut dyn BxVM, query_id: usize, row_index: usize) -> Result<BxValue, String> {
+    vm.native_object_call_method(
+        query_id,
+        "getrow",
+        &[BxValue::new_number((row_index + 1) as f64)],
+    )
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_columns(vm: &mut dyn BxVM, query_id: usize) -> Result<Vec<QueryColumn>, String> {
+    vm.native_object_query_columns(query_id)
+        .ok_or_else(|| "first argument must be a query object".to_string())
+}
+
+#[cfg(feature = "bif-datasource")]
+fn new_query(vm: &mut dyn BxVM, columns: &[QueryColumn]) -> usize {
+    vm.native_object_new(Rc::new(RefCell::new(BxQuery::new(columns.to_vec()))))
+}
+
+#[cfg(feature = "bif-datasource")]
+fn query_callback(
+    vm: &mut dyn BxVM,
+    callback: &BxValue,
+    full_args: Vec<BxValue>,
+    minimal_args: Vec<BxValue>,
+    chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+) -> Result<BxValue, String> {
+    match vm.call_function_by_value(callback, full_args, chunk.clone()) {
+        Ok(value) => Ok(value),
+        Err(error) if error.contains("Expected") && error.contains("arguments") => {
+            vm.call_function_by_value(callback, minimal_args, chunk)
+        }
+        Err(error) => Err(error),
+    }
 }

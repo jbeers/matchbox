@@ -118,6 +118,16 @@ pub trait BxVM {
     fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>, priority: u8, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> BxValue;
     fn spawn_by_value(&mut self, func: &BxValue, args: Vec<BxValue>, priority: u8, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> Result<BxValue, String>;
     fn call_function_by_value(&mut self, func: &BxValue, args: Vec<BxValue>, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> Result<BxValue, String>;
+    fn call_method_by_value(
+        &mut self,
+        receiver: BxValue,
+        name: &str,
+        args: Vec<BxValue>,
+        _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    ) -> Result<BxValue, String> {
+        let _ = (receiver, name, args);
+        Err("Value does not support method invocation".to_string())
+    }
     fn yield_fiber(&mut self);
     fn sleep(&mut self, ms: u64);
     fn get_root_shape(&self) -> u32;

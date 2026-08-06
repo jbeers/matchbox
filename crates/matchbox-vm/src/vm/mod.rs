@@ -595,6 +595,17 @@ impl BxVM for VM {
             .map_err(|e| e.to_string())
     }
 
+    fn call_method_by_value(
+        &mut self,
+        receiver: BxValue,
+        name: &str,
+        args: Vec<BxValue>,
+        _chunk: Rc<RefCell<crate::vm::chunk::Chunk>>,
+    ) -> Result<BxValue, String> {
+        self.call_method_value(receiver, name, args)
+            .map_err(|e| e.to_string())
+    }
+
     fn yield_fiber(&mut self) {
         if let Some(idx) = self.current_fiber_idx {
             self.fibers[idx].yield_requested = true;
@@ -1927,6 +1938,24 @@ impl VM {
                 }
                 (GcObject::DateTime(a), GcObject::DateTime(b)) => return a == b,
                 (GcObject::Bytes(a), GcObject::Bytes(b)) => return a == b,
+                (GcObject::Array(a), GcObject::Array(b)) => {
+                    return a.len() == b.len()
+                        && a.iter().zip(b).all(|(left, right)| self.is_equal(*left, *right));
+                }
+                (GcObject::Struct(_), GcObject::Struct(_)) => {
+                    let keys_a = self.struct_key_array(id_a);
+                    let keys_b = self.struct_key_array(id_b);
+                    if keys_a.len() != keys_b.len() {
+                        return false;
+                    }
+                    return keys_a.iter().all(|key| {
+                        self.struct_key_exists(id_b, key)
+                            && self.is_equal(
+                                self.struct_get(id_a, key),
+                                self.struct_get(id_b, key),
+                            )
+                    });
+                }
                 _ => {}
             }
         }
@@ -5086,7 +5115,21 @@ impl VM {
                             GcObject::NativeObject(obj) => {
                                 let name =
                                     self.interner.resolve(name_id).to_string().to_lowercase();
-                                let val = obj.borrow().get_property(&name);
+                                let is_query = obj.borrow().query_columns().is_some();
+                                let property = obj.borrow().get_property(&name);
+                                let val = if !property.is_null() {
+                                    property
+                                } else if is_query {
+                                    let column_name = self.string_new(name.clone());
+                                    self.native_object_call_method(
+                                        id,
+                                        "columndata",
+                                        &[BxValue::new_ptr(column_name)],
+                                    )
+                                    .unwrap_or_else(|_| BxValue::new_null())
+                                } else {
+                                    obj.borrow().get_property(&name)
+                                };
                                 self.fibers[fiber_idx].stack.push(val);
                             }
                             _ => {

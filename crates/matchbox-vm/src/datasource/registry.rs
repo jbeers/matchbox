@@ -18,6 +18,10 @@ pub fn register(name: &str, driver: Arc<dyn DbDriver>) {
     registry().lock().unwrap().insert(name.to_string(), driver);
 }
 
+pub fn unregister(name: &str) {
+    registry().lock().unwrap().remove(name);
+}
+
 pub fn get(name: &str) -> Option<Arc<dyn DbDriver>> {
     registry().lock().unwrap().get(name).cloned()
 }

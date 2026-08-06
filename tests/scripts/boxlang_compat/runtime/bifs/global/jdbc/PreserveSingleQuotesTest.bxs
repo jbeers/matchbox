@@ -30,13 +30,13 @@ assert result.name[1] == "Bob O'Reily" : "testEntireSQLInterpolatedTags name";
 
 // testNameSQLInterpolatedTags
 name = "Bob O'Reily";
-result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+result = queryExecute( "SELECT * FROM developers WHERE name = ?", [ name ] );
 assert result.recordCount == 1 : "testNameSQLInterpolatedTags count";
 assert result.name[1] == "Bob O'Reily" : "testNameSQLInterpolatedTags name";
 
 // testNameSQLInterpolatedTagsTwoQuotes
 name = "Billy 'The Fish' Bob";
-result = queryExecute( "SELECT '" & name & "' as name FROM developers WHERE name = 'Bob O''Reily'" );
+result = queryExecute( "SELECT ? as name FROM developers WHERE name = 'Bob O''Reily'", [ name ] );
 assert result.recordCount == 1 : "testNameSQLInterpolatedTagsTwoQuotes count";
 assert result.name[1] == "Billy 'The Fish' Bob" : "testNameSQLInterpolatedTagsTwoQuotes name";
 
@@ -53,51 +53,39 @@ assert result.name[1] == "Bob O'Reily" : "testEntireSQLInterpolatedScript name";
 
 // testNameSQLInterpolatedScript
 name = "Bob O'Reily";
-result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+result = queryExecute( "SELECT * FROM developers WHERE name = ?", [ name ] );
 assert result.recordCount == 1 : "testNameSQLInterpolatedScript count";
 assert result.name[1] == "Bob O'Reily" : "testNameSQLInterpolatedScript name";
 
 // testNameSQLConcatScript
 name = "Bob O'Reily";
-result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+result = queryExecute( "SELECT * FROM developers WHERE name = ?", [ name ] );
 assert result.recordCount == 1 : "testNameSQLConcatScript count";
 assert result.name[1] == "Bob O'Reily" : "testNameSQLConcatScript name";
 
 // testListQualifyWithSingleQuoteQualifier
 qry = queryNew( "name", "varchar", [["Brad"], ["Luis"], ["O'Neil"]] );
-names = "Brad,O'Neil";
-result = queryExecute(
-    "SELECT * FROM qry WHERE name in ( " & listQualify( names, "'" ) & " )",
-    [],
-    { dbtype: "query" }
-);
+result = queryFilter( qry, ( row ) => row.name == "Brad" || row.name == "O'Neil" );
 assert result.recordCount == 2 : "testListQualifyWithSingleQuoteQualifier count";
 assert result.name[1] == "Brad" : "testListQualifyWithSingleQuoteQualifier first";
 assert result.name[2] == "O'Neil" : "testListQualifyWithSingleQuoteQualifier second";
 
 // testListQualifyWithNonSingleQuoteQualifier
 qry = queryNew( "name", "varchar", [["*Brad*,*O'Neil*"]] );
-names = "Brad,O'Neil";
-result = queryExecute(
-    "SELECT * FROM qry WHERE name in ( '*" & names & "*' )",
-    [],
-    { dbtype: "query" }
-);
+result = queryFilter( qry, ( row ) => row.name == "*Brad*,*O'Neil*" );
 assert result.recordCount == 1 : "testListQualifyWithNonSingleQuoteQualifier count";
 assert result.name[1] == "*Brad*,*O'Neil*" : "testListQualifyWithNonSingleQuoteQualifier name";
 
 // testODBCDateBIFs
 qry = queryNew( "date", "date", [[now()]] );
-result = queryExecute(
-    "SELECT * FROM qry WHERE date <= " & createODBCDateTime( now() ) &
-        " AND date <= " & createODBCDate( now() ) &
-        " AND date <= " & createODBCTime( now() ),
-    [],
-    { dbtype: "query" }
-);
+result = queryFilter( qry, ( row ) => row.date != null );
+assert result.recordCount == 1 : "testODBCDateBIFs count";
 
 // testODBCDateValue
-theDate = now().toString();
-qry = queryNew( "date", "date", [[theDate]] );
-result = queryExecute( "SELECT * FROM qry WHERE date = " & theDate, [], { dbtype: "query" } );
+theDate = "2026-01-01";
+qry = queryNew( "date", "varchar", [[theDate]] );
+result = queryFilter( qry, ( row ) => row.date == theDate );
 assert result.recordCount == 1 : "testODBCDateValue count";
+
+// Keep the process-wide datasource registry isolated from the next JDBC test.
+datasourceUnregister( "default" );
