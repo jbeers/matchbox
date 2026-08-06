@@ -416,6 +416,14 @@ pub struct FunctionModifiers {
     pub is_final: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FunctionKind {
+    #[default]
+    Udf,
+    Closure,
+    Lambda,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ClassModifiers {
     pub is_abstract: bool,
@@ -425,6 +433,7 @@ pub struct ClassModifiers {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BxCompiledFunction {
     pub name: String,
+    pub kind: FunctionKind,
     pub arity: u32,     // Total parameters
     pub min_arity: u32, // Required parameters
     pub params: Vec<String>, // Parameter names

@@ -804,6 +804,15 @@ impl BxVM for VM {
                     )
                 })
                 .unwrap_or(false),
+            "udf" => val.as_gc_id().is_some_and(|id| {
+                matches!(self.heap.get(id), GcObject::CompiledFunction(f) if f.kind == crate::types::FunctionKind::Udf)
+            }),
+            "closure" => val.as_gc_id().is_some_and(|id| {
+                matches!(self.heap.get(id), GcObject::CompiledFunction(f) if f.kind == crate::types::FunctionKind::Closure)
+            }),
+            "lambda" => val.as_gc_id().is_some_and(|id| {
+                matches!(self.heap.get(id), GcObject::CompiledFunction(f) if f.kind == crate::types::FunctionKind::Lambda)
+            }),
             "class" | "component" => val
                 .as_gc_id()
                 .map(|id| {
@@ -1425,6 +1434,30 @@ impl BxVM for VM {
     }
 
     fn resolve_variable_path(&self, path: &str) -> Option<BxValue> {
+        if let Some(open) = path.find('[') {
+            let close = path.rfind(']')?;
+            if close != path.len() - 1 || open == 0 {
+                return None;
+            }
+            let base = self.resolve_variable_path(path[..open].trim())?;
+            let key_expr = path[open + 1..close].trim();
+            if key_expr.is_empty() {
+                return None;
+            }
+            let key = if (key_expr.starts_with('"') && key_expr.ends_with('"'))
+                || (key_expr.starts_with('\'') && key_expr.ends_with('\''))
+            {
+                key_expr[1..key_expr.len() - 1].to_string()
+            } else {
+                let key_value = self
+                    .get_global(key_expr)
+                    .or_else(|| self.resolve_variable_path(key_expr))?;
+                self.to_string(key_value)
+            };
+            let base_id = base.as_gc_id()?;
+            let value = self.struct_get(base_id, &key);
+            return (!value.is_null()).then_some(value);
+        }
         let parts: Vec<&str> = path.split('.').collect();
         let first = parts.first()?.to_lowercase();
         let mut value = self
@@ -1691,6 +1724,7 @@ impl VM {
         let chunk_for_func = chunk.clone();
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
+            kind: crate::types::FunctionKind::Udf,
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
@@ -2655,6 +2689,7 @@ impl VM {
     ) -> Result<BxValue> {
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
+            kind: crate::types::FunctionKind::Udf,
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
@@ -2703,6 +2738,7 @@ impl VM {
     ) -> Result<BxValue> {
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
+            kind: crate::types::FunctionKind::Udf,
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
@@ -2846,6 +2882,7 @@ impl VM {
         let chunk_rc = Rc::new(RefCell::new(chunk));
         let function = Rc::new(BxCompiledFunction {
             name: "script".to_string(),
+            kind: crate::types::FunctionKind::Udf,
             arity: 0,
             min_arity: 0,
             params: Vec::new(),
@@ -4839,9 +4876,9 @@ impl VM {
                     let base_val = self.fibers[fiber_idx].stack.pop().unwrap();
 
                     if let Some(id) = base_val.as_gc_id() {
+                        let index_string = self.to_string(index_val);
                         let key_id = if !index_val.is_number() && !index_val.is_int() {
-                            let key_str = self.to_string(index_val);
-                            Some(self.interner.intern(&key_str))
+                            Some(self.interner.intern(&index_string))
                         } else {
                             None
                         };
@@ -4927,6 +4964,10 @@ impl VM {
                                     inst.shape_id = self.shapes.transition(inst.shape_id, key_id);
                                     inst.properties.push(val);
                                 }
+                                self.fibers[fiber_idx].stack.push(val);
+                            }
+                            GcObject::NativeObject(object) => {
+                                object.borrow_mut().set_property(&index_string, val);
                                 self.fibers[fiber_idx].stack.push(val);
                             }
                             _ => {

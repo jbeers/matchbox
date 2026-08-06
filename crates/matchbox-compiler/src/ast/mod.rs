@@ -248,6 +248,7 @@ pub enum Literal {
     Function {
         params: Vec<FunctionParam>,
         body: FunctionBody,
+        is_lambda: bool,
     },
 }
 

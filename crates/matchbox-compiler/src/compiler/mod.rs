@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 use matchbox_vm::Chunk;
 use matchbox_vm::types::{
     BxClass, BxCompiledFunction, BxInterface, ClassModifiers as VmClassModifiers, Constant,
-    FunctionModifiers as VmFunctionModifiers, box_string::BoxString,
+    FunctionKind, FunctionModifiers as VmFunctionModifiers, box_string::BoxString,
 };
 use matchbox_vm::vm::opcode::op;
 use std::collections::{HashMap, HashSet};
@@ -256,6 +256,7 @@ impl Compiler {
                                     &params,
                                     &body,
                                     modifiers.clone(),
+                                    FunctionKind::Udf,
                                 )?;
                                 methods.insert(func_name.to_lowercase(), func);
                             }
@@ -285,6 +286,7 @@ impl Compiler {
 
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, getter_name),
+                                kind: FunctionKind::Udf,
                                 arity: 0,
                                 min_arity: 0,
                                 params: Vec::new(),
@@ -308,6 +310,7 @@ impl Compiler {
 
                             let func = BxCompiledFunction {
                                 name: format!("{}.{}", name, setter_name),
+                                kind: FunctionKind::Udf,
                                 arity: 1,
                                 min_arity: 1,
                                 params: vec!["val".to_string()],
@@ -364,6 +367,7 @@ impl Compiler {
 
                 let constructor = BxCompiledFunction {
                     name: format!("{}.constructor", name),
+                    kind: FunctionKind::Udf,
                     arity: 0,
                     min_arity: 0,
                     params: Vec::new(),
@@ -424,6 +428,7 @@ impl Compiler {
                                 params,
                                 body,
                                 AstFunctionModifiers::default(),
+                                FunctionKind::Udf,
                             )?;
                             Some(func)
                         };
@@ -1273,7 +1278,13 @@ impl Compiler {
                     // Abstract function — skip compilation (no body to emit)
                     return Ok(());
                 }
-                let func = self.compile_function(&name, &params, &body, modifiers.clone())?;
+                let func = self.compile_function(
+                    &name,
+                    &params,
+                    &body,
+                    modifiers.clone(),
+                    FunctionKind::Udf,
+                )?;
                 let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                 if self.is_repl && is_last {
                     self.chunk.emit1(op::CONSTANT, func_idx, stmt.line as u32);
@@ -1664,13 +1675,18 @@ impl Compiler {
                     }
                     Ok(())
                 }
-                Literal::Function { params, body } => {
+                Literal::Function { params, body, is_lambda } => {
                     let anon_name = format!("anonymous@{}@{}", expr.line, self.chunk.code.len());
                     let func = self.compile_function(
                         &anon_name,
                         &params,
                         &body,
                         AstFunctionModifiers::default(),
+                        if *is_lambda {
+                            FunctionKind::Lambda
+                        } else {
+                            FunctionKind::Closure
+                        },
                     )?;
                     let func_idx = self.chunk.add_constant(Constant::CompiledFunction(func));
                     self.chunk.emit1(op::CONSTANT, func_idx, expr.line);
@@ -2381,6 +2397,7 @@ impl Compiler {
         params: &[crate::ast::FunctionParam],
         body: &crate::ast::FunctionBody,
         modifiers: AstFunctionModifiers,
+        kind: FunctionKind,
     ) -> Result<BxCompiledFunction> {
         let mut sub_compiler = Compiler::with_chunk(self.chunk.new_sub_chunk());
         // Source text lives only in the root chunk to avoid N copies per file.
@@ -2499,6 +2516,7 @@ impl Compiler {
 
         Ok(BxCompiledFunction {
             name: name.to_string(),
+            kind,
             arity: (params.len() + 1) as u32, // +1 for the implicit `arguments` local
             min_arity,
             params: params.iter().map(|p| p.name.to_lowercase()).collect(),

@@ -1558,6 +1558,7 @@ impl<'a> Parser<'a> {
                 }
                 // Check for lambda: identifier => expr
                 if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                    let is_lambda = self.peek_is(TokenKind::MinusGreater);
                     let _ = self.advance_lexeme();
                     let body = self.parse_lambda_body()?;
                     return Ok(Expression::new(
@@ -1566,6 +1567,7 @@ impl<'a> Parser<'a> {
                                 name, type_name: None, required: false, default_value: None,
                             }],
                             body,
+                            is_lambda,
                         }),
                         line,
                     ));
@@ -1588,10 +1590,11 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     // () => or () ->
                     if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                        let is_lambda = self.peek_is(TokenKind::MinusGreater);
                         let _ = self.advance_lexeme();
                         let body = self.parse_lambda_body()?;
                         return Ok(Expression::new(
-                            ExpressionKind::Literal(Literal::Function { params: vec![], body }),
+                            ExpressionKind::Literal(Literal::Function { params: vec![], body, is_lambda }),
                             line,
                         ));
                     }
@@ -1601,10 +1604,11 @@ impl<'a> Parser<'a> {
                 if self.is_lambda_params() {
                     let params = self.parse_params()?;
                     self.expect(TokenKind::RightParen)?;
+                    let is_lambda = self.peek_is(TokenKind::MinusGreater);
                     let _ = self.advance_lexeme(); // => or ->
                     let body = self.parse_lambda_body()?;
                     return Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Function { params, body }),
+                        ExpressionKind::Literal(Literal::Function { params, body, is_lambda }),
                         line,
                     ));
                 }
@@ -1613,6 +1617,7 @@ impl<'a> Parser<'a> {
                 self.expect(TokenKind::RightParen)?;
                 // Check for lambda: (identifier) => ...
                 if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
+                    let is_lambda = self.peek_is(TokenKind::MinusGreater);
                     let _ = self.advance_lexeme();
                     let body = self.parse_lambda_body()?;
                     let params = match &expr.kind {
@@ -1626,7 +1631,7 @@ impl<'a> Parser<'a> {
                         }
                     };
                     return Ok(Expression::new(
-                        ExpressionKind::Literal(Literal::Function { params, body }),
+                        ExpressionKind::Literal(Literal::Function { params, body, is_lambda }),
                         line,
                     ));
                 }
@@ -1643,6 +1648,7 @@ impl<'a> Parser<'a> {
                     ExpressionKind::Literal(Literal::Function {
                         params,
                         body: FunctionBody::Block(body_stmts),
+                        is_lambda: false,
                     }),
                     line,
                 ))

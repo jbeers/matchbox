@@ -13,7 +13,21 @@ fn is_custom_function_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
     if args.is_empty() {
         return Ok(BxValue::new_bool(false));
     }
-    Ok(BxValue::new_bool(vm.value_matches_type_name(args[0], "function")))
+    if args.len() == 1 {
+        return Ok(BxValue::new_bool(
+            vm.value_matches_type_name(args[0], "udf")
+                || vm.value_matches_type_name(args[0], "closure")
+                || vm.value_matches_type_name(args[0], "lambda"),
+        ));
+    }
+    let type_name = vm.to_string(args[1]).trim().to_ascii_lowercase();
+    if !matches!(type_name.as_str(), "udf" | "closure" | "lambda") {
+        return Err(format!(
+            "Invalid type [{}], must be one of [UDF, CLOSURE, LAMBDA]",
+            vm.to_string(args[1])
+        ));
+    }
+    Ok(BxValue::new_bool(vm.value_matches_type_name(args[0], &type_name)))
 }
 
 fn is_date_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -30,8 +44,21 @@ fn is_debug_mode_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, S
     Ok(BxValue::new_bool(false))
 }
 
-fn is_defined_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Ok(BxValue::new_bool(false))
+fn is_defined_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let Some(path) = args.first().map(|value| vm.to_string(*value)) else {
+        return Ok(BxValue::new_bool(false));
+    };
+    if path.is_empty() || path.contains('(') || path.contains(')') || path.contains('=') {
+        return Ok(BxValue::new_bool(false));
+    }
+    if path.eq_ignore_ascii_case("local") || path.to_ascii_lowercase().starts_with("local.") {
+        return Ok(BxValue::new_bool(false));
+    }
+    let path = path
+        .strip_prefix("variables.")
+        .or_else(|| path.strip_prefix("VARIABLES."))
+        .unwrap_or(&path);
+    Ok(BxValue::new_bool(vm.resolve_variable_path(path).is_some()))
 }
 
 fn is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

@@ -472,6 +472,7 @@ mod tests {
             implements: Vec::new(),
             constructor: BxCompiledFunction {
                 name: "init".to_string(),
+                kind: crate::types::FunctionKind::Udf,
                 arity: 0,
                 min_arity: 0,
                 params: Vec::new(),
