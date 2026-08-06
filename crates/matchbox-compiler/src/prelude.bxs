@@ -39,20 +39,30 @@ function max(n1, n2) {
 /**
  * Maps an array to a new array using a callback function.
  */
-function arrayMap(array, callback) {
-    var result = [];
-    for (item in array) {
-        arrayAppend(result, callback(item));
-    }
-    return result;
+function arrayMap(array, callback, parallel = false, maxThreads = 0, virtual = false) {
+    return _arrayMapWithIndex(array, callback);
 }
 
 /**
  * Iterates over an array and calls a callback for each item.
  */
-function arrayEach(array, callback) {
-    for (item in array) {
-        callback(item);
+function arrayEach(array, callback, parallel = false, maxThreads = 0, virtual = false) {
+    _arrayEachWithIndex(array, callback);
+}
+
+function _arrayMapWithIndex(array, callback) {
+    var result = [];
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        arrayAppend(result, callback(array[i], i));
+    }
+    return result;
+}
+
+function _arrayEachWithIndex(array, callback) {
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        callback(array[i], i);
     }
 }
 
@@ -113,12 +123,14 @@ function arrayReverse(array) {
  */
 function arraySlice(array, offset, length) {
     var result = [];
-    var end = offset + length;
     var arrayLen = len(array);
-    if (end > arrayLen + 1) {
-        end = arrayLen + 1;
+    if (offset < 1) {
+        offset = 1;
     }
-    for (var i = offset; i < end; i++) {
+    if (length > arrayLen) {
+        length = arrayLen;
+    }
+    for (var i = offset; i <= length; i++) {
         arrayAppend(result, array[i]);
     }
     return result;
@@ -127,9 +139,9 @@ function arraySlice(array, offset, length) {
 /**
  * Returns the first element of an array.
  */
-function arrayFirst(array) {
+function arrayFirst(array, defaultValue = null) {
     if (len(array) == 0) {
-        return null;
+        return defaultValue;
     }
     return array[1];
 }
@@ -137,10 +149,10 @@ function arrayFirst(array) {
 /**
  * Returns the last element of an array.
  */
-function arrayLast(array) {
+function arrayLast(array, defaultValue = null) {
     var length = len(array);
     if (length == 0) {
-        return null;
+        return defaultValue;
     }
     return array[length];
 }
@@ -159,7 +171,7 @@ function arrayPrepend(array, value) {
 function arrayFind(array, value) {
     var length = len(array);
     for (var i = 1; i <= length; i++) {
-        if (array[i] == value) {
+        if (_arrayValueEquals(array[i], value)) {
             return i;
         }
     }
@@ -263,13 +275,25 @@ function arrayNone(array, callback) {
 /**
  * Deletes a specific value from an array.
  */
-function arrayDelete(array, value) {
-    var index = arrayFind(array, value);
-    if (index > 0) {
-        arrayDeleteAt(array, index);
-        return true;
+function arrayDelete(array, value, scope = "one") {
+    var removed = false;
+    if (scope == "all") {
+        var i = len(array);
+        while (i >= 1) {
+            if (_arrayValueEquals(array[i], value)) {
+                arrayDeleteAt(array, i);
+                removed = true;
+            }
+            i = i - 1;
+        }
+    } else {
+        var index = arrayFind(array, value);
+        if (index > 0) {
+            arrayDeleteAt(array, index);
+            removed = true;
+        }
     }
-    return false;
+    return removed;
 }
 
 /**
@@ -360,9 +384,8 @@ function arrayUnique(array) {
  */
 function arrayFindNoCase(array, value) {
     var length = len(array);
-    var search = lcase(value);
     for (var i = 1; i <= length; i++) {
-        if (lcase(array[i]) == search) {
+        if (_arrayValueEqualsNoCase(array[i], value)) {
             return i;
         }
     }
@@ -377,6 +400,30 @@ function arrayContainsNoCase(array, value) {
 }
 
 /**
+ * Deletes a value from an array using case-insensitive string equality.
+ */
+function arrayDeleteNoCase(array, value, scope = "one") {
+    var removed = false;
+    if (scope == "all") {
+        var i = len(array);
+        while (i >= 1) {
+            if (_arrayValueEqualsNoCase(array[i], value)) {
+                arrayDeleteAt(array, i);
+                removed = true;
+            }
+            i = i - 1;
+        }
+    } else {
+        var index = arrayFindNoCase(array, value);
+        if (index > 0) {
+            arrayDeleteAt(array, index);
+            removed = true;
+        }
+    }
+    return removed;
+}
+
+/**
  * Sorts an array in place using an O(n log n) stable merge sort.
  *
  * `sortType` ("text"|"numeric") and `sortOrder` ("asc"|"desc") control
@@ -384,12 +431,12 @@ function arrayContainsNoCase(array, value) {
  * datetimes, and strings all sort exactly as they did under the previous
  * bubble-sort implementation — only the algorithmic complexity changes.
  *
- * Returns true (matching the legacy contract) and mutates the input array.
+ * Returns the sorted array and mutates the input array.
  */
 function arraySort(array, sortType = "text", sortOrder = "asc") {
     var length = len(array);
     if (length < 2) {
-        return true;
+        return array;
     }
 
     // Work on a slice rather than the live array during the merge passes;
@@ -421,7 +468,7 @@ function arraySort(array, sortType = "text", sortOrder = "asc") {
                 var l = i;
                 var r = rightStart;
                 while (l <= leftEnd && r <= rightEnd) {
-                    if (_sortShouldComeBefore(work[l], work[r], sortOrder)) {
+                    if (_sortShouldComeBefore(work[l], work[r], sortType, sortOrder)) {
                         arrayAppend(merged, work[l]);
                         l = l + 1;
                     } else {
@@ -448,7 +495,7 @@ function arraySort(array, sortType = "text", sortOrder = "asc") {
     for (var n = 1; n <= length; n++) {
         array[n] = work[n];
     }
-    return true;
+    return array;
 }
 
 /**
@@ -504,56 +551,61 @@ function arrayUnshift(array, value) {
  * Merges two arrays.
  */
 function arrayMerge(array1, array2, leaveIndex = false) {
-    if (!leaveIndex) {
-        var result = [];
-        for (var item in array1) {
-            arrayAppend(result, item);
-        }
-        for (var item in array2) {
-            arrayAppend(result, item);
-        }
-        return result;
-    } else {
-        var len1 = len(array1);
-        var len2 = len(array2);
-        var maxLen = len1;
-        if (len2 > maxLen) {
-            maxLen = len2;
-        }
-        var result = [];
-        for (var i = 1; i <= maxLen; i++) {
-            if (i <= len1) {
-                arrayAppend(result, array1[i]);
-            } else {
-                arrayAppend(result, array2[i]);
-            }
-        }
-        for (var i = 1; i <= len1; i++) {
-            result[i] = array1[i];
-        }
-        return result;
+    var result = [];
+    for (var item in array1) {
+        arrayAppend(result, item);
     }
+    for (var item in array2) {
+        arrayAppend(result, item);
+    }
+    return result;
 }
 
 /**
  * Creates an array of numbers in a range (inclusive).
  */
-function arrayRange(start = 1, end) {
+function arrayRange(start = 1, end, count = null) {
     if (isNull(end)) {
         end = start;
     }
-    if (isSimpleValue(start) && !isNumeric(start)) {
+    if (isString(start)) {
         var str = toString(start);
         var dotPos = find("..", str);
         if (dotPos > 0) {
             var fromStr = left(str, dotPos - 1);
-            var toStr = right(str, len(str) - dotPos - 1);
+            if (len(fromStr) == 0 || !isNumeric(fromStr)) {
+                throw "arrayRange() invalid start";
+            }
             start = val(fromStr);
-            end = val(toStr);
+            var endCount = len(str) - dotPos - 1;
+            if (endCount == 0) {
+                end = start;
+            } else {
+                var toStr = right(str, endCount);
+                if (!isNumeric(toStr)) {
+                    throw "arrayRange() invalid end";
+                }
+                end = val(toStr);
+            }
         } else {
+            if (!isNumeric(str)) {
+                throw "arrayRange() invalid range";
+            }
             start = val(str);
             end = start;
         }
+    }
+    if (isString(end)) {
+        if (!isNumeric(end)) {
+            throw "arrayRange() invalid end";
+        }
+        end = val(end);
+    }
+    if (!isNumeric(start) || !isNumeric(end)) {
+        throw "arrayRange() expects numeric bounds";
+    }
+    if (!isNull(count) && (!isNumeric(count) || count <= 0)) {
+        throw "arrayRange() count must be greater than zero";
     }
     if (end < start) {
         end = start;
@@ -569,6 +621,9 @@ function arrayRange(start = 1, end) {
  * Splits an array into chunks of the given size.
  */
 function arrayChunk(array, chunkSize) {
+    if (!isNumeric(chunkSize) || chunkSize <= 0) {
+        throw "arrayChunk() chunk size must be greater than zero";
+    }
     var result = [];
     var length = len(array);
     var i = 1;
@@ -619,7 +674,27 @@ function arrayFindAll(array, value) {
     var result = [];
     var length = len(array);
     for (var i = 1; i <= length; i++) {
-        if (array[i] == value) {
+        var matches = false;
+        if (_arrayIsCallback(value)) {
+            matches = value(array[i], i);
+        } else {
+            matches = _arrayValueEquals(array[i], value);
+        }
+        if (matches) {
+            arrayAppend(result, i);
+        }
+    }
+    return result;
+}
+
+/**
+ * Returns array indices matching a value without folding string case.
+ */
+function arrayFindAllNoCase(array, value) {
+    var result = [];
+    var length = len(array);
+    for (var i = 1; i <= length; i++) {
+        if (_arrayValueEqualsNoCase(array[i], value)) {
             arrayAppend(result, i);
         }
     }
@@ -761,7 +836,7 @@ function arrayZip(array1, array2, callback) {
 }
 
 /**
- * Removes/replaces elements in an array. Returns the modified array.
+ * Removes/replaces elements in an array and returns the removed elements.
  */
 function arraySplice(array, index, deleteCount = 0, replacements) {
     var len_arr = len(array);
@@ -779,8 +854,10 @@ function arraySplice(array, index, deleteCount = 0, replacements) {
     if (dc < 0) {
         dc = 0;
     }
+    var removed = [];
     for (var d = 0; d < dc; d++) {
         if (start <= len(array)) {
+            arrayAppend(removed, array[start]);
             arrayDeleteAt(array, start);
         }
     }
@@ -790,14 +867,18 @@ function arraySplice(array, index, deleteCount = 0, replacements) {
             arrayInsertAt(array, start + r - 1, replacements[r]);
         }
     }
-    return array;
+    return removed;
 }
 
 /**
  * Returns basic array metadata.
  */
 function arrayGetMetadata(array) {
-    return { "datatype": "any", "dimensions": 1 };
+    var arrayType = "synchronized";
+    if (!arrayIsSynchronized(array)) {
+        arrayType = "unsynchronized";
+    }
+    return { "type": arrayType, "datatype": "any", "dimensions": 1 };
 }
 
 /**
@@ -811,11 +892,44 @@ function arrayGetMetadata(array) {
  * number/datetime/string fallback as `<` / `>`, so ordering is preserved
  * for every value type.
  */
-function _sortShouldComeBefore(a, b, sortOrder) {
+function _sortShouldComeBefore(a, b, sortType, sortOrder) {
+    if (_arrayIsCallback(sortType)) {
+        return sortType(a, b) <= 0;
+    }
+    if (sortType == "textnocase") {
+        if (sortOrder == "asc") {
+            return compare(lcase(a), lcase(b)) <= 0;
+        }
+        return compare(lcase(a), lcase(b)) >= 0;
+    }
+    if (sortType == "text") {
+        if (sortOrder == "asc") {
+            return compare(toString(a), toString(b)) <= 0;
+        }
+        return compare(toString(a), toString(b)) >= 0;
+    }
     if (sortOrder == "asc") {
         return a <= b;
     }
     return a >= b;
+}
+
+function _arrayIsCallback(value) {
+    return isClosure(value) || isCustomFunction(value);
+}
+
+function _arrayValueEquals(left, right) {
+    if (isString(left) && isString(right)) {
+        return compare(left, right) == 0;
+    }
+    return left == right;
+}
+
+function _arrayValueEqualsNoCase(left, right) {
+    if (isString(left) && isString(right)) {
+        return compare(lcase(left), lcase(right)) == 0;
+    }
+    return left == right;
 }
 
 // --- Struct BIFs ---
@@ -826,7 +940,9 @@ function _sortShouldComeBefore(a, b, sortOrder) {
 function structAppend(target, source, overwrite = true) {
     var keys = structKeyArray(source);
     for (key in keys) {
-        if (overwrite || !structKeyExists(target, key)) {
+        if (overwrite) {
+            structUpdate(target, key, source[key]);
+        } else if (!structKeyExists(target, key)) {
             structInsert(target, key, source[key]);
         }
     }
@@ -945,14 +1061,19 @@ function structKeyList(struct, delimiter = ",") {
 /**
  * Finds a key in a struct by value.
  */
-function structFindValue(struct, value) {
+function structFindValue(struct, value, scope = "one") {
+    var result = [];
     var keys = structKeyArray(struct);
     for (key in keys) {
         if (struct[key] == value) {
-            return key;
+            var match = { "key": key, "path": "." & key, "value": struct[key] };
+            arrayAppend(result, match);
+            if (scope != "all") {
+                return result;
+            }
         }
     }
-    return null;
+    return result;
 }
 
 /**
@@ -961,11 +1082,30 @@ function structFindValue(struct, value) {
  * array; values are looked up by key during comparison so semantics match
  * the previous bubble-sort implementation.
  */
-function structSort(struct, sortType = "text", sortOrder = "asc") {
+function _structSortValue(struct, key, path) {
+    var value = struct[key];
+    if (isNull(path) || path == "") {
+        return value;
+    }
+    var pathParts = listToArray(path, ".");
+    for (var part in pathParts) {
+        if (!isStruct(value) || !structKeyExists(value, part)) {
+            return null;
+        }
+        value = value[part];
+    }
+    return value;
+}
+
+function structSort(struct, sortType = "text", sortOrder = "asc", path = "", callback = null) {
     var keys = structKeyArray(struct);
     var length = len(keys);
     if (length < 2) {
         return keys;
+    }
+
+    if (_arrayIsCallback(sortType)) {
+        callback = sortType;
     }
 
     var work = arraySlice(keys, 1, length);
@@ -993,7 +1133,19 @@ function structSort(struct, sortType = "text", sortOrder = "asc") {
                 var l = i;
                 var r = rightStart;
                 while (l <= leftEnd && r <= rightEnd) {
-                    if (_sortShouldComeBefore(struct[work[l]], struct[work[r]], sortOrder)) {
+                    var comesBefore = false;
+                    if (!isNull(callback)) {
+                        comesBefore = callback(work[l], work[r]) <= 0;
+                    } else {
+                        var leftValue = work[l];
+                        var rightValue = work[r];
+                        if (sortType != "text" || path != "") {
+                            leftValue = _structSortValue(struct, work[l], path);
+                            rightValue = _structSortValue(struct, work[r], path);
+                        }
+                        comesBefore = _sortShouldComeBefore(leftValue, rightValue, sortType, sortOrder);
+                    }
+                    if (comesBefore) {
                         arrayAppend(merged, work[l]);
                         l = l + 1;
                     } else {

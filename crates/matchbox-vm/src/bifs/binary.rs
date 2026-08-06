@@ -12,6 +12,8 @@ pub fn register_binary_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
     bifs.insert("bitmaskread".to_string(), bit_mask_read as BxNativeFunction);
     bifs.insert("bitmaskset".to_string(), bit_mask_set as BxNativeFunction);
     bifs.insert("bitsh".to_string(), bit_sh as BxNativeFunction);
+    bifs.insert("bitshln".to_string(), bit_sh_left as BxNativeFunction);
+    bifs.insert("bitshrn".to_string(), bit_sh_right as BxNativeFunction);
 }
 
 fn binary_decode(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -65,8 +67,8 @@ fn bit_and(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("bitAnd() requires 2 arguments".to_string());
     }
-    let a = args[0].as_number() as i32;
-    let b = args[1].as_number() as i32;
+    let a = args[0].as_number() as i64;
+    let b = args[1].as_number() as i64;
     Ok(BxValue::new_number((a & b) as f64))
 }
 
@@ -74,8 +76,8 @@ fn bit_or(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("bitOr() requires 2 arguments".to_string());
     }
-    let a = args[0].as_number() as i32;
-    let b = args[1].as_number() as i32;
+    let a = args[0].as_number() as i64;
+    let b = args[1].as_number() as i64;
     Ok(BxValue::new_number((a | b) as f64))
 }
 
@@ -83,8 +85,8 @@ fn bit_xor(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("bitXor() requires 2 arguments".to_string());
     }
-    let a = args[0].as_number() as i32;
-    let b = args[1].as_number() as i32;
+    let a = args[0].as_number() as i64;
+    let b = args[1].as_number() as i64;
     Ok(BxValue::new_number((a ^ b) as f64))
 }
 
@@ -92,7 +94,7 @@ fn bit_not(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("bitNot() requires 1 argument".to_string());
     }
-    let n = args[0].as_number() as i32;
+    let n = args[0].as_number() as i64;
     Ok(BxValue::new_number((!n) as f64))
 }
 
@@ -100,14 +102,11 @@ fn bit_mask_clear(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     if args.len() < 3 {
         return Err("bitMaskClear() requires 3 arguments: number, start, length".to_string());
     }
-    let number = args[0].as_number() as i32;
-    let start = args[1].as_number() as i32;
-    let length = args[2].as_number() as i32;
-    let mask = if length >= 32 {
-        !0i32
-    } else {
-        ((1i32 << length) - 1) << start
-    };
+    let number = args[0].as_number() as i64;
+    let start = args[1].as_number() as i64;
+    let length = args[2].as_number() as i64;
+    validate_mask_range(start, length)?;
+    let mask = ((1_i64 << length) - 1) << start;
     Ok(BxValue::new_number((number & !mask) as f64))
 }
 
@@ -115,15 +114,12 @@ fn bit_mask_read(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     if args.len() < 3 {
         return Err("bitMaskRead() requires 3 arguments: number, start, length".to_string());
     }
-    let number = args[0].as_number() as i32;
-    let start = args[1].as_number() as i32;
-    let length = args[2].as_number() as i32;
-    let mask = if length >= 32 {
-        !0u32
-    } else {
-        (1u32 << length) - 1
-    };
-    let result = ((number as u32) >> start) & mask;
+    let number = args[0].as_number() as i64;
+    let start = args[1].as_number() as i64;
+    let length = args[2].as_number() as i64;
+    validate_mask_range(start, length)?;
+    let mask = (1_i64 << length) - 1;
+    let result = (number >> start) & mask;
     Ok(BxValue::new_number(result as f64))
 }
 
@@ -131,12 +127,14 @@ fn bit_mask_set(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     if args.len() < 4 {
         return Err("bitMaskSet() requires 4 arguments: number, mask, start, length".to_string());
     }
-    let number = args[0].as_number() as i32;
-    let mask = args[1].as_number() as i32;
-    let start = args[2].as_number() as i32;
-    let _length = args[3].as_number() as i32;
-    let shifted_mask = (mask as u32) << start;
-    let result = (number as u32) | shifted_mask;
+    let number = args[0].as_number() as i64;
+    let mask = args[1].as_number() as i64;
+    let start = args[2].as_number() as i64;
+    let length = args[3].as_number() as i64;
+    validate_mask_range(start, length)?;
+    let bitmask = ((1_i64 << length) - 1) << start;
+    let adjusted_mask = (mask & ((1_i64 << length) - 1)) << start;
+    let result = (number & !bitmask) | adjusted_mask;
     Ok(BxValue::new_number(result as f64))
 }
 
@@ -144,7 +142,7 @@ fn bit_sh(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("bitSh() requires 2 arguments: number, count".to_string());
     }
-    let number = args[0].as_number() as i32;
+    let number = args[0].as_number() as i64;
     let count = args[1].as_number() as i32;
     let result = if count >= 0 {
         (number as u32).wrapping_shl(count as u32) as i32
@@ -152,6 +150,28 @@ fn bit_sh(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         (number as u32).wrapping_shr((-count) as u32) as i32
     };
     Ok(BxValue::new_number(result as f64))
+}
+
+fn bit_sh_left(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    bit_sh(vm, args)
+}
+
+fn bit_sh_right(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("bitShrn() requires 2 arguments: number, count".to_string());
+    }
+    let shifted_args = [args[0], BxValue::new_number(-args[1].as_number())];
+    bit_sh(vm, &shifted_args)
+}
+
+fn validate_mask_range(start: i64, length: i64) -> Result<(), String> {
+    if !(0..=31).contains(&start) {
+        return Err("Start must be in the range 0-31, inclusive.".to_string());
+    }
+    if !(0..=31).contains(&length) {
+        return Err("Length must be in the range 0-31, inclusive.".to_string());
+    }
+    Ok(())
 }
 
 const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -183,6 +203,9 @@ fn base64_encode(data: &[u8]) -> String {
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    let unpadded = input.trim_end_matches('=');
+    let padding = (4 - unpadded.len() % 4) % 4;
+    let input = format!("{}{}", unpadded, "=".repeat(padding));
     if input.len() % 4 != 0 {
         return Err("binaryDecode() invalid base64 length".to_string());
     }

@@ -380,6 +380,19 @@ pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
 }
 
 #[cfg(feature = "bif-io")]
+pub fn get_temp_directory(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("getTempDirectory() expects no arguments".to_string());
+    }
+
+    let mut directory = std::env::temp_dir().to_string_lossy().to_string();
+    if !directory.ends_with(std::path::MAIN_SEPARATOR) {
+        directory.push(std::path::MAIN_SEPARATOR);
+    }
+    Ok(BxValue::new_ptr(vm.string_new(directory)))
+}
+
+#[cfg(feature = "bif-io")]
 pub fn create_temp_directory(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let directory = if !args.is_empty() {
         vm.to_string(args[0])

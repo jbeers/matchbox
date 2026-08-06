@@ -244,7 +244,9 @@ impl<'a> Parser<'a> {
             TokenKind::PipePipe => "||".to_string(),
             TokenKind::AmpAmp => "&&".to_string(),
             TokenKind::EqualEqual => "==".to_string(),
+            TokenKind::EqualEqualEqual => "===".to_string(),
             TokenKind::BangEqual => "!=".to_string(),
+            TokenKind::BangEqualEqual => "!==".to_string(),
             TokenKind::Less => "<".to_string(),
             TokenKind::Greater => ">".to_string(),
             TokenKind::LessEqual => "<=".to_string(),
@@ -872,6 +874,11 @@ impl<'a> Parser<'a> {
         while self.peek_is(TokenKind::Catch) {
             self.pos += 1; // catch
             self.expect(TokenKind::LeftParen)?;
+            // Catch types are currently ignored by the VM, but typed catches
+            // must still be accepted by the BoxLang parser.
+            if self.peek_is(TokenKind::Identifier) && self.kind(1) == Some(TokenKind::Identifier) {
+                self.pos += 1;
+            }
             let exception_var = self.expect_get(TokenKind::Identifier)?;
             self.expect(TokenKind::RightParen)?;
             self.expect(TokenKind::LeftBrace)?;
@@ -1265,7 +1272,8 @@ impl<'a> Parser<'a> {
             let op_prec = match self.peek_kind() {
                 Some(TokenKind::PipePipe) | Some(TokenKind::Xor) | Some(TokenKind::Eqv) => 1,
                 Some(TokenKind::AmpAmp) => 2,
-                Some(TokenKind::EqualEqual) | Some(TokenKind::BangEqual)
+            Some(TokenKind::EqualEqual) | Some(TokenKind::BangEqual)
+                | Some(TokenKind::EqualEqualEqual) | Some(TokenKind::BangEqualEqual)
                 | Some(TokenKind::Less) | Some(TokenKind::Greater)
                 | Some(TokenKind::LessEqual) | Some(TokenKind::GreaterEqual)
                 | Some(TokenKind::InstanceOf) | Some(TokenKind::CastAs)
@@ -1279,7 +1287,8 @@ impl<'a> Parser<'a> {
                 | Some(TokenKind::GreaterDotDot) | Some(TokenKind::GreaterDotDotLess) => 8,
                 Some(TokenKind::Ampersand) => 9,
                 Some(TokenKind::Plus) | Some(TokenKind::Minus) => 10,
-                Some(TokenKind::Star) | Some(TokenKind::Slash) | Some(TokenKind::Percent) => 11,
+                Some(TokenKind::Star) | Some(TokenKind::Slash) | Some(TokenKind::Percent)
+                | Some(TokenKind::Backslash) => 11,
                 Some(TokenKind::Caret) => 12, // power ^
                 _ => 0,
             };
@@ -1365,6 +1374,11 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_unary()?;
                 Ok(Expression::new(ExpressionKind::UnaryNot(Box::new(expr)), line))
             }
+            Some(TokenKind::BitwiseComplement) => {
+                self.pos += 1;
+                let expr = self.parse_unary()?;
+                Ok(Expression::new(ExpressionKind::UnaryBitwiseNot(Box::new(expr)), line))
+            }
             Some(TokenKind::Minus) => {
                 self.pos += 1;
                 let expr = self.parse_unary()?;
@@ -1421,7 +1435,11 @@ impl<'a> Parser<'a> {
                 }
                 Some(TokenKind::Dot) => {
                     self.pos += 1; // .
-                    let member = self.expect_get(TokenKind::Identifier)?;
+                    let member = if self.peek_is(TokenKind::Contains) {
+                        self.advance_lexeme().unwrap_or_default()
+                    } else {
+                        self.expect_get(TokenKind::Identifier)?
+                    };
                     expr = Expression::new(
                         ExpressionKind::MemberAccess { base: Box::new(expr), member },
                         line,
@@ -1429,7 +1447,11 @@ impl<'a> Parser<'a> {
                 }
                 Some(TokenKind::QuestionDot) => {
                     self.pos += 1; // ?.
-                    let member = self.expect_get(TokenKind::Identifier)?;
+                    let member = if self.peek_is(TokenKind::Contains) {
+                        self.advance_lexeme().unwrap_or_default()
+                    } else {
+                        self.expect_get(TokenKind::Identifier)?
+                    };
                     expr = Expression::new(
                         ExpressionKind::SafeMemberAccess { base: Box::new(expr), member },
                         line,
@@ -1514,6 +1536,26 @@ impl<'a> Parser<'a> {
             }
             Some(TokenKind::Identifier) => {
                 let name = self.advance_lexeme().unwrap_or_default();
+                if (name.eq_ignore_ascii_case("sb") || name.eq_ignore_ascii_case("stringbuilder"))
+                    && self.peek_is(TokenKind::LeftBrace)
+                {
+                    self.pos += 1;
+                    let mut args = Vec::new();
+                    if !self.peek_is(TokenKind::RightBrace) {
+                        args.push(Argument { name: None, value: self.parse_expression()? });
+                    }
+                    self.expect(TokenKind::RightBrace)?;
+                    return Ok(Expression::new(
+                        ExpressionKind::FunctionCall {
+                            base: Box::new(Expression::new(
+                                ExpressionKind::Identifier("stringbuildernew".to_string()),
+                                line,
+                            )),
+                            args,
+                        },
+                        line,
+                    ));
+                }
                 // Check for lambda: identifier => expr
                 if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
                     let _ = self.advance_lexeme();

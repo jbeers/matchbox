@@ -87,6 +87,7 @@ impl BxNativeObject for BxQuery {
         args: &[BxValue],
     ) -> Result<BxValue, String> {
         match name.to_lowercase().as_str() {
+            "len" | "length" | "size" => Ok(BxValue::new_number(self.record_count as f64)),
             "columnlist" => {
                 let list: String = self
                     .columns

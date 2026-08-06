@@ -113,6 +113,19 @@ pub fn hash_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 }
 
 #[cfg(feature = "bif-crypto")]
+pub fn hash40_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return hash_bif(vm, args);
+    }
+
+    let mut hash_args = Vec::with_capacity(args.len() + 1);
+    hash_args.push(args[0]);
+    hash_args.push(BxValue::new_ptr(vm.string_new("sha1".to_string())));
+    hash_args.extend_from_slice(args.get(2..).unwrap_or_default());
+    hash_bif(vm, &hash_args)
+}
+
+#[cfg(feature = "bif-crypto")]
 pub fn hmac_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
         return Err("hmac() expects at least 2 arguments".to_string());

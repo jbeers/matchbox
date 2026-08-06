@@ -1686,6 +1686,8 @@ impl Compiler {
                 match operator.as_str() {
                     "||" => {
                         self.compile_expression(left)?;
+                        self.chunk.emit0(op::NOT, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
                         // If left is falsy, skip the unconditional jump to land at pop+right
                         let jif_idx = self.chunk.code.len();
                         self.chunk.emit1(op::JUMP_IF_FALSE, 0, expr.line);
@@ -1698,6 +1700,10 @@ impl Compiler {
                             op::JUMP_IF_FALSE as u32 | (((false_target - jif_idx - 1) as u32) << 8);
                         self.chunk.emit0(op::POP, expr.line);
                         self.compile_expression(right)?;
+                        // Logical operators return a boolean in BoxLang, not the
+                        // operand value.  Normalize both short-circuit paths.
+                        self.chunk.emit0(op::NOT, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
                         // Patch unconditional jump to end
                         let end_target = self.chunk.code.len();
                         self.chunk.code[jump_idx] =
@@ -1747,12 +1753,18 @@ impl Compiler {
                     }
                     "&&" => {
                         self.compile_expression(left)?;
+                        self.chunk.emit0(op::NOT, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
                         // If left is falsy, jump to end (left stays on stack as result)
                         let jif_idx = self.chunk.code.len();
                         self.chunk.emit1(op::JUMP_IF_FALSE, 0, expr.line);
                         // Left is truthy: pop it, evaluate right
                         self.chunk.emit0(op::POP, expr.line);
                         self.compile_expression(right)?;
+                        // Logical operators return a boolean in BoxLang, not the
+                        // operand value.  Normalize both short-circuit paths.
+                        self.chunk.emit0(op::NOT, expr.line);
+                        self.chunk.emit0(op::NOT, expr.line);
                         // Patch JumpIfFalse to end
                         let end_target = self.chunk.code.len();
                         self.chunk.code[jif_idx] =
@@ -1820,7 +1832,7 @@ impl Compiler {
                             self.chunk.emit0(op::MULTIPLY, expr.line);
                         }
                     }
-                    "/" => {
+                     "/" => {
                         let mut specialized = false;
                         if let (
                             ExpressionKind::Literal(Literal::Number(_)),
@@ -1830,14 +1842,17 @@ impl Compiler {
                             self.chunk.emit0(op::DIV_FLOAT, expr.line);
                             specialized = true;
                         }
-                        if !specialized {
-                            self.chunk.emit0(op::DIVIDE, expr.line);
-                        }
-                    }
-                    "%" => self.chunk.emit0(op::MODULO, expr.line),
-                    "&" => self.chunk.emit0(op::STRING_CONCAT, expr.line),
-                    "==" => self.chunk.emit0(op::EQUAL, expr.line),
-                    "!=" => self.chunk.emit0(op::NOT_EQUAL, expr.line),
+                         if !specialized {
+                             self.chunk.emit0(op::DIVIDE, expr.line);
+                         }
+                     }
+                     "\\" => self.chunk.emit0(op::INTEGER_DIVIDE, expr.line),
+                     "%" => self.chunk.emit0(op::MODULO, expr.line),
+                     "&" => self.chunk.emit0(op::STRING_CONCAT, expr.line),
+                     "==" => self.chunk.emit0(op::EQUAL, expr.line),
+                     "===" => self.chunk.emit0(op::STRICT_EQUAL, expr.line),
+                     "!=" => self.chunk.emit0(op::NOT_EQUAL, expr.line),
+                     "!==" => self.chunk.emit0(op::STRICT_NOT_EQUAL, expr.line),
                     "<" => self.chunk.emit0(op::LESS, expr.line),
                     "<=" => self.chunk.emit0(op::LESS_EQUAL, expr.line),
                     ">" => self.chunk.emit0(op::GREATER, expr.line),
@@ -1858,6 +1873,11 @@ impl Compiler {
             ExpressionKind::UnaryNot(inner) => {
                 self.compile_expression(inner)?;
                 self.chunk.emit0(op::NOT, expr.line);
+                Ok(())
+            }
+            ExpressionKind::UnaryBitwiseNot(inner) => {
+                self.compile_expression(inner)?;
+                self.chunk.emit0(op::BIT_NOT, expr.line);
                 Ok(())
             }
             ExpressionKind::Ternary {
@@ -2183,6 +2203,9 @@ impl Compiler {
                     self.chunk
                         .emit1(op::CALL_SPREAD, args.len() as u32, expr.line);
                 } else if has_named {
+                    for arg in args {
+                        self.compile_expression(&arg.value)?;
+                    }
                     let names_idx = self.chunk.add_constant(Constant::StringArray(arg_names));
                     self.chunk.emit2(
                         op::CALL_NAMED,

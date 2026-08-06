@@ -185,6 +185,7 @@ pub enum ExpressionKind {
         right: Box<Expression>,
     },
     UnaryNot(Box<Expression>),
+    UnaryBitwiseNot(Box<Expression>),
     Ternary {
         condition: Box<Expression>,
         then_expr: Box<Expression>,

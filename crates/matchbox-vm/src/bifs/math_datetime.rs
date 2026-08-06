@@ -1,6 +1,8 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
 use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Timelike, Utc};
 use std::collections::HashMap;
+use std::iter::Peekable;
+use std::str::Chars;
 
 use super::{datetime_from_parts, parse_datetime_input};
 
@@ -33,14 +35,14 @@ fn increment_value(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     if args.is_empty() {
         return Err("incrementValue() expects 1 argument".to_string());
     }
-    Ok(BxValue::new_number(args[0].as_number() + 1.0))
+    Ok(BxValue::new_number(((args[0].as_number() + 1.0) * 1e12).round() / 1e12))
 }
 
 fn decrement_value(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("decrementValue() expects 1 argument".to_string());
     }
-    Ok(BxValue::new_number(args[0].as_number() - 1.0))
+    Ok(BxValue::new_number(((args[0].as_number() - 1.0) * 1e12).round() / 1e12))
 }
 
 fn fix_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -135,10 +137,121 @@ fn precision_evaluate(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         return Err("precisionEvaluate() expects 1 argument".to_string());
     }
     let expr = vm.to_string(args[0]);
-    if let Ok(n) = expr.trim().parse::<f64>() {
-        return Ok(BxValue::new_number(n));
+    let mut parser = PrecisionParser::new(&expr);
+    let value = parser.parse_expression()?;
+    parser.skip_whitespace();
+    if parser.input.peek().is_some() {
+        return Err("precisionEvaluate() could not parse the expression".to_string());
     }
-    Err("precisionEvaluate() is not fully implemented; only numeric literals are supported".to_string())
+    Ok(BxValue::new_number(value))
+}
+
+struct PrecisionParser<'a> {
+    input: Peekable<Chars<'a>>,
+}
+
+impl<'a> PrecisionParser<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input: input.chars().peekable() }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.input.peek().is_some_and(|ch| ch.is_whitespace()) {
+            self.input.next();
+        }
+    }
+
+    fn consume(&mut self, expected: char) -> bool {
+        self.skip_whitespace();
+        if self.input.peek() == Some(&expected) {
+            self.input.next();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn parse_expression(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_term()?;
+        loop {
+            if self.consume('+') {
+                value += self.parse_term()?;
+            } else if self.consume('-') {
+                value -= self.parse_term()?;
+            } else {
+                return Ok(value);
+            }
+        }
+    }
+
+    fn parse_term(&mut self) -> Result<f64, String> {
+        let mut value = self.parse_power()?;
+        loop {
+            if self.consume('*') {
+                value *= self.parse_power()?;
+            } else if self.consume('/') {
+                value /= self.parse_power()?;
+            } else if self.consume_word("mod") {
+                value %= self.parse_power()?;
+            } else {
+                return Ok(value);
+            }
+        }
+    }
+
+    fn parse_power(&mut self) -> Result<f64, String> {
+        let value = self.parse_unary()?;
+        if self.consume('^') {
+            Ok(value.powf(self.parse_power()?))
+        } else {
+            Ok(value)
+        }
+    }
+
+    fn parse_unary(&mut self) -> Result<f64, String> {
+        if self.consume('-') {
+            Ok(-self.parse_unary()?)
+        } else if self.consume('+') {
+            self.parse_unary()
+        } else {
+            self.parse_primary()
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<f64, String> {
+        if self.consume('(') {
+            let value = self.parse_expression()?;
+            if !self.consume(')') {
+                return Err("precisionEvaluate() expected ')'".to_string());
+            }
+            return Ok(value);
+        }
+        self.skip_whitespace();
+        let mut number = String::new();
+        while self.input.peek().is_some_and(|ch| ch.is_ascii_digit() || *ch == '.') {
+            number.push(self.input.next().unwrap());
+        }
+        number
+            .parse::<f64>()
+            .map_err(|_| "precisionEvaluate() expected a number".to_string())
+    }
+
+    fn consume_word(&mut self, word: &str) -> bool {
+        self.skip_whitespace();
+        let mut chars = self.input.clone();
+        for expected in word.chars() {
+            if chars.next().is_none_or(|actual| !actual.eq_ignore_ascii_case(&expected)) {
+                return false;
+            }
+        }
+        if chars.peek().is_some_and(|ch| ch.is_ascii_alphabetic()) {
+            return false;
+        }
+        for _ in word.chars() {
+            self.input.next();
+        }
+        true
+    }
 }
 
 // ============================================================================

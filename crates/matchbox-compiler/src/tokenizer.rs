@@ -48,9 +48,9 @@ pub enum TokenKind {
     Plus, Minus, Star, Slash, Percent, Caret, Equal, Less, Greater, Bang, Question, Ampersand,
 
     // Multi-char operators
-    EqualEqual, BangEqual, LessEqual, GreaterEqual, AmpAmp, PipePipe,
+    EqualEqual, EqualEqualEqual, BangEqual, BangEqualEqual, LessEqual, GreaterEqual, AmpAmp, PipePipe,
     EqualGreater, MinusGreater, QuestionColon, QuestionDot, ColonColon,
-    PlusEqual, MinusEqual, StarEqual, SlashEqual, PercentEqual, AmpEqual,
+    PlusEqual, MinusEqual, StarEqual, SlashEqual, PercentEqual, AmpEqual, Backslash,
     PlusPlus, MinusMinus, DotDot, DotDotDot, DotDotLess,
     GreaterDotDot, GreaterDotDotLess,
     // Bitwise operators
@@ -125,7 +125,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Percent => "%",
             TokenKind::Caret => "^",
             TokenKind::EqualEqual => "==",
+            TokenKind::EqualEqualEqual => "===",
             TokenKind::BangEqual => "!=",
+            TokenKind::BangEqualEqual => "!==",
             TokenKind::LessEqual => "<=",
             TokenKind::GreaterEqual => ">=",
             TokenKind::AmpAmp => "&&",
@@ -140,6 +142,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::StarEqual => "*=",
             TokenKind::SlashEqual => "/=",
             TokenKind::PercentEqual => "%=",
+            TokenKind::Backslash => "\\",
             TokenKind::AmpEqual => "&=",
             TokenKind::PlusPlus => "++",
             TokenKind::MinusMinus => "--",
@@ -914,6 +917,7 @@ impl<'a> Lexer<'a> {
             '-' => self.tokenize_minus(),
             '*' => self.tokenize_star(),
             '/' => self.tokenize_slash(),
+            '\\' => self.tokenize_backslash(),
             '%' => self.tokenize_percent(),
             '^' => TokenKind::Caret,
             '=' => self.tokenize_equal(),
@@ -961,7 +965,12 @@ impl<'a> Lexer<'a> {
     fn tokenize_equal(&mut self) -> TokenKind {
         if self.next_char_matches('=') {
             self.advance();
-            TokenKind::EqualEqual
+            if self.next_char_matches('=') {
+                self.advance();
+                TokenKind::EqualEqualEqual
+            } else {
+                TokenKind::EqualEqual
+            }
         } else if self.next_char_matches('>') {
             self.advance();
             TokenKind::EqualGreater
@@ -1015,6 +1024,10 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn tokenize_backslash(&mut self) -> TokenKind {
+        TokenKind::Backslash
+    }
+
     fn tokenize_percent(&mut self) -> TokenKind {
         if self.next_char_matches('=') {
             self.advance();
@@ -1055,7 +1068,12 @@ impl<'a> Lexer<'a> {
     fn tokenize_bang(&mut self) -> TokenKind {
         if self.next_char_matches('=') {
             self.advance();
-            TokenKind::BangEqual
+            if self.next_char_matches('=') {
+                self.advance();
+                TokenKind::BangEqualEqual
+            } else {
+                TokenKind::BangEqual
+            }
         } else {
             TokenKind::Bang
         }

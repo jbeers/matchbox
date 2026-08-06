@@ -1,15 +1,18 @@
-use crate::types::{BxNativeFunction, BxVM, BxValue};
+use crate::types::{BxNativeFunction, BxNativeObject, BxVM, BxValue, Tracer};
 use chrono::{
     DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 static MATH_RNG: OnceLock<Mutex<StdRng>> = OnceLock::new();
+static UNSYNCHRONIZED_ARRAYS: OnceLock<Mutex<HashSet<(usize, usize)>>> = OnceLock::new();
 
 fn math_rng() -> &'static Mutex<StdRng> {
     MATH_RNG.get_or_init(|| Mutex::new(StdRng::seed_from_u64(0)))
@@ -89,6 +92,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("arrayappend".to_string(), array_append as BxNativeFunction);
     bifs.insert("arraylen".to_string(), len as BxNativeFunction);
     bifs.insert("arraynew".to_string(), array_new as BxNativeFunction);
+    bifs.insert(
+        "arrayissynchronized".to_string(),
+        array_is_synchronized_bif as BxNativeFunction,
+    );
     bifs.insert("arraypop".to_string(), array_pop_bif as BxNativeFunction);
     bifs.insert(
         "arraydeleteat".to_string(),
@@ -118,11 +125,11 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("structnew".to_string(), struct_new as BxNativeFunction);
     bifs.insert(
         "structinsert".to_string(),
-        struct_set_bif as BxNativeFunction,
+        struct_insert_bif as BxNativeFunction,
     );
     bifs.insert(
         "structupdate".to_string(),
-        struct_set_bif as BxNativeFunction,
+        struct_update_bif as BxNativeFunction,
     );
     bifs.insert(
         "structdelete".to_string(),
@@ -183,29 +190,57 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         struct_find_key_bif as BxNativeFunction,
     );
 
+    // StringBuilder BIFs
+    bifs.insert("stringbuildernew".to_string(), string_builder_new_bif as BxNativeFunction);
+    bifs.insert("isstringbuilder".to_string(), is_string_builder_bif as BxNativeFunction);
+    bifs.insert("stringbuilderappend".to_string(), string_builder_append_bif as BxNativeFunction);
+    bifs.insert("stringbuilderclear".to_string(), string_builder_clear_bif as BxNativeFunction);
+    bifs.insert("stringbuildercontains".to_string(), string_builder_contains_bif as BxNativeFunction);
+    bifs.insert("stringbuilderdelete".to_string(), string_builder_delete_bif as BxNativeFunction);
+    bifs.insert("stringbuilderendswith".to_string(), string_builder_ends_with_bif as BxNativeFunction);
+    bifs.insert("stringbuilderfind".to_string(), string_builder_find_bif as BxNativeFunction);
+    bifs.insert("stringbuilderinsert".to_string(), string_builder_insert_bif as BxNativeFunction);
+    bifs.insert("stringbuilderleft".to_string(), string_builder_left_bif as BxNativeFunction);
+    bifs.insert("stringbuildermid".to_string(), string_builder_mid_bif as BxNativeFunction);
+    bifs.insert("stringbuilderprepend".to_string(), string_builder_prepend_bif as BxNativeFunction);
+    bifs.insert("stringbuilderreplace".to_string(), string_builder_replace_bif as BxNativeFunction);
+    bifs.insert("stringbuilderreverse".to_string(), string_builder_reverse_bif as BxNativeFunction);
+    bifs.insert("stringbuilderright".to_string(), string_builder_right_bif as BxNativeFunction);
+    bifs.insert("stringbuilderstartswith".to_string(), string_builder_starts_with_bif as BxNativeFunction);
+    bifs.insert("stringbuildertrim".to_string(), string_builder_trim_bif as BxNativeFunction);
+
     // Core BIFs
     bifs.insert("len".to_string(), len as BxNativeFunction);
+    bifs.insert("getmetadata".to_string(), get_metadata_bif as BxNativeFunction);
     bifs.insert(
         "writeoutput".to_string(),
         write_output_bif as BxNativeFunction,
     );
+    bifs.insert("echo".to_string(), write_output_bif as BxNativeFunction);
     bifs.insert("duplicate".to_string(), duplicate_bif as BxNativeFunction);
     bifs.insert(
         "createobject".to_string(),
         create_object as BxNativeFunction,
     );
     bifs.insert("isnull".to_string(), is_null_bif as BxNativeFunction);
+    bifs.insert("nullvalue".to_string(), null_value_bif as BxNativeFunction);
     bifs.insert("isnumeric".to_string(), is_numeric_bif as BxNativeFunction);
+    bifs.insert("lsisnumeric".to_string(), is_numeric_bif as BxNativeFunction);
     bifs.insert("isarray".to_string(), is_array_bif as BxNativeFunction);
     bifs.insert("isstruct".to_string(), is_struct_bif as BxNativeFunction);
     bifs.insert("isboolean".to_string(), is_boolean_bif as BxNativeFunction);
     bifs.insert("isstring".to_string(), is_string_bif as BxNativeFunction);
     bifs.insert("isdate".to_string(), is_date_bif as BxNativeFunction);
+    bifs.insert("isnumericdate".to_string(), is_date_bif as BxNativeFunction);
     bifs.insert(
         "issimplevalue".to_string(),
         is_simple_value_bif as BxNativeFunction,
     );
     bifs.insert("isobject".to_string(), is_object_bif as BxNativeFunction);
+    bifs.insert(
+        "isinstanceof".to_string(),
+        is_instance_of_bif as BxNativeFunction,
+    );
     bifs.insert("ucase".to_string(), ucase as BxNativeFunction);
     bifs.insert("lcase".to_string(), lcase as BxNativeFunction);
     bifs.insert("trim".to_string(), trim_bif as BxNativeFunction);
@@ -323,6 +358,8 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         sql_prettify_bif as BxNativeFunction,
     );
     bifs.insert("tostring".to_string(), to_string_bif as BxNativeFunction);
+    bifs.insert("stringlen".to_string(), len as BxNativeFunction);
+    bifs.insert("cast".to_string(), cast_bif as BxNativeFunction);
     bifs.insert("now".to_string(), now as BxNativeFunction);
     bifs.insert("createdate".to_string(), create_date as BxNativeFunction);
     bifs.insert(
@@ -390,6 +427,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     #[cfg(feature = "bif-crypto")]
     {
         bifs.insert("hash".to_string(), crypto::hash_bif as BxNativeFunction);
+        bifs.insert("hash40".to_string(), crypto::hash40_bif as BxNativeFunction);
         bifs.insert("hmac".to_string(), crypto::hmac_bif as BxNativeFunction);
         bifs.insert(
             "generatesecretkey".to_string(),
@@ -516,9 +554,14 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             fs::create_temp_directory as BxNativeFunction,
         );
         bifs.insert(
+            "gettempdirectory".to_string(),
+            fs::get_temp_directory as BxNativeFunction,
+        );
+        bifs.insert(
             "createtempfile".to_string(),
             fs::create_temp_file as BxNativeFunction,
         );
+        bifs.insert("gettempfile".to_string(), fs::create_temp_file as BxNativeFunction);
         bifs.insert(
             "directorycopy".to_string(),
             fs::directory_copy as BxNativeFunction,
@@ -794,6 +837,214 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 }
 
 // --- Implementation ---
+
+#[derive(Debug)]
+struct StringBuilderObject {
+    value: String,
+}
+
+impl BxNativeObject for StringBuilderObject {
+    fn get_property(&self, _name: &str) -> BxValue {
+        BxValue::new_null()
+    }
+
+    fn set_property(&mut self, _name: &str, _value: BxValue) {}
+
+    fn call_method(
+        &mut self,
+        vm: &mut dyn BxVM,
+        id: usize,
+        name: &str,
+        args: &[BxValue],
+    ) -> Result<BxValue, String> {
+        let name = name.to_ascii_lowercase();
+        let self_value = || BxValue::new_ptr(id);
+        match name.as_str() {
+            "__is_string_builder" => Ok(BxValue::new_bool(true)),
+            "tostring" => Ok(BxValue::new_ptr(vm.string_new(self.value.clone()))),
+            "append" => {
+                self.value.push_str(&builder_arg_string(vm, args, 0)?);
+                Ok(self_value())
+            }
+            "prepend" => {
+                self.value = format!("{}{}", builder_arg_string(vm, args, 0)?, self.value);
+                Ok(self_value())
+            }
+            "clear" => {
+                self.value.clear();
+                Ok(self_value())
+            }
+            "contains" => Ok(BxValue::new_bool(self.value.contains(&builder_arg_string(vm, args, 0)?))),
+            "containsnocase" => Ok(BxValue::new_bool(
+                self.value.to_lowercase().contains(&builder_arg_string(vm, args, 0)?.to_lowercase()),
+            )),
+            "startswith" => Ok(BxValue::new_bool(self.value.starts_with(&builder_arg_string(vm, args, 0)?))),
+            "endswith" => Ok(BxValue::new_bool(self.value.ends_with(&builder_arg_string(vm, args, 0)?))),
+            "find" | "findnocase" => {
+                let needle = builder_arg_string(vm, args, 0)?;
+                let (haystack, needle) = if name == "findnocase" {
+                    (self.value.to_lowercase(), needle.to_lowercase())
+                } else {
+                    (self.value.clone(), needle)
+                };
+                let start = args.get(1).map(BxValue::as_number).unwrap_or(1.0).max(1.0) as usize;
+                let offset = char_to_byte_offset(&haystack, start - 1);
+                let found = haystack[offset..]
+                    .find(&needle)
+                    .map(|idx| byte_to_char_count(&haystack[..offset + idx]) + 1)
+                    .unwrap_or(0);
+                Ok(BxValue::new_number(found as f64))
+            }
+            "delete" => {
+                self.value = builder_replace_range(
+                    &self.value,
+                    builder_position(args, 0)?,
+                    builder_position(args, 1)?,
+                    "",
+                );
+                Ok(self_value())
+            }
+            "insert" => {
+                self.value = builder_insert_at(
+                    &self.value,
+                    builder_position(args, 0)?,
+                    &builder_arg_string(vm, args, 1)?,
+                );
+                Ok(self_value())
+            }
+            "replace" => {
+                self.value = builder_replace_range(
+                    &self.value,
+                    builder_position(args, 0)?,
+                    builder_position(args, 1)?,
+                    &builder_arg_string(vm, args, 2)?,
+                );
+                Ok(self_value())
+            }
+            "reverse" => {
+                self.value = self.value.chars().rev().collect();
+                Ok(self_value())
+            }
+            "trim" => {
+                self.value = self.value.trim().to_string();
+                Ok(self_value())
+            }
+            "left" => Ok(BxValue::new_ptr(vm.string_new(builder_left(&self.value, builder_position(args, 0)?)))),
+            "right" => Ok(BxValue::new_ptr(vm.string_new(builder_right(&self.value, builder_position(args, 0)?)))),
+            "mid" => {
+                let start = builder_position(args, 0)?;
+                let count = args.get(1).map(BxValue::as_number).map(|value| value as usize);
+                Ok(BxValue::new_ptr(vm.string_new(builder_mid(&self.value, start, count))))
+            }
+            _ => Err(format!("StringBuilder method '{}' not found", name)),
+        }
+    }
+
+    fn trace(&self, _tracer: &mut dyn Tracer) {}
+}
+
+fn builder_arg_string(vm: &mut dyn BxVM, args: &[BxValue], index: usize) -> Result<String, String> {
+    args.get(index)
+        .copied()
+        .map(|value| vm.to_string(value))
+        .ok_or_else(|| "StringBuilder method is missing an argument".to_string())
+}
+
+fn builder_position(args: &[BxValue], index: usize) -> Result<isize, String> {
+    args.get(index)
+        .map(|value| value.as_number() as isize)
+        .ok_or_else(|| "StringBuilder method is missing a position".to_string())
+}
+
+fn char_to_byte_offset(value: &str, index: usize) -> usize {
+    value.char_indices().nth(index).map_or(value.len(), |(offset, _)| offset)
+}
+
+fn byte_to_char_count(value: &str) -> usize {
+    value.chars().count()
+}
+
+fn builder_insert_at(value: &str, position: isize, text: &str) -> String {
+    let position = position.max(1) as usize;
+    let offset = char_to_byte_offset(value, position - 1);
+    format!("{}{}{}", &value[..offset], text, &value[offset..])
+}
+
+fn builder_replace_range(value: &str, start: isize, end: isize, replacement: &str) -> String {
+    let start = start.max(1) as usize;
+    let end = end.max(start as isize) as usize;
+    let start_offset = char_to_byte_offset(value, start - 1);
+    let end_offset = char_to_byte_offset(value, end);
+    format!("{}{}{}", &value[..start_offset], replacement, &value[end_offset..])
+}
+
+fn builder_left(value: &str, count: isize) -> String {
+    let length = value.chars().count() as isize;
+    let count = if count < 0 { length + count } else { count }.clamp(0, length) as usize;
+    value[..char_to_byte_offset(value, count)].to_string()
+}
+
+fn builder_right(value: &str, count: isize) -> String {
+    let length = value.chars().count() as isize;
+    let count = if count < 0 { length + count } else { count }.clamp(0, length) as usize;
+    value[char_to_byte_offset(value, length as usize - count)..].to_string()
+}
+
+fn builder_mid(value: &str, start: isize, count: Option<usize>) -> String {
+    let start = start.max(1) as usize;
+    let start_offset = char_to_byte_offset(value, start - 1);
+    let end = count.map_or(value.chars().count(), |count| start - 1 + count);
+    let end_offset = char_to_byte_offset(value, end);
+    value[start_offset..end_offset].to_string()
+}
+
+fn string_builder_new_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let value = args
+        .first()
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value))
+        .unwrap_or_default();
+    let id = vm.native_object_new(Rc::new(RefCell::new(StringBuilderObject { value })));
+    Ok(BxValue::new_ptr(id))
+}
+
+fn is_string_builder_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let Some(id) = args.first().and_then(BxValue::as_gc_id) else {
+        return Ok(BxValue::new_bool(false));
+    };
+    Ok(BxValue::new_bool(
+        vm.native_object_call_method(id, "__is_string_builder", &[]).is_ok(),
+    ))
+}
+
+fn string_builder_call(vm: &mut dyn BxVM, args: &[BxValue], method: &str) -> Result<BxValue, String> {
+    let id = args.first().and_then(BxValue::as_gc_id).ok_or("Expected a StringBuilder")?;
+    vm.native_object_call_method(id, method, &args[1..])
+}
+
+macro_rules! string_builder_bif {
+    ($name:ident, $method:literal) => {
+        fn $name(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+            string_builder_call(vm, args, $method)
+        }
+    };
+}
+
+string_builder_bif!(string_builder_append_bif, "append");
+string_builder_bif!(string_builder_clear_bif, "clear");
+string_builder_bif!(string_builder_contains_bif, "contains");
+string_builder_bif!(string_builder_delete_bif, "delete");
+string_builder_bif!(string_builder_ends_with_bif, "endsWith");
+string_builder_bif!(string_builder_find_bif, "find");
+string_builder_bif!(string_builder_insert_bif, "insert");
+string_builder_bif!(string_builder_left_bif, "left");
+string_builder_bif!(string_builder_mid_bif, "mid");
+string_builder_bif!(string_builder_prepend_bif, "prepend");
+string_builder_bif!(string_builder_replace_bif, "replace");
+string_builder_bif!(string_builder_reverse_bif, "reverse");
+string_builder_bif!(string_builder_right_bif, "right");
+string_builder_bif!(string_builder_starts_with_bif, "startsWith");
+string_builder_bif!(string_builder_trim_bif, "trim");
 
 fn future_on_error(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 {
@@ -1090,10 +1341,16 @@ fn insert_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let substring = vm.to_string(args[0]);
     let input = vm.to_string(args[1]);
     let position = args[2].as_number() as usize;
-    if position > input.len() {
+    let chars: Vec<char> = input.chars().collect();
+    if position > chars.len() {
         return Err(format!("insert() position {} is out of range", position));
     }
-    let result = format!("{}{}{}", &input[..position], substring, &input[position..]);
+    let result = format!(
+        "{}{}{}",
+        chars[..position].iter().collect::<String>(),
+        substring,
+        chars[position..].iter().collect::<String>()
+    );
     Ok(BxValue::new_ptr(vm.string_new(result)))
 }
 
@@ -1242,10 +1499,21 @@ fn replace_list_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     let list2 = vm.to_string(args[2]);
     let items1: Vec<&str> = list1.split(',').collect();
     let items2: Vec<&str> = list2.split(',').collect();
+    if items2.len() < items1.len() {
+        let result = input
+            .split(',')
+            .filter_map(|item| {
+                items1
+                    .iter()
+                    .position(|search| *search == item)
+                    .map_or(Some(item), |index| items2.get(index).copied())
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        return Ok(BxValue::new_ptr(vm.string_new(result)));
+    }
     for (i, search) in items1.iter().enumerate() {
-        if let Some(replacement) = items2.get(i) {
-            input = input.replace(search, replacement);
-        }
+        input = input.replace(search, items2[i]);
     }
     Ok(BxValue::new_ptr(vm.string_new(input)))
 }
@@ -1492,6 +1760,28 @@ fn to_string_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     Ok(BxValue::new_ptr(vm.string_new(s)))
 }
 
+fn cast_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("cast() expects exactly 2 arguments: (value, type)".to_string());
+    }
+
+    let value = args[0];
+    let type_name = vm.to_string(args[1]);
+    match type_name.trim().to_ascii_lowercase().as_str() {
+        "string" if value.is_null() => {
+            Err("Could not cast null to type [string]".to_string())
+        }
+        "numeric" | "number" if value.is_null() => Ok(BxValue::new_number(0.0)),
+        "numeric" | "number" if value.is_bool() => Err(format!(
+            "Could not cast object [{}] to type [{}]",
+            vm.to_string(value),
+            type_name
+        )),
+        "double" if value.is_null() => Ok(BxValue::new_number(0.0)),
+        _ => vm.cast_value_to_type(value, &type_name),
+    }
+}
+
 fn list_to_array(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("listToArray() expects at least 1 argument".to_string());
@@ -1602,7 +1892,9 @@ fn list_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         },
         multi,
     );
-    items.push(vm.to_string(args[1]));
+    if !args[1].is_null() {
+        items.push(vm.to_string(args[1]));
+    }
     Ok(BxValue::new_ptr(
         vm.string_new(join_list(&items, &delimiter, multi)),
     ))
@@ -1692,7 +1984,7 @@ fn list_rest(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let cutoff = offset.min(items.len());
     items.drain(0..cutoff);
     Ok(BxValue::new_ptr(
-        vm.string_new(join_list(&items, &delimiter, multi)),
+        vm.string_new(join_list(&items, ",", false)),
     ))
 }
 
@@ -1851,7 +2143,7 @@ pub(super) fn parse_list_items(
         return Vec::new();
     }
     if delimiter.is_empty() {
-        return vec![list.to_string()];
+        return list.chars().map(|ch| ch.to_string()).collect();
     }
 
     let mut items = Vec::new();
@@ -1910,7 +2202,14 @@ fn chr_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("chr() expects 1 argument".to_string());
     }
-    let code = args[0].as_number() as u32;
+    let code = args[0].as_number();
+    if code > 0xffff as f64 {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
+    if code < 0.0 {
+        return Err(format!("Invalid character code: {}", code));
+    }
+    let code = code as u32;
     let c = std::char::from_u32(code).ok_or_else(|| format!("Invalid character code: {}", code))?;
     let s_id = vm.string_new(c.to_string());
     Ok(BxValue::new_ptr(s_id))
@@ -2247,11 +2546,13 @@ fn replace_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 }
 
 fn round(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    if args.len() != 1 {
-        return Err("round() expects exactly 1 argument".to_string());
+    if args.is_empty() || args.len() > 2 {
+        return Err("round() expects 1 or 2 arguments".to_string());
     }
     if args[0].is_number() {
-        Ok(BxValue::new_number(args[0].as_number().round()))
+        let precision = args.get(1).map_or(0, |value| value.as_number() as i32);
+        let factor = 10_f64.powi(precision);
+        Ok(BxValue::new_number((args[0].as_number() * factor).round() / factor))
     } else {
         Err("round() expects a number".to_string())
     }
@@ -2335,8 +2636,13 @@ fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         let mut rng = math_rng()
             .lock()
             .map_err(|_| "random generator is unavailable".to_string())?;
-        let val = rng.random_range((args[0].as_number() as i64)..=(args[1].as_number() as i64));
-        Ok(BxValue::new_number(val as f64))
+        let low = args[0].as_number();
+        let high = args[1].as_number();
+        if low.fract() == 0.0 && high.fract() == 0.0 {
+            Ok(BxValue::new_number(rng.random_range((low as i64)..=(high as i64)) as f64))
+        } else {
+            Ok(BxValue::new_number(rng.random_range(low..=high)))
+        }
     } else {
         Err("randRange() expects numbers".to_string())
     }
@@ -2433,14 +2739,22 @@ fn asin_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 || !args[0].is_number() {
         return Err("asin() expects exactly 1 numeric argument".to_string());
     }
-    Ok(BxValue::new_number(args[0].as_number().asin()))
+    let value = args[0].as_number();
+    if !(-1.0..=1.0).contains(&value) {
+        return Err("asin() argument must be between -1 and 1".to_string());
+    }
+    Ok(BxValue::new_number(value.asin()))
 }
 
 fn acos_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 || !args[0].is_number() {
         return Err("acos() expects exactly 1 numeric argument".to_string());
     }
-    Ok(BxValue::new_number(args[0].as_number().acos()))
+    let value = args[0].as_number();
+    if !(-1.0..=1.0).contains(&value) {
+        return Err("acos() argument must be between -1 and 1".to_string());
+    }
+    Ok(BxValue::new_number(value.acos()))
 }
 
 fn atan_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -2463,11 +2777,40 @@ fn len(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 1 {
         return Err("len() expects exactly 1 argument".to_string());
     }
+    if args[0].is_null() {
+        return Ok(BxValue::new_number(0.0));
+    }
+    if args[0].is_number() || args[0].is_int() {
+        return Ok(BxValue::new_number(vm.to_string(args[0]).chars().count() as f64));
+    }
     if let Some(id) = args[0].as_gc_id() {
         Ok(BxValue::new_number(vm.get_len(id) as f64))
     } else {
         Err("len() expects a string, array, or struct".to_string())
     }
+}
+
+fn get_metadata_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 1 {
+        return Err("getMetadata() expects exactly 1 argument".to_string());
+    }
+    let metadata = vm.struct_new();
+    let class_name = if vm.is_array_value(args[0]) {
+        "array".to_string()
+    } else if vm.is_struct_value(args[0]) {
+        "struct".to_string()
+    } else if vm.is_string_value(args[0]) {
+        "string".to_string()
+    } else if let Some(name) = vm.type_name_from_value(args[0]) {
+        name
+    } else if args[0].is_number() || args[0].is_int() {
+        "numeric".to_string()
+    } else {
+        "object".to_string()
+    };
+    let class_value = BxValue::new_ptr(vm.string_new(class_name));
+    vm.struct_set(metadata, "class", class_value);
+    Ok(BxValue::new_ptr(metadata))
 }
 
 fn write_output_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -2599,8 +2942,33 @@ fn array_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     }
 }
 
-fn array_new(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Ok(BxValue::new_ptr(vm.array_new()))
+fn array_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let id = vm.array_new();
+    let key = (vm as *mut dyn BxVM as *mut () as usize, id);
+    let arrays = UNSYNCHRONIZED_ARRAYS.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut arrays = arrays.lock().map_err(|_| "Array metadata lock poisoned".to_string())?;
+    if args.len() > 1 && !args[1].as_bool() {
+        arrays.insert(key);
+    } else {
+        arrays.remove(&key);
+    }
+    Ok(BxValue::new_ptr(id))
+}
+
+fn array_is_synchronized_bif(
+    vm: &mut dyn BxVM,
+    args: &[BxValue],
+) -> Result<BxValue, String> {
+    if args.is_empty() || !vm.is_array_value(args[0]) {
+        return Ok(BxValue::new_bool(true));
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "arrayIsSynchronized() expects an array".to_string())?;
+    let key = (vm as *mut dyn BxVM as *mut () as usize, id);
+    let arrays = UNSYNCHRONIZED_ARRAYS.get_or_init(|| Mutex::new(HashSet::new()));
+    let arrays = arrays.lock().map_err(|_| "Array metadata lock poisoned".to_string())?;
+    Ok(BxValue::new_bool(!arrays.contains(&key)))
 }
 
 fn array_pop_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -2608,6 +2976,9 @@ fn array_pop_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         return Err("arrayPop() expects 1 argument".to_string());
     }
     if let Some(id) = args[0].as_gc_id() {
+        if vm.array_len(id) == 0 && args.len() > 1 {
+            return Ok(args[1]);
+        }
         vm.array_pop(id)
     } else {
         Err("arrayPop() expects an array".to_string())
@@ -2710,11 +3081,18 @@ fn array_set_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         return Err("arraySet() expects 3 arguments: (array, index, value)".to_string());
     }
     if let Some(id) = args[0].as_gc_id() {
-        let idx = args[1].as_number() as usize;
-        if idx == 0 {
+        let from = args[1].as_number() as usize;
+        let (to, value) = if args.len() >= 4 {
+            (args[2].as_number() as usize, args[3])
+        } else {
+            (from, args[2])
+        };
+        if from == 0 || to == 0 || to < from {
             return Err("Array index must be 1-based".to_string());
         }
-        vm.array_set(id, idx - 1, args[2])?;
+        for idx in from..=to {
+            vm.array_set(id, idx - 1, value)?;
+        }
         Ok(args[0])
     } else {
         Err("arraySet() expects an array as the first argument".to_string())
@@ -2805,16 +3183,23 @@ fn is_bytes_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
 // --- Struct BIFs ---
 
-fn struct_new(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Ok(BxValue::new_ptr(vm.struct_new()))
+fn struct_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let options = args.iter().map(|value| vm.to_string(*value)).collect::<Vec<_>>();
+    Ok(BxValue::new_ptr(vm.struct_new_with_options(&options)))
 }
 
-fn struct_set_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn struct_insert_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 3 {
         return Err("structInsert() expects 3 arguments: (struct, key, value)".to_string());
     }
     if let Some(id) = args[0].as_gc_id() {
         let key = vm.to_string(args[1]);
+        let overwrite = args
+            .get(3)
+            .is_some_and(|value| value.is_bool() && value.as_bool());
+        if vm.struct_key_exists(id, &key) && !overwrite {
+            return Err(format!("Key '{}' already exists in struct", key));
+        }
         vm.struct_set(id, &key, args[2]);
         Ok(args[0])
     } else {
@@ -2822,7 +3207,24 @@ fn struct_set_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     }
 }
 
+fn struct_update_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 {
+        return Err("structUpdate() expects 3 arguments: (struct, key, value)".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        let key = vm.to_string(args[1]);
+        vm.struct_set(id, &key, args[2]);
+        Ok(args[0])
+    } else {
+        Err("structUpdate() expects a struct as the first argument".to_string())
+    }
+}
+
 fn struct_get_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() == 1 {
+        let path = vm.to_string(args[0]);
+        return Ok(vm.resolve_variable_path(&path).unwrap_or(BxValue::new_null()));
+    }
     if args.len() < 2 {
         return Err("structGet() expects 2 arguments: (struct, key)".to_string());
     }
@@ -2923,8 +3325,8 @@ fn struct_is_case_sensitive_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<B
     if args.is_empty() {
         return Err("structIsCaseSensitive() expects 1 argument".to_string());
     }
-    if args[0].as_gc_id().is_some() {
-        Ok(BxValue::new_bool(false))
+    if let Some(id) = args[0].as_gc_id() {
+        Ok(BxValue::new_bool(vm.struct_is_case_sensitive(id)))
     } else {
         Err("structIsCaseSensitive() expects a struct".to_string())
     }
@@ -2934,8 +3336,8 @@ fn struct_is_ordered_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
     if args.is_empty() {
         return Err("structIsOrdered() expects 1 argument".to_string());
     }
-    if args[0].as_gc_id().is_some() {
-        Ok(BxValue::new_bool(true))
+    if let Some(id) = args[0].as_gc_id() {
+        Ok(BxValue::new_bool(vm.struct_is_ordered(id)))
     } else {
         Err("structIsOrdered() expects a struct".to_string())
     }
@@ -3104,6 +3506,28 @@ fn struct_to_sorted_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
     Ok(BxValue::new_ptr(new_id))
 }
 
+fn struct_key_translate_path(
+    vm: &mut dyn BxVM,
+    struct_id: usize,
+    parts: &[&str],
+    value: BxValue,
+) {
+    if parts.len() == 1 {
+        vm.struct_set(struct_id, parts[0], value);
+        return;
+    }
+
+    let parent_id = match vm.struct_get(struct_id, parts[0]).as_gc_id() {
+        Some(id) if vm.is_struct_value(vm.struct_get(struct_id, parts[0])) => id,
+        _ => {
+            let id = vm.struct_new();
+            vm.struct_set(struct_id, parts[0], BxValue::new_ptr(id));
+            id
+        }
+    };
+    struct_key_translate_path(vm, parent_id, &parts[1..], value);
+}
+
 fn struct_key_translate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("structKeyTranslate() expects at least 1 argument".to_string());
@@ -3111,26 +3535,19 @@ fn struct_key_translate_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVal
     let id = args[0]
         .as_gc_id()
         .ok_or("structKeyTranslate() expects a struct as the first argument")?;
-    let _deep = args.len() >= 2 && args[1] == BxValue::new_bool(true);
+    let deep = args.len() >= 2 && args[1] == BxValue::new_bool(true);
     let retain_keys = args.len() >= 3 && args[2] == BxValue::new_bool(true);
     let keys = vm.struct_key_array(id);
     let dot_keys: Vec<String> = keys.iter().filter(|k| k.contains('.')).cloned().collect();
     for dot_key in &dot_keys {
         let val = vm.struct_get(id, dot_key);
-        let parts: Vec<&str> = dot_key.splitn(2, '.').collect();
-        if parts.len() == 2 {
-            let parent_key = parts[0];
-            let child_key = parts[1];
-            let parent_val = vm.struct_get(id, parent_key);
-            if parent_val.is_null() {
-                let new_parent = vm.struct_new();
-                vm.struct_set(new_parent, child_key, val);
-                vm.struct_set(id, parent_key, BxValue::new_ptr(new_parent));
-            } else if let Some(parent_id) = parent_val.as_gc_id() {
-                if vm.is_struct_value(parent_val) {
-                    vm.struct_set(parent_id, child_key, val);
-                }
-            }
+        let parts: Vec<&str> = if deep {
+            dot_key.split('.').collect()
+        } else {
+            dot_key.splitn(2, '.').collect()
+        };
+        if parts.len() >= 2 {
+            struct_key_translate_path(vm, id, &parts, val);
             if !retain_keys {
                 vm.struct_delete(id, dot_key);
             }
@@ -3776,6 +4193,13 @@ fn is_null_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     Ok(BxValue::new_bool(args[0].is_null()))
 }
 
+fn null_value_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if !args.is_empty() {
+        return Err("nullValue() expects no arguments".to_string());
+    }
+    Ok(BxValue::new_null())
+}
+
 fn is_array_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Ok(BxValue::new_bool(false));
@@ -3847,6 +4271,14 @@ fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         value.as_gc_id().is_some()
     };
     Ok(BxValue::new_bool(is_object))
+}
+
+fn is_instance_of_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Ok(BxValue::new_bool(false));
+    }
+    let type_name = vm.to_string(args[1]);
+    Ok(BxValue::new_bool(vm.value_matches_type_name(args[0], &type_name)))
 }
 
 fn is_numeric_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -4178,6 +4610,9 @@ fn charset_encode_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 fn sql_prettify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("sqlPrettify() expects at least 1 argument".to_string());
+    }
+    if args[0].is_null() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
     }
     let input = vm.to_string(args[0]);
     if input.trim().is_empty() {

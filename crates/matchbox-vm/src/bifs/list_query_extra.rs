@@ -7,6 +7,8 @@ pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunctio
     bifs.insert("listavg".to_string(), list_avg as BxNativeFunction);
     bifs.insert("listchangedelims".to_string(), list_change_delims as BxNativeFunction);
     bifs.insert("listcompact".to_string(), list_compact as BxNativeFunction);
+    bifs.insert("listcontains".to_string(), list_contains as BxNativeFunction);
+    bifs.insert("listcontainsnocase".to_string(), list_contains_nocase as BxNativeFunction);
     bifs.insert("listeach".to_string(), list_each as BxNativeFunction);
     bifs.insert("listevery".to_string(), list_every as BxNativeFunction);
     bifs.insert("listfilter".to_string(), list_filter as BxNativeFunction);
@@ -24,6 +26,16 @@ pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunctio
     bifs.insert("listsetat".to_string(), list_set_at as BxNativeFunction);
     bifs.insert("listsome".to_string(), list_some as BxNativeFunction);
     bifs.insert("listvaluecount".to_string(), list_value_count as BxNativeFunction);
+    bifs.insert("listvaluecountnocase".to_string(), list_value_count_nocase as BxNativeFunction);
+    bifs.insert("stringeach".to_string(), string_each as BxNativeFunction);
+    bifs.insert("stringevery".to_string(), string_every as BxNativeFunction);
+    bifs.insert("stringfilter".to_string(), string_filter as BxNativeFunction);
+    bifs.insert("stringmap".to_string(), string_map as BxNativeFunction);
+    bifs.insert("stringnone".to_string(), string_none as BxNativeFunction);
+    bifs.insert("stringreduce".to_string(), string_reduce as BxNativeFunction);
+    bifs.insert("stringreduceright".to_string(), string_reduce_right as BxNativeFunction);
+    bifs.insert("stringsome".to_string(), string_some as BxNativeFunction);
+    bifs.insert("stringsort".to_string(), string_sort as BxNativeFunction);
     #[cfg(feature = "bif-datasource")]
     {
         bifs.insert("queryeach".to_string(), query_each as BxNativeFunction);
@@ -39,15 +51,17 @@ pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunctio
 }
 
 fn gd(args: &[BxValue], idx: usize, vm: &dyn BxVM) -> String {
-    if args.len() > idx { vm.to_string(args[idx]) } else { ",".to_string() }
+    if args.len() > idx && !args[idx].is_null() { vm.to_string(args[idx]) } else { ",".to_string() }
 }
 
 pub fn get_token(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("getToken() expects at least 2 arguments".to_string()); }
-    let delim = if args.len() > 2 { vm.to_string(args[2]) } else { " ".to_string() };
+    let delim = if args.len() > 2 { vm.to_string(args[2]) } else { ",".to_string() };
     let items = parse_list_items(&vm.to_string(args[0]), delim, false, false);
     let idx = args[1].as_number() as usize;
-    if idx < 1 || idx > items.len() { return Err(format!("getToken() index {} out of range", idx)); }
+    if idx < 1 || idx > items.len() {
+        return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+    }
     Ok(BxValue::new_ptr(vm.string_new(items[idx - 1].clone())))
 }
 
@@ -61,20 +75,75 @@ pub fn list_avg(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
 pub fn list_change_delims(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listChangeDelims() expects at least 2 arguments".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &vm.to_string(args[1]), false))))
+    let delimiter = gd(args, 2, vm);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
+    let output_delimiter = vm.to_string(args[1]);
+    let multi = args.get(4).is_some_and(BxValue::as_bool);
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&items, &output_delimiter, multi))))
 }
 
 pub fn list_compact(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Err("listCompact() expects at least 1 argument".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 1, vm), false, false);
-    let filtered: Vec<String> = items.into_iter().filter(|s| !s.trim().is_empty()).collect();
-    Ok(BxValue::new_ptr(vm.string_new(join_list(&filtered, &gd(args, 1, vm), false))))
+    let delimiter = gd(args, 1, vm);
+    let multi = args.get(3).is_some_and(BxValue::as_bool);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delimiter.clone(),
+        true,
+        multi,
+    );
+    let filtered: Vec<String> = if multi {
+        items.into_iter().filter(|s| !s.trim().is_empty()).collect()
+    } else {
+        let first = items.iter().position(|s| !s.trim().is_empty()).unwrap_or(items.len());
+        let last = items
+            .iter()
+            .rposition(|s| !s.trim().is_empty())
+            .map_or(first, |index| index + 1);
+        items[first..last].to_vec()
+    };
+    Ok(BxValue::new_ptr(vm.string_new(join_list(&filtered, &delimiter, multi))))
+}
+
+pub fn list_contains(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("listContains() expects 2 arguments".to_string()); }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
+    let value = vm.to_string(args[1]);
+    Ok(BxValue::new_bool(items.iter().any(|item| item == &value)))
+}
+
+pub fn list_contains_nocase(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("listContainsNoCase() expects 2 arguments".to_string()); }
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
+    let value = vm.to_string(args[1]).to_ascii_lowercase();
+    Ok(BxValue::new_bool(
+        items.iter().any(|item| item.to_ascii_lowercase() == value),
+    ))
 }
 
 pub fn list_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listEach() expects 2 arguments".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let chunk = vm.current_chunk().ok_or("No current chunk")?;
     for (i, item) in items.iter().enumerate() {
         let s_id = vm.string_new(item.clone());
@@ -85,7 +154,12 @@ pub fn list_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
 
 pub fn list_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listEvery() expects 2 arguments".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let chunk = vm.current_chunk().ok_or("No current chunk")?;
     for (i, item) in items.iter().enumerate() {
         let s_id = vm.string_new(item.clone());
@@ -98,7 +172,12 @@ pub fn list_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
 pub fn list_filter(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listFilter() expects 2 arguments".to_string()); }
     let delim = gd(args, 2, vm);
-    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delim.clone(),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let chunk = vm.current_chunk().ok_or("No current chunk")?;
     let mut result = Vec::new();
     for (i, item) in items.iter().enumerate() {
@@ -122,7 +201,12 @@ pub fn list_get_endings(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
 
 pub fn list_index_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listIndexExists() expects 2 arguments".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let idx = args[1].as_number() as usize;
     Ok(BxValue::new_bool(idx >= 1 && idx <= items.len()))
 }
@@ -140,7 +224,12 @@ pub fn list_insert_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 pub fn list_item_trim(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Err("listItemTrim() expects at least 1 argument".to_string()); }
     let delim = gd(args, 1, vm);
-    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delim.clone(),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let trimmed: Vec<String> = items.iter().map(|s| s.trim().to_string()).collect();
     Ok(BxValue::new_ptr(vm.string_new(join_list(&trimmed, &delim, false))))
 }
@@ -148,7 +237,12 @@ pub fn list_item_trim(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 pub fn list_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listMap() expects 2 arguments".to_string()); }
     let delim = gd(args, 2, vm);
-    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delim.clone(),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let chunk = vm.current_chunk().ok_or("No current chunk")?;
     let mut result = Vec::new();
     for (i, item) in items.iter().enumerate() {
@@ -175,9 +269,28 @@ pub fn list_prepend(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
 pub fn list_qualify(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listQualify() expects 2 arguments".to_string()); }
     let delim = gd(args, 2, vm);
-    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        delim.clone(),
+        args.get(4).is_some_and(BxValue::as_bool),
+        false,
+    );
     let q = vm.to_string(args[1]);
-    let qualified: Vec<String> = items.iter().map(|s| format!("{}{}{}", q, s, q)).collect();
+    let element_type = args.get(3).map(|value| vm.to_string(*value).to_ascii_lowercase());
+    let qualified: Vec<String> = items
+        .iter()
+        .map(|item| {
+            let should_qualify = match element_type.as_deref() {
+                Some("char") => item.parse::<f64>().is_err(),
+                _ => true,
+            };
+            if should_qualify {
+                format!("{}{}{}", q, item, q)
+            } else {
+                item.clone()
+            }
+        })
+        .collect();
     Ok(BxValue::new_ptr(vm.string_new(join_list(&qualified, &delim, false))))
 }
 
@@ -208,11 +321,19 @@ pub fn list_reduce_right(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue,
 pub fn list_remove_duplicates(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Err("listRemoveDuplicates() expects at least 1 argument".to_string()); }
     let delim = gd(args, 1, vm);
-    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), false, false);
+    let items = parse_list_items(&vm.to_string(args[0]), delim.clone(), true, false);
     let mut seen = Vec::new();
     let mut result = Vec::new();
     for item in items {
-        if !seen.contains(&item) { seen.push(item.clone()); result.push(item); }
+        let compare = if args.get(2).is_some_and(BxValue::as_bool) {
+            item.to_ascii_lowercase()
+        } else {
+            item.clone()
+        };
+        if !seen.contains(&compare) {
+            seen.push(compare);
+            result.push(item);
+        }
     }
     Ok(BxValue::new_ptr(vm.string_new(join_list(&result, &delim, false))))
 }
@@ -229,7 +350,12 @@ pub fn list_set_at(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 
 pub fn list_some(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("listSome() expects 2 arguments".to_string()); }
-    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
+    let items = parse_list_items(
+        &vm.to_string(args[0]),
+        gd(args, 2, vm),
+        args.get(3).is_some_and(BxValue::as_bool),
+        args.get(4).is_some_and(BxValue::as_bool),
+    );
     let chunk = vm.current_chunk().ok_or("No current chunk")?;
     for (i, item) in items.iter().enumerate() {
         let s_id = vm.string_new(item.clone());
@@ -244,6 +370,119 @@ pub fn list_value_count(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
     let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
     let value = vm.to_string(args[1]);
     Ok(BxValue::new_number(items.iter().filter(|s| *s == &value).count() as f64))
+}
+
+pub fn list_value_count_nocase(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("listValueCountNoCase() expects 2 arguments".to_string()); }
+    let items = parse_list_items(&vm.to_string(args[0]), gd(args, 2, vm), false, false);
+    let value = vm.to_string(args[1]).to_ascii_lowercase();
+    Ok(BxValue::new_number(
+        items.iter().filter(|item| item.to_ascii_lowercase() == value).count() as f64,
+    ))
+}
+
+fn string_callback_args(vm: &mut dyn BxVM, chunk: &std::rc::Rc<std::cell::RefCell<crate::vm::chunk::Chunk>>, callback: &BxValue, ch: char, index: usize) -> Result<BxValue, String> {
+    let ch_id = vm.string_new(ch.to_string());
+    vm.call_function_by_value(
+        callback,
+        vec![BxValue::new_ptr(ch_id), BxValue::new_number((index + 1) as f64)],
+        chunk.clone(),
+    )
+}
+
+pub fn string_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("stringEach() expects 2 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        string_callback_args(vm, &chunk, &args[1], ch, index)?;
+    }
+    Ok(BxValue::new_null())
+}
+
+pub fn string_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("stringEvery() expects 2 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        if !string_callback_args(vm, &chunk, &args[1], ch, index)?.as_bool() {
+            return Ok(BxValue::new_bool(false));
+        }
+    }
+    Ok(BxValue::new_bool(true))
+}
+
+pub fn string_filter(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("stringFilter() expects 2 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    let mut result = String::new();
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        if string_callback_args(vm, &chunk, &args[1], ch, index)?.as_bool() {
+            result.push(ch);
+        }
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+pub fn string_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("stringMap() expects 2 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    let mut result = String::new();
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        let value = string_callback_args(vm, &chunk, &args[1], ch, index)?;
+        result.push_str(&vm.to_string(value));
+    }
+    Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+pub fn string_none(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(!string_some(vm, args)?.as_bool()))
+}
+
+pub fn string_reduce(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 { return Err("stringReduce() expects 3 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    let mut result = args[2];
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        let ch_id = vm.string_new(ch.to_string());
+        result = vm.call_function_by_value(
+            &args[1],
+            vec![result, BxValue::new_ptr(ch_id), BxValue::new_number((index + 1) as f64)],
+            chunk.clone(),
+        )?;
+    }
+    Ok(result)
+}
+
+pub fn string_reduce_right(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 3 { return Err("stringReduceRight() expects 3 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    let mut result = args[2];
+    for (index, ch) in vm.to_string(args[0]).chars().rev().enumerate() {
+        let ch_id = vm.string_new(ch.to_string());
+        result = vm.call_function_by_value(
+            &args[1],
+            vec![result, BxValue::new_ptr(ch_id), BxValue::new_number((index + 1) as f64)],
+            chunk.clone(),
+        )?;
+    }
+    Ok(result)
+}
+
+pub fn string_some(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 { return Err("stringSome() expects 2 arguments".to_string()); }
+    let chunk = vm.current_chunk().ok_or("No current chunk")?;
+    for (index, ch) in vm.to_string(args[0]).chars().enumerate() {
+        if string_callback_args(vm, &chunk, &args[1], ch, index)?.as_bool() {
+            return Ok(BxValue::new_bool(true));
+        }
+    }
+    Ok(BxValue::new_bool(false))
+}
+
+pub fn string_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() { return Err("stringSort() expects at least 1 argument".to_string()); }
+    let mut chars: Vec<char> = vm.to_string(args[0]).chars().collect();
+    chars.sort_unstable();
+    Ok(BxValue::new_ptr(vm.string_new(chars.into_iter().collect())))
 }
 
 #[cfg(feature = "bif-datasource")]

@@ -628,6 +628,7 @@ impl BxVM for VM {
             GcObject::Struct(s) => s.properties.len(),
             GcObject::String(s) => s.len(),
             GcObject::Bytes(bytes) => bytes.len(),
+            GcObject::DateTime(_) => 26,
             _ => 0,
         }
     }
@@ -756,7 +757,8 @@ impl BxVM for VM {
 
     fn value_matches_type_name(&self, val: BxValue, type_name: &str) -> bool {
         let lower = type_name.trim().to_ascii_lowercase();
-        match lower.as_str() {
+        let builtin = lower.rsplit('.').next().unwrap_or(&lower);
+        match builtin {
             "any" | "object" => !val.is_null(),
             "null" | "void" => val.is_null(),
             "string" => val
@@ -1138,7 +1140,31 @@ impl BxVM for VM {
         self.heap.alloc(GcObject::Struct(BxStruct {
             shape_id: self.shapes.get_root(),
             properties: Vec::new(),
+            case_sensitive: false,
+            ordered: false,
         }))
+    }
+
+    fn struct_new_with_options(&mut self, options: &[String]) -> usize {
+        let id = self.struct_new();
+        if let GcObject::Struct(structure) = self.heap.get_mut(id) {
+            for option in options {
+                match option.to_ascii_lowercase().as_str() {
+                    "casesensitive" => structure.case_sensitive = true,
+                    "ordered" => structure.ordered = true,
+                    _ => {}
+                }
+            }
+        }
+        id
+    }
+
+    fn struct_is_case_sensitive(&self, id: usize) -> bool {
+        matches!(self.heap.get_opt(id), Some(GcObject::Struct(structure)) if structure.case_sensitive)
+    }
+
+    fn struct_is_ordered(&self, id: usize) -> bool {
+        matches!(self.heap.get_opt(id), Some(GcObject::Struct(structure)) if structure.ordered)
     }
 
     fn struct_set(&mut self, id: usize, key: &str, val: BxValue) {
@@ -1385,6 +1411,36 @@ impl BxVM for VM {
 
     fn insert_global(&mut self, name: String, val: BxValue) {
         VM::insert_global(self, name, val);
+    }
+
+    fn resolve_variable_path(&self, path: &str) -> Option<BxValue> {
+        let parts: Vec<&str> = path.split('.').collect();
+        let first = parts.first()?.to_lowercase();
+        let mut value = self
+            .current_variables_scope()
+            .borrow()
+            .get(&first)
+            .copied()
+            .or_else(|| self.get_global(&first))?;
+
+        for part in parts.iter().skip(1) {
+            let id = value.as_gc_id()?;
+            value = match self.heap.get_opt(id)? {
+                GcObject::Struct(_) => self.struct_get(id, part),
+                GcObject::Instance(instance) => instance
+                    .variables
+                    .borrow()
+                    .get(&part.to_lowercase())
+                    .copied()
+                    .unwrap_or_else(BxValue::new_null),
+                GcObject::NativeObject(object) => object.borrow().get_property(part),
+                _ => BxValue::new_null(),
+            };
+            if value.is_null() {
+                return None;
+            }
+        }
+        Some(value)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1783,8 +1839,15 @@ impl VM {
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
                 GcObject::String(s) => s.to_string(),
-                GcObject::Bytes(bytes) => format!("<bytes len:{}>", bytes.len()),
-                GcObject::Array(_) => self.bx_to_json(&val).to_string(),
+                GcObject::Bytes(bytes) => String::from_utf8_lossy(bytes).to_string(),
+                GcObject::Array(values) => format!(
+                    "[{}]",
+                    values
+                        .iter()
+                        .map(|value| self.to_string_internal(*value))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
                 GcObject::Range(range) => format!("{}", range),
                 GcObject::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Millis, true),
                 GcObject::Struct(_) => self.bx_to_json(&val).to_string(),
@@ -1805,22 +1868,93 @@ impl VM {
         }
     }
 
-    fn is_equal(&self, a: BxValue, b: BxValue) -> bool {
-        if a == b {
-            return true;
+    fn numeric_value(&self, val: BxValue) -> Option<f64> {
+        if val.is_number() {
+            Some(val.as_number())
+        } else if let Some(id) = val.as_gc_id() {
+            match self.heap.get(id) {
+                GcObject::String(s) => s.to_string().trim().parse::<f64>().ok(),
+                _ => None,
+            }
+        } else {
+            None
         }
+    }
+
+    fn compare_values(&self, a: BxValue, b: BxValue) -> std::cmp::Ordering {
+        if a.is_null() && b.is_null() {
+            return std::cmp::Ordering::Equal;
+        }
+        if a.is_null() {
+            return std::cmp::Ordering::Less;
+        }
+        if b.is_null() {
+            return std::cmp::Ordering::Greater;
+        }
+
+        if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+            if let Some(ordering) = na.partial_cmp(&nb) {
+                return ordering;
+            }
+        }
+
+        if a.is_bool() && b.is_bool() {
+            return a.as_bool().cmp(&b.as_bool());
+        }
+
+        if let (Some(a_dt), Some(b_dt)) = (self.datetime_value(a), self.datetime_value(b)) {
+            return a_dt.cmp(&b_dt);
+        }
+
+        self.to_string_internal(a)
+            .to_lowercase()
+            .cmp(&self.to_string_internal(b).to_lowercase())
+    }
+
+    fn is_equal(&self, a: BxValue, b: BxValue) -> bool {
+        if a.is_null() || b.is_null() {
+            return a.is_null() && b.is_null();
+        }
+
+        if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+            return na == nb;
+        }
+
         if let (Some(id_a), Some(id_b)) = (a.as_gc_id(), b.as_gc_id()) {
             match (self.heap.get(id_a), self.heap.get(id_b)) {
                 (GcObject::String(s1), GcObject::String(s2)) => {
-                    s1.to_string().to_lowercase() == s2.to_string().to_lowercase()
+                    return s1.to_string().to_lowercase() == s2.to_string().to_lowercase();
                 }
-                (GcObject::DateTime(a), GcObject::DateTime(b)) => a == b,
-                (GcObject::Bytes(a), GcObject::Bytes(b)) => a == b,
-                _ => false,
+                (GcObject::DateTime(a), GcObject::DateTime(b)) => return a == b,
+                (GcObject::Bytes(a), GcObject::Bytes(b)) => return a == b,
+                _ => {}
             }
-        } else {
-            false
         }
+
+        if a == b {
+            return true;
+        }
+        false
+    }
+
+    fn is_strict_equal(&self, a: BxValue, b: BxValue) -> bool {
+        if a.is_number() && b.is_number() {
+            return a.as_number() == b.as_number();
+        }
+        if a.is_bool() && b.is_bool() {
+            return a.as_bool() == b.as_bool();
+        }
+        if a.is_null() || b.is_null() {
+            return a.is_null() && b.is_null();
+        }
+        if let (Some(id_a), Some(id_b)) = (a.as_gc_id(), b.as_gc_id()) {
+            if let (GcObject::String(s1), GcObject::String(s2)) =
+                (self.heap.get(id_a), self.heap.get(id_b))
+            {
+                return s1.to_string().to_lowercase() == s2.to_string().to_lowercase();
+            }
+        }
+        a == b
     }
 
     pub fn new() -> Self {
@@ -2067,6 +2201,8 @@ impl VM {
         let mut os_struct = BxStruct {
             shape_id: self.shapes.get_root(),
             properties: Vec::new(),
+            case_sensitive: false,
+            ordered: false,
         };
 
         let os_name = if cfg!(target_os = "espidf") {
@@ -2115,6 +2251,8 @@ impl VM {
         let mut server_struct = BxStruct {
             shape_id: self.shapes.get_root(),
             properties: Vec::new(),
+            case_sensitive: false,
+            ordered: false,
         };
         let os_key_idx = self.interner.intern("os");
         server_struct.shape_id = self.shapes.transition(server_struct.shape_id, os_key_idx);
@@ -2170,9 +2308,18 @@ impl VM {
         let name = method_name.to_ascii_lowercase();
         if receiver.is_number() {
             return match name.as_str() {
+                "len" | "length" => Some("len".to_string()),
                 "abs" => Some("abs".to_string()),
                 "round" => Some("round".to_string()),
                 "floor" => Some("floor".to_string()),
+                "ceiling" => Some("ceiling".to_string()),
+                "int" => Some("int".to_string()),
+                "fix" => Some("fix".to_string()),
+                "incrementvalue" => Some("incrementvalue".to_string()),
+                "decrementvalue" => Some("decrementvalue".to_string()),
+                "sgn" => Some("sgn".to_string()),
+                "sqr" => Some("sqr".to_string()),
+                "decimalformat" => Some("decimalformat".to_string()),
                 "log" => Some("log".to_string()),
                 "log10" => Some("log10".to_string()),
                 "exp" => Some("exp".to_string()),
@@ -2191,6 +2338,7 @@ impl VM {
             match self.heap.get(id) {
                 GcObject::String(_) => match name.as_str() {
                     "len" | "length" => Some("len".to_string()),
+                    "tostring" => Some("tostring".to_string()),
                     "ucase" | "touppercase" => Some("ucase".to_string()),
                     "lcase" | "tolowercase" => Some("lcase".to_string()),
                     "split" => Some("listtoarray".to_string()),
@@ -2236,16 +2384,33 @@ impl VM {
                     "spanexcluding" => Some("spanexcluding".to_string()),
                     "spanincluding" => Some("spanincluding".to_string()),
                     "replace" => Some("replace".to_string()),
-                    "listlen" => Some("listlen".to_string()),
-                    "listgetat" => Some("listgetat".to_string()),
+                     "listlen" => Some("listlen".to_string()),
+                     "listavg" => Some("listavg".to_string()),
+                     "listchangedelims" => Some("listchangedelims".to_string()),
+                     "listcompact" => Some("listcompact".to_string()),
+                     "listcontains" => Some("listcontains".to_string()),
+                     "listcontainsnocase" => Some("listcontainsnocase".to_string()),
+                     "listgetat" => Some("listgetat".to_string()),
                     "listappend" => Some("listappend".to_string()),
                     "listfirst" => Some("listfirst".to_string()),
                     "listlast" => Some("listlast".to_string()),
                     "listrest" => Some("listrest".to_string()),
                     "listdeleteat" => Some("listdeleteat".to_string()),
                     "listfind" => Some("listfind".to_string()),
-                    "listfindnocase" => Some("listfindnocase".to_string()),
-                    "listsort" => Some("listsort".to_string()),
+                     "listfindnocase" => Some("listfindnocase".to_string()),
+                     "listgettoken" | "gettoken" => Some("gettoken".to_string()),
+                     "listeach" => Some("listeach".to_string()),
+                     "listevery" => Some("listevery".to_string()),
+                     "listfilter" => Some("listfilter".to_string()),
+                     "listmap" => Some("listmap".to_string()),
+                     "listnone" => Some("listnone".to_string()),
+                     "listqualify" => Some("listqualify".to_string()),
+                     "listreduceright" => Some("listreduceright".to_string()),
+                     "listremoveduplicates" => Some("listremoveduplicates".to_string()),
+                     "listsome" => Some("listsome".to_string()),
+                     "listsort" => Some("listsort".to_string()),
+                     "listvaluecount" => Some("listvaluecount".to_string()),
+                     "listvaluecountnocase" => Some("listvaluecountnocase".to_string()),
                     "jsformat" | "jsstringformat" => Some("jsstringformat".to_string()),
                     "ljustify" => Some("ljustify".to_string()),
                     "rjustify" => Some("rjustify".to_string()),
@@ -2254,27 +2419,84 @@ impl VM {
                     "wrap" => Some("wrap".to_string()),
                     "bind" | "stringbind" => Some("stringbind".to_string()),
                     "charsetdecode" => Some("charsetdecode".to_string()),
-                    "sqlprettify" => Some("sqlprettify".to_string()),
-                    _ => None,
-                },
-                GcObject::Array(_) => match name.as_str() {
-                    "len" | "length" | "count" => Some("len".to_string()),
-                    "append" | "add" => Some("arrayappend".to_string()),
-                    "resize" => Some("arrayresize".to_string()),
-                    "swap" => Some("arrayswap".to_string()),
-                    "each" => Some("arrayeach".to_string()),
-                    "map" => Some("arraymap".to_string()),
-                    "reduce" => Some("arrayreduce".to_string()),
-                    "filter" => Some("arrayfilter".to_string()),
-                    "tolist" => Some("arraytolist".to_string()),
-                    "tojson" => Some("serializejson".to_string()),
-                    "duplicate" => Some("duplicate".to_string()),
+                     "sqlprettify" => Some("sqlprettify".to_string()),
+                     "each" => Some("stringeach".to_string()),
+                     "every" => Some("stringevery".to_string()),
+                     "filter" => Some("stringfilter".to_string()),
+                     "map" => Some("stringmap".to_string()),
+                     "reduce" => Some("stringreduce".to_string()),
+                     "reduceright" => Some("stringreduceright".to_string()),
+                     "some" => Some("stringsome".to_string()),
+                     "sort" => Some("stringsort".to_string()),
+                     _ => None,
+                 },
+                 GcObject::Array(_) => match name.as_str() {
+                     "len" | "length" | "count" | "size" => Some("len".to_string()),
+                     "append" | "add" => Some("arrayappend".to_string()),
+                     "avg" => Some("arrayavg".to_string()),
+                     "chunk" => Some("arraychunk".to_string()),
+                     "contains" => Some("arraycontains".to_string()),
+                     "containsnocase" => Some("arraycontainsnocase".to_string()),
+                     "delete" => Some("arraydelete".to_string()),
+                     "deletenocase" => Some("arraydeletenocase".to_string()),
+                     "deleteat" => Some("arraydeleteat".to_string()),
+                     "resize" => Some("arrayresize".to_string()),
+                     "swap" => Some("arrayswap".to_string()),
+                     "each" => Some("arrayeach".to_string()),
+                     "every" => Some("arrayevery".to_string()),
+                     "map" => Some("arraymap".to_string()),
+                     "reduce" => Some("arrayreduce".to_string()),
+                     "filter" => Some("arrayfilter".to_string()),
+                     "find" => Some("arrayfind".to_string()),
+                     "findall" => Some("arrayfindall".to_string()),
+                     "findallnocase" => Some("arrayfindallnocase".to_string()),
+                     "findfirst" => Some("arrayfindfirst".to_string()),
+                     "first" => Some("arrayfirst".to_string()),
+                     "flatmap" => Some("arrayflatmap".to_string()),
+                     "flatten" => Some("arrayflatten".to_string()),
+                     "getmetadata" => Some("arraygetmetadata".to_string()),
+                     "groupby" => Some("arraygroupby".to_string()),
+                     "indexexists" => Some("arrayindexexists".to_string()),
+                     "insertat" => Some("arrayinsertat".to_string()),
+                     "isempty" => Some("arrayisempty".to_string()),
+                     "last" => Some("arraylast".to_string()),
+                     "max" => Some("arraymax".to_string()),
+                     "median" => Some("arraymedian".to_string()),
+                     "merge" => Some("arraymerge".to_string()),
+                     "min" => Some("arraymin".to_string()),
+                     "none" => Some("arraynone".to_string()),
+                     "pop" => Some("arraypop".to_string()),
+                     "prepend" => Some("arrayprepend".to_string()),
+                     "push" => Some("arraypush".to_string()),
+                     "range" => Some("arrayrange".to_string()),
+                     "reduceright" => Some("arrayreduceright".to_string()),
+                     "reject" => Some("arrayreject".to_string()),
+                     "reverse" => Some("arrayreverse".to_string()),
+                     "set" => Some("arrayset".to_string()),
+                     "shift" => Some("arrayshift".to_string()),
+                     "slice" => Some("arrayslice".to_string()),
+                     "some" => Some("arraysome".to_string()),
+                     "sort" => Some("arraysort".to_string()),
+                     "splice" => Some("arraysplice".to_string()),
+                     "sum" => Some("arraysum".to_string()),
+                     "tolist" => Some("arraytolist".to_string()),
+                     "tostruct" => Some("arraytostruct".to_string()),
+                     "transpose" => Some("arraytranspose".to_string()),
+                     "unique" => Some("arrayunique".to_string()),
+                     "unshift" => Some("arrayunshift".to_string()),
+                     "zip" => Some("arrayzip".to_string()),
+                     "tojson" => Some("serializejson".to_string()),
+                     "toset" => Some("toset".to_string()),
+                     "tomodifiable" => Some("tomodifiable".to_string()),
+                     "tounmodifiable" => Some("tounmodifiable".to_string()),
+                     "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
                 GcObject::Struct(_) => match name.as_str() {
                     "len" | "count" => Some("len".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
-                    "find" => Some("structfind".to_string()),
+                     "find" => Some("structfind".to_string()),
+                     "append" => Some("structappend".to_string()),
                     "isempty" => Some("structisempty".to_string()),
                     "each" => Some("structeach".to_string()),
                     "tojson" => Some("serializejson".to_string()),
@@ -2295,6 +2517,7 @@ impl VM {
                     _ => None,
                 },
                 GcObject::DateTime(_) => match name.as_str() {
+                    "len" => Some("len".to_string()),
                     "add" => Some("dateadd".to_string()),
                     "diff" => Some("datediff".to_string()),
                     "format" => Some("datetimeformat".to_string()),
@@ -3683,18 +3906,33 @@ impl VM {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
 
-                    let a_num = if a.is_number() {
-                        Some(a.as_number())
-                    } else {
-                        self.to_string(a).parse::<f64>().ok()
-                    };
-                    let b_num = if b.is_number() {
-                        Some(b.as_number())
-                    } else {
-                        self.to_string(b).parse::<f64>().ok()
+                    let array_union = match (a.as_gc_id(), b.as_gc_id()) {
+                        (Some(a_id), Some(b_id)) => {
+                            let (left, right) = match (self.heap.get(a_id), self.heap.get(b_id)) {
+                                (GcObject::Array(left), GcObject::Array(right)) => {
+                                    (Some(left.clone()), Some(right.clone()))
+                                }
+                                _ => (None, None),
+                            };
+                            left.zip(right).map(|(left, right)| {
+                                let mut values = left;
+                                for value in right {
+                                    if !values.iter().any(|existing| self.is_equal(*existing, value)) {
+                                        values.push(value);
+                                    }
+                                }
+                                values
+                            })
+                        }
+                        _ => None,
                     };
 
-                    if let (Some(na), Some(nb)) = (a_num, b_num) {
+                    if let Some(values) = array_union {
+                        let id = self.heap.alloc(GcObject::Array(values));
+                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                    } else if let (Some(na), Some(nb)) =
+                        (self.numeric_value(a), self.numeric_value(b))
+                    {
                         self.fibers[fiber_idx]
                             .stack
                             .push(BxValue::new_number(na + nb));
@@ -3708,10 +3946,34 @@ impl VM {
                 op::SUBTRACT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
+                    let array_difference = match (a.as_gc_id(), b.as_gc_id()) {
+                        (Some(a_id), Some(b_id)) => {
+                            let (left, right) = match (self.heap.get(a_id), self.heap.get(b_id)) {
+                                (GcObject::Array(left), GcObject::Array(right)) => {
+                                    (Some(left.clone()), Some(right.clone()))
+                                }
+                                _ => (None, None),
+                            };
+                            left.zip(right).map(|(left, right)| {
+                                left.into_iter()
+                                    .filter(|value| {
+                                        !right.iter().any(|excluded| self.is_equal(*value, *excluded))
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(values) = array_difference {
+                        let id = self.heap.alloc(GcObject::Array(values));
+                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                    } else if let (Some(na), Some(nb)) =
+                        (self.numeric_value(a), self.numeric_value(b))
+                    {
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(a.as_number() - b.as_number()));
+                            .push(BxValue::new_number(na - nb));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers.")?;
@@ -3722,9 +3984,11 @@ impl VM {
                 op::SUB_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(
-                        a.as_number() as i32 - b.as_number() as i32,
-                    ));
+                    let result = self.numeric_value(a).unwrap_or(f64::NAN) as i32
+                        - self.numeric_value(b).unwrap_or(f64::NAN) as i32;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_int(result));
                 }
                 op::SUB_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -3736,10 +4000,10 @@ impl VM {
                 op::MULTIPLY => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(a.as_number() * b.as_number()));
+                            .push(BxValue::new_number(na * nb));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers.")?;
@@ -3750,9 +4014,11 @@ impl VM {
                 op::MUL_INT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    self.fibers[fiber_idx].stack.push(BxValue::new_int(
-                        a.as_number() as i32 * b.as_number() as i32,
-                    ));
+                    let result = self.numeric_value(a).unwrap_or(f64::NAN) as i32
+                        * self.numeric_value(b).unwrap_or(f64::NAN) as i32;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_int(result));
                 }
                 op::MUL_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -3764,8 +4030,7 @@ impl VM {
                 op::DIVIDE => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let b_n = b.as_number();
+                    if let (Some(na), Some(b_n)) = (self.numeric_value(a), self.numeric_value(b)) {
                         if b_n == 0.0 {
                             flush_ip!();
                             self.throw_error(fiber_idx, "Division by zero")?;
@@ -3774,7 +4039,7 @@ impl VM {
                         } else {
                             self.fibers[fiber_idx]
                                 .stack
-                                .push(BxValue::new_number(a.as_number() / b_n));
+                                .push(BxValue::new_number(na / b_n));
                         }
                     } else {
                         flush_ip!();
@@ -3786,15 +4051,55 @@ impl VM {
                 op::DIV_FLOAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let Some(na) = self.numeric_value(a) else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
+                        frame_changed = true;
+                        continue 'quantum;
+                    };
+                    let Some(nb) = self.numeric_value(b) else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
+                        frame_changed = true;
+                        continue 'quantum;
+                    };
+                    if nb == 0.0 {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Division by zero")?;
+                        frame_changed = true;
+                        continue 'quantum;
+                    }
+                    let result = na / nb;
                     self.fibers[fiber_idx]
                         .stack
-                        .push(BxValue::new_number(a.as_number() / b.as_number()));
+                        .push(BxValue::new_number(result));
+                }
+                op::INTEGER_DIVIDE => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let left = na.floor();
+                        let right = nb.floor();
+                        if right == 0.0 {
+                            flush_ip!();
+                            self.throw_error(fiber_idx, "Division by zero")?;
+                            frame_changed = true;
+                            continue 'quantum;
+                        }
+                        self.fibers[fiber_idx]
+                            .stack
+                            .push(BxValue::new_number((left / right).trunc()));
+                    } else {
+                        flush_ip!();
+                        self.throw_error(fiber_idx, "Operands must be two numbers.")?;
+                        frame_changed = true;
+                        continue 'quantum;
+                    }
                 }
                 op::MODULO => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let b_n = b.as_number();
+                    if let (Some(na), Some(b_n)) = (self.numeric_value(a), self.numeric_value(b)) {
                         if b_n == 0.0 {
                             flush_ip!();
                             self.throw_error(fiber_idx, "Division by zero (modulo)")?;
@@ -3803,7 +4108,7 @@ impl VM {
                         } else {
                             self.fibers[fiber_idx]
                                 .stack
-                                .push(BxValue::new_number(a.as_number() % b_n));
+                                .push(BxValue::new_number(na % b_n));
                         }
                     } else {
                         flush_ip!();
@@ -3815,11 +4120,11 @@ impl VM {
                 op::BIT_OR => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as i64) | (b.as_number() as i64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let result = (na as i32) | (nb as i32);
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(
@@ -3833,11 +4138,11 @@ impl VM {
                 op::BIT_AND => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as i64) & (b.as_number() as i64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let result = (na as i32) & (nb as i32);
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(
@@ -3851,11 +4156,11 @@ impl VM {
                 op::BIT_XOR => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as i64) ^ (b.as_number() as i64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let result = (na as i32) ^ (nb as i32);
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(
@@ -3868,11 +4173,11 @@ impl VM {
                 }
                 op::BIT_NOT => {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() {
-                        let result = !(a.as_number() as i64);
+                    if let Some(na) = self.numeric_value(a) {
+                        let result = !(na as i32);
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operand must be a number for bitwise NOT.")?;
@@ -3883,11 +4188,12 @@ impl VM {
                 op::BIT_SHL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as i64) << (b.as_number() as i64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let shift = (nb as i32 as u32) & 31;
+                        let result = (na as i32 as u32).wrapping_shl(shift) as i32;
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(
@@ -3901,11 +4207,12 @@ impl VM {
                 op::BIT_SHR => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as i64) >> (b.as_number() as i64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let shift = (nb as i32 as u32) & 31;
+                        let result = (na as i32) >> shift;
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(result as f64));
+                            .push(BxValue::new_int(result));
                     } else {
                         flush_ip!();
                         self.throw_error(
@@ -3919,8 +4226,9 @@ impl VM {
                 op::BIT_USHR => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        let result = (a.as_number() as u64) >> (b.as_number() as u64);
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                        let shift = (nb as i32 as u32) & 31;
+                        let result = (na as i32 as u32) >> shift;
                         self.fibers[fiber_idx]
                             .stack
                             .push(BxValue::new_number(result as f64));
@@ -3937,10 +4245,10 @@ impl VM {
                 op::POW => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
+                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
                         self.fibers[fiber_idx]
                             .stack
-                            .push(BxValue::new_number(a.as_number().powf(b.as_number())));
+                            .push(BxValue::new_number(na.powf(nb)));
                     } else {
                         flush_ip!();
                         self.throw_error(fiber_idx, "Operands must be two numbers for power.")?;
@@ -4351,6 +4659,8 @@ impl VM {
                     let id = self.heap.alloc(GcObject::Struct(BxStruct {
                         shape_id,
                         properties: props,
+                        case_sensitive: false,
+                        ordered: false,
                     }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
@@ -4377,6 +4687,8 @@ impl VM {
                     let id = self.heap.alloc(GcObject::Struct(BxStruct {
                         shape_id,
                         properties: props,
+                        case_sensitive: false,
+                        ordered: false,
                     }));
                     self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
                 }
@@ -4408,16 +4720,37 @@ impl VM {
                         match self.heap.get(id) {
                             GcObject::Array(arr) => {
                                 if index_val.is_number() || index_val.is_int() {
-                                    let idx = if index_val.is_int() {
-                                        index_val.as_int() as usize
+                                    if index_val.is_number() && index_val.as_number().fract() != 0.0 {
+                                        flush_ip!();
+                                        self.throw_error(fiber_idx, "Array index must be an integer")?;
+                                        frame_changed = true;
+                                        continue 'quantum;
+                                    }
+                                    let raw_index = if index_val.is_int() {
+                                        index_val.as_int() as i64
                                     } else {
-                                        index_val.as_number() as usize
+                                        index_val.as_number() as i64
                                     };
-                                    if idx < 1 || idx > arr.len() {
-                                        // Out-of-bounds reads return null (sparse array semantics)
-                                        self.fibers[fiber_idx].stack.push(BxValue::new_null());
+                                    if raw_index == 0 {
+                                        flush_ip!();
+                                        self.throw_error(fiber_idx, "Array index must not be zero")?;
+                                        frame_changed = true;
+                                        continue 'quantum;
+                                    }
+                                    let resolved_index = if raw_index < 0 {
+                                        arr.len() as i64 + raw_index
                                     } else {
-                                        self.fibers[fiber_idx].stack.push(arr[idx - 1]);
+                                        raw_index - 1
+                                    };
+                                    if resolved_index < 0 || resolved_index >= arr.len() as i64 {
+                                        flush_ip!();
+                                        self.throw_error(fiber_idx, "Array index out of bounds")?;
+                                        frame_changed = true;
+                                        continue 'quantum;
+                                    } else {
+                                        self.fibers[fiber_idx]
+                                            .stack
+                                            .push(arr[resolved_index as usize]);
                                     }
                                 } else {
                                     flush_ip!();
@@ -5187,6 +5520,18 @@ impl VM {
                 op::STRING_CONCAT => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    if let Some(id) = a.as_gc_id() {
+                        if self
+                            .native_object_call_method(id, "__is_string_builder", &[])
+                            .is_ok()
+                        {
+                            let result = self
+                                .native_object_call_method(id, "append", &[b])
+                                .map_err(anyhow::Error::msg)?;
+                            self.fibers[fiber_idx].stack.push(result);
+                            continue 'quantum;
+                        }
+                    }
                     let a_s = self.to_box_string(a);
                     let b_s = self.to_box_string(b);
                     let res_id = self.heap.alloc(GcObject::String(a_s.concat(&b_s)));
@@ -5494,89 +5839,53 @@ impl VM {
                     let res = self.is_equal(a, b);
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(!res));
                 }
+                op::STRICT_EQUAL => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let result = self.is_strict_equal(a, b);
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
+                }
+                op::STRICT_NOT_EQUAL => {
+                    let b = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let a = self.fibers[fiber_idx].stack.pop().unwrap();
+                    let result = !self.is_strict_equal(a, b);
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
+                }
                 op::LESS => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a.as_number() < b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) =
-                        (self.datetime_value(a), self.datetime_value(b))
-                    {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a_dt < b_dt));
-                    } else {
-                        let sa = self.to_string_internal(a);
-                        let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(sa < sb));
-                    }
+                    let result = self.compare_values(a, b) == std::cmp::Ordering::Less;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
                 }
                 op::LESS_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a.as_number() <= b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) =
-                        (self.datetime_value(a), self.datetime_value(b))
-                    {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a_dt <= b_dt));
-                    } else {
-                        let sa = self.to_string_internal(a);
-                        let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(sa <= sb));
-                    }
+                    let result = self.compare_values(a, b) != std::cmp::Ordering::Greater;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
                 }
                 op::GREATER => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a.as_number() > b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) =
-                        (self.datetime_value(a), self.datetime_value(b))
-                    {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a_dt > b_dt));
-                    } else {
-                        let sa = self.to_string_internal(a);
-                        let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(sa > sb));
-                    }
+                    let result = self.compare_values(a, b) == std::cmp::Ordering::Greater;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
                 }
                 op::GREATER_EQUAL => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if a.is_number() && b.is_number() {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a.as_number() >= b.as_number()));
-                    } else if let (Some(a_dt), Some(b_dt)) =
-                        (self.datetime_value(a), self.datetime_value(b))
-                    {
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(a_dt >= b_dt));
-                    } else {
-                        let sa = self.to_string_internal(a);
-                        let sb = self.to_string_internal(b);
-                        self.fibers[fiber_idx]
-                            .stack
-                            .push(BxValue::new_bool(sa >= sb));
-                    }
+                    let result = self.compare_values(a, b) != std::cmp::Ordering::Less;
+                    self.fibers[fiber_idx]
+                        .stack
+                        .push(BxValue::new_bool(result));
                 }
                 op::NOT => {
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
@@ -5845,7 +6154,7 @@ impl VM {
                     let offset = next_word!();
                     let val = unsafe { *locals_ptr.add(slot as usize) };
                     let constant = self.read_constant(fiber_idx, const_idx as usize)?;
-                    if val != constant {
+                    if !self.is_equal(val, constant) {
                         ip += offset as usize;
                     }
                 }
@@ -5941,29 +6250,40 @@ impl VM {
                 op::CONTAINS => {
                     let needle = self.fibers[fiber_idx].stack.pop().unwrap();
                     let haystack = self.fibers[fiber_idx].stack.pop().unwrap();
-                    let needle_s = self.to_string(needle);
-                    let result = if let Some(id) = haystack.as_gc_id() {
+                    let result = if needle.is_null() || haystack.is_null() {
+                        false
+                    } else if let Some(id) = haystack.as_gc_id() {
                         match self.heap.get(id) {
-                            GcObject::String(s) => s.to_string().contains(&needle_s),
-                            GcObject::Array(arr) => arr.iter().any(|v| *v == needle),
+                            GcObject::String(s) => s
+                                .to_string()
+                                .to_lowercase()
+                                .contains(&self.to_string(needle).to_lowercase()),
+                            GcObject::Array(arr) => arr.iter().any(|v| self.is_equal(*v, needle)),
                             GcObject::Range(range) => {
-                                if needle.is_number() || needle.is_int() {
-                                    range.contains_number(needle.as_number())
+                                if let Some(number) = self.numeric_value(needle) {
+                                    range.contains_number(number)
                                 } else {
                                     false
                                 }
                             }
                             GcObject::Struct(s) => {
-                                let intern_id = self.interner.intern(&needle_s);
-                                self.shapes.get_index(s.shape_id, intern_id).is_some()
+                                let needle_s = self.to_string(needle);
+                                let shape = &self.shapes.shapes[s.shape_id as usize];
+                                shape.fields.keys().any(|key_id| {
+                                    self.interner
+                                        .resolve(*key_id)
+                                        .eq_ignore_ascii_case(&needle_s)
+                                })
                             }
-                            _ => false,
+                            _ => self
+                                .to_string(haystack)
+                                .to_lowercase()
+                                .contains(&self.to_string(needle).to_lowercase()),
                         }
-                    } else if haystack.is_number() {
-                        false
                     } else {
-                        let hs = self.to_string(haystack);
-                        hs.contains(&needle_s)
+                        self.to_string(haystack)
+                            .to_lowercase()
+                            .contains(&self.to_string(needle).to_lowercase())
                     };
                     self.fibers[fiber_idx].stack.push(BxValue::new_bool(result));
                 }
@@ -6353,6 +6673,7 @@ impl VM {
                     }
                     let _future = self.enqueue_function_call(func, f, args, 0, None);
                     let fiber_idx = self.fibers.len() - 1;
+                    let previous_fiber_idx = self.current_fiber_idx;
                     self.current_fiber_idx = Some(fiber_idx);
                     // Loop until the fiber completes — this is a synchronous blocking call.
                     let result = loop {
@@ -6364,7 +6685,7 @@ impl VM {
                             Err(e) => break Err(e),
                         }
                     };
-                    self.current_fiber_idx = None;
+                    self.current_fiber_idx = previous_fiber_idx;
                     let _ = self.fibers.swap_remove(fiber_idx);
                     result
                 }
@@ -6463,6 +6784,7 @@ impl VM {
                     };
                     self.fibers.push(fiber);
                     let fiber_idx = self.fibers.len() - 1;
+                    let previous_fiber_idx = self.current_fiber_idx;
                     self.current_fiber_idx = Some(fiber_idx);
                     let result = loop {
                         match self
@@ -6473,7 +6795,7 @@ impl VM {
                             Err(e) => break Err(e),
                         }
                     };
-                    self.current_fiber_idx = None;
+                    self.current_fiber_idx = previous_fiber_idx;
                     if fiber_idx < self.fibers.len() {
                         self.fibers.swap_remove(fiber_idx);
                     }
@@ -6651,7 +6973,19 @@ impl VM {
             false
         } else if let Some(id) = val.as_gc_id() {
             match self.heap.get(id) {
-                GcObject::String(s) => !s.is_empty() && s.to_string().to_lowercase() != "false",
+                GcObject::String(s) => {
+                    let text = s.to_string();
+                    let trimmed = text.trim();
+                    if trimmed.is_empty() {
+                        false
+                    } else if matches!(trimmed.to_lowercase().as_str(), "false" | "no") {
+                        false
+                    } else if let Ok(number) = trimmed.parse::<f64>() {
+                        number != 0.0
+                    } else {
+                        true
+                    }
+                }
                 _ => true,
             }
         } else {
@@ -6665,7 +6999,8 @@ impl VM {
         names: Vec<String>,
         params: &[String],
     ) -> Vec<BxValue> {
-        let mut final_args = vec![BxValue::new_null(); params.len()];
+        // Compiled functions reserve one extra local for the implicit `arguments` value.
+        let mut final_args = vec![BxValue::new_null(); params.len() + 1];
         let mut positional_args = Vec::new();
         let mut named_args = Vec::new();
 
@@ -6689,6 +7024,130 @@ impl VM {
             if let Some(param_idx) = params.iter().position(|p| p.to_lowercase() == name) {
                 final_args[param_idx] = arg_val;
             }
+        }
+        final_args
+    }
+
+    fn native_global_name(&self, value: BxValue) -> Option<String> {
+        self.global_names.iter().find_map(|(name_id, idx)| {
+            (self.global_values[*idx] == value)
+                .then(|| self.interner.resolve(*name_id).to_string())
+        })
+    }
+
+    fn reorder_native_arguments(
+        &self,
+        args: Vec<BxValue>,
+        names: Vec<String>,
+        function_name: Option<&str>,
+    ) -> Vec<BxValue> {
+        let Some(function_name) = function_name else {
+            return args;
+        };
+
+        let params: Vec<&str> = match function_name.to_ascii_lowercase().as_str() {
+            "gettoken" => vec!["list", "position", "delimiter"],
+            "listavg" => vec!["list", "delimiter"],
+            "listchangedelims" => {
+                vec!["list", "newdelimiter", "delimiters", "includeemptyfields"]
+            }
+            "listcontains" | "listcontainsnocase" => vec![
+                "list",
+                "value",
+                "delimiter",
+                "includeemptyfields",
+                "multicharacterdelimiter",
+            ],
+            "listcompact" => vec!["list", "delimiters", "includeemptyfields", "multicharacterdelimiter"],
+            "listeach" | "listevery" | "listmap" | "listnone" | "listsome" => vec![
+                "list",
+                "callback",
+                "delimiter",
+                "includeemptyfields",
+                "parallel",
+                "virtual",
+                "maxthreads",
+            ],
+            "listfilter" => vec![
+                "list",
+                "filter",
+                "delimiter",
+                "includeemptyfields",
+                "parallel",
+                "virtual",
+                "maxthreads",
+            ],
+            "listqualify" => vec![
+                "list",
+                "qualifier",
+                "delimiter",
+                "elements",
+                "includeemptyfields",
+            ],
+            "listreduce" | "listreduceright" => {
+                vec!["list", "callback", "initialvalue", "delimiter"]
+            }
+            "listremoveduplicates" => vec!["list", "delimiter", "ignorecase"],
+            "listvaluecount" | "listvaluecountnocase" => {
+                vec!["list", "value", "delimiter"]
+            }
+            "listtoarray" => vec![
+                "list",
+                "delimiter",
+                "includeemptyfields",
+                "multicharacterdelimiter",
+            ],
+            "listlen" => vec!["list", "delimiter", "includeemptyfields", "multicharacterdelimiter"],
+            "listgetat" => vec![
+                "list",
+                "position",
+                "delimiter",
+                "includeemptyfields",
+                "multicharacterdelimiter",
+            ],
+            "listappend" => vec![
+                "list",
+                "value",
+                "delimiter",
+                "includeemptyfields",
+                "multicharacterdelimiter",
+            ],
+            "listrest" => vec![
+                "list",
+                "delimiter",
+                "includeemptyfields",
+                "multicharacterdelimiter",
+                "offset",
+            ],
+            "structkeytranslate" => vec!["struct", "deep", "retainkeys"],
+            "stringbuildernew" => vec!["value", "capacity"],
+            _ => return args,
+        };
+
+        let mut final_args = vec![BxValue::new_null(); params.len()];
+        let mut positional_args = Vec::new();
+        for (index, value) in args.into_iter().enumerate() {
+            if index < names.len() && !names[index].is_empty() {
+                if let Some(param_index) = params
+                    .iter()
+                    .position(|param| *param == names[index].to_ascii_lowercase())
+                {
+                    final_args[param_index] = value;
+                }
+            } else {
+                positional_args.push(value);
+            }
+        }
+        for (index, value) in positional_args.into_iter().enumerate() {
+            if index < final_args.len() {
+                final_args[index] = value;
+            }
+        }
+        while final_args
+            .last()
+            .is_some_and(BxValue::is_null)
+        {
+            final_args.pop();
         }
         final_args
     }
@@ -6717,8 +7176,12 @@ impl VM {
         arg_count: usize,
         names: Option<Vec<String>>,
     ) -> Result<()> {
-        let func_val =
-            self.fibers[fiber_idx].stack[self.fibers[fiber_idx].stack.len() - 1 - arg_count];
+        let func_index = self.fibers[fiber_idx]
+            .stack
+            .len()
+            .checked_sub(1 + arg_count)
+            .ok_or_else(|| anyhow::anyhow!("Call stack underflow: {} arguments", arg_count))?;
+        let func_val = self.fibers[fiber_idx].stack[func_index];
 
         if let Some(id) = func_val.as_gc_id() {
             #[cfg(all(target_arch = "wasm32", feature = "js"))]
@@ -6774,7 +7237,6 @@ impl VM {
                         }
                         a
                     };
-
                     // Stack: ... [func] [arg1] [arg2] ...
                     // Function is already at len() - 1 - arg_count.
                     // We popped args, now we push final_args back.
@@ -6873,6 +7335,10 @@ impl VM {
                         args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                     }
                     args.reverse();
+                    let native_name = self.native_global_name(func_val);
+                    if let Some(names) = names {
+                        args = self.reorder_native_arguments(args, names, native_name.as_deref());
+                    }
                     self.fibers[fiber_idx].stack.pop(); // Pop the function object
 
                     match func(self, &args) {
@@ -7049,6 +7515,44 @@ impl VM {
             }
 
             match self.heap.get(id) {
+                GcObject::Struct(_) => {
+                    let method_val = self.struct_get(id, &name);
+                    if let Some(method_id) = method_val.as_gc_id() {
+                        if let GcObject::CompiledFunction(function) = self.heap.get(method_id) {
+                            let function = Rc::clone(function);
+                            let mut args = Vec::with_capacity(arg_count);
+                            for _ in 0..arg_count {
+                                args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                            }
+                            args.reverse();
+                            self.fibers[fiber_idx].stack.pop();
+                            let final_args = if let Some(names_list) = names {
+                                self.reorder_arguments(args, names_list, &function.params)
+                            } else {
+                                let mut final_args = args;
+                                while final_args.len() < function.arity as usize {
+                                    final_args.push(BxValue::new_null());
+                                }
+                                final_args
+                            };
+                            self.fibers[fiber_idx].stack.extend(final_args);
+                            let sub_chunk = function.chunk.clone();
+                            let constant_count = sub_chunk.constants().len();
+                            let stack_base = self.fibers[fiber_idx].stack.len() - function.arity as usize;
+                            self.fibers[fiber_idx].frames.push(CallFrame {
+                                function,
+                                chunk: Rc::new(RefCell::new(sub_chunk)),
+                                ip: 0,
+                                stack_base,
+                                receiver: Some(receiver_val),
+                                handlers: Vec::new(),
+                                pending_completion: None,
+                                promoted_constants: vec![None; constant_count],
+                            });
+                            return Ok(());
+                        }
+                    }
+                }
                 GcObject::Future(f) => {
                     let (status, value) = (f.status.clone(), f.value);
 
@@ -7346,25 +7850,43 @@ impl VM {
 
         if let Some(bif_val) = self.get_global(&bif_name) {
             if let Some(bif_id) = bif_val.as_gc_id() {
-                if let GcObject::NativeFunction(bif) = self.heap.get(bif_id) {
-                    let bif = *bif;
-                    let mut args = Vec::with_capacity(arg_count + 1);
-                    for _ in 0..arg_count {
-                        args.push(self.fibers[fiber_idx].stack.pop().unwrap());
-                    }
-                    args.reverse();
-                    self.fibers[fiber_idx].stack.pop(); // receiver
-
-                    let mut final_args = vec![receiver];
-                    final_args.extend(args);
-
-                    match bif(self, &final_args) {
-                        Ok(res) => {
-                            self.fibers[fiber_idx].stack.push(res);
-                            return Ok(());
+                match self.heap.get(bif_id) {
+                    GcObject::NativeFunction(bif) => {
+                        let bif = *bif;
+                        let mut args = Vec::with_capacity(arg_count + 1);
+                        for _ in 0..arg_count {
+                            args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                         }
-                        Err(e) => return self.throw_error(fiber_idx, &e),
+                        args.reverse();
+                        self.fibers[fiber_idx].stack.pop(); // receiver
+
+                        let mut final_args = vec![receiver];
+                        final_args.extend(args);
+
+                        match bif(self, &final_args) {
+                            Ok(res) => {
+                                self.fibers[fiber_idx].stack.push(res);
+                                return Ok(());
+                            }
+                            Err(e) => return self.throw_error(fiber_idx, &e),
+                        }
                     }
+                    // Prelude functions and native BIFs share the same public
+                    // member-method surface. Rebuild a normal call frame for a
+                    // compiled function instead of treating it as a missing BIF.
+                    GcObject::CompiledFunction(_) => {
+                        let mut args = Vec::with_capacity(arg_count + 1);
+                        for _ in 0..arg_count {
+                            args.push(self.fibers[fiber_idx].stack.pop().unwrap());
+                        }
+                        args.reverse();
+                        self.fibers[fiber_idx].stack.pop(); // receiver
+                        self.fibers[fiber_idx].stack.push(bif_val);
+                        self.fibers[fiber_idx].stack.push(receiver);
+                        self.fibers[fiber_idx].stack.extend(args);
+                        return self.execute_call(fiber_idx, arg_count + 1, None);
+                    }
+                    _ => {}
                 }
             }
         }
@@ -7803,6 +8325,8 @@ impl VM {
                 let mut bx_struct = BxStruct {
                     shape_id: self.shapes.get_root(),
                     properties: Vec::new(),
+                    case_sensitive: false,
+                    ordered: false,
                 };
                 for (name, val) in obj {
                     let bx_val = self.json_to_bx(val);

@@ -149,6 +149,9 @@ pub trait BxVM {
     fn array_new(&mut self) -> usize;
     fn struct_len(&self, id: usize) -> usize;
     fn struct_new(&mut self) -> usize;
+    fn struct_new_with_options(&mut self, _options: &[String]) -> usize {
+        self.struct_new()
+    }
     fn struct_set(&mut self, id: usize, key: &str, val: BxValue);
     fn struct_get(&self, id: usize, key: &str) -> BxValue;
     fn struct_delete(&mut self, id: usize, key: &str) -> bool;
@@ -156,6 +159,12 @@ pub trait BxVM {
     fn struct_key_array(&self, id: usize) -> Vec<String>;
     fn struct_clear(&mut self, id: usize);
     fn struct_get_shape(&self, id: usize) -> u32;
+    fn struct_is_case_sensitive(&self, _id: usize) -> bool {
+        false
+    }
+    fn struct_is_ordered(&self, _id: usize) -> bool {
+        false
+    }
     fn future_new(&mut self) -> BxValue;
     fn future_resolve(&mut self, future: BxValue, value: BxValue) -> Result<(), String>;
     fn future_reject(&mut self, future: BxValue, error: BxValue) -> Result<(), String>;
@@ -183,6 +192,9 @@ pub trait BxVM {
     fn native_object_query_row_count(&self, id: usize) -> Option<usize>;
     #[cfg(not(target_arch = "wasm32"))]
     fn native_object_query_cell(&self, id: usize, row_idx: usize, col_idx: usize) -> Option<crate::datasource::traits::SqlValue>;
+    fn resolve_variable_path(&self, _path: &str) -> Option<BxValue> {
+        None
+    }
     fn get_cli_args(&self) -> Vec<String>;
     fn write_output(&mut self, s: &str);
     fn begin_output_capture(&mut self);
@@ -507,6 +519,8 @@ impl std::fmt::Display for BxRange {
 pub struct BxStruct {
     pub shape_id: u32,
     pub properties: Vec<BxValue>,
+    pub case_sensitive: bool,
+    pub ordered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

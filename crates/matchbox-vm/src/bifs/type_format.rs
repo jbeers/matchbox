@@ -229,6 +229,7 @@ pub fn register_type_format_bifs(bifs: &mut std::collections::HashMap<String, Bx
     bifs.insert("isdebugmode".to_string(), is_debug_mode_bif as BxNativeFunction);
     bifs.insert("isdefined".to_string(), is_defined_bif as BxNativeFunction);
     bifs.insert("isempty".to_string(), is_empty_bif as BxNativeFunction);
+    bifs.insert("arrayisempty".to_string(), is_empty_bif as BxNativeFunction);
     bifs.insert("isfileobject".to_string(), is_file_object_bif as BxNativeFunction);
     bifs.insert("isipv6".to_string(), is_ipv6_bif as BxNativeFunction);
     bifs.insert("isleapyear".to_string(), is_leap_year_bif as BxNativeFunction);
@@ -242,6 +243,8 @@ pub fn register_type_format_bifs(bifs: &mut std::collections::HashMap<String, Bx
     bifs.insert("isxmlnode".to_string(), is_xml_node_bif as BxNativeFunction);
     bifs.insert("isxmlroot".to_string(), is_xml_root_bif as BxNativeFunction);
     bifs.insert("booleanformat".to_string(), boolean_format_bif as BxNativeFunction);
+    bifs.insert("truefalseformat".to_string(), boolean_format_bif as BxNativeFunction);
     bifs.insert("decimalformat".to_string(), decimal_format_bif as BxNativeFunction);
     bifs.insert("numberformat".to_string(), number_format_bif as BxNativeFunction);
+    bifs.insert("lsnumberformat".to_string(), number_format_bif as BxNativeFunction);
 }

@@ -96,6 +96,9 @@ pub mod op {
     pub const CALL_NAMED_SPREAD: u8 = 84; // 1-word: op0=arg_entry_count
     pub const INVOKE_NAMED_SPREAD: u8 = 85; // 3-word: op0=name_idx, w1=arg_entry_count, w2=unused
     pub const END_FINALLY: u8 = 86;
+    pub const INTEGER_DIVIDE: u8 = 87;
+    pub const STRICT_EQUAL: u8 = 88;
+    pub const STRICT_NOT_EQUAL: u8 = 89;
 }
 
 pub fn opcode_name(op: u8) -> &'static str {
@@ -187,6 +190,9 @@ pub fn opcode_name(op: u8) -> &'static str {
         op::CALL_NAMED_SPREAD => "CALL_NAMED_SPREAD",
         op::INVOKE_NAMED_SPREAD => "INVOKE_NAMED_SPREAD",
         op::END_FINALLY => "END_FINALLY",
+        op::INTEGER_DIVIDE => "INTEGER_DIVIDE",
+        op::STRICT_EQUAL => "STRICT_EQUAL",
+        op::STRICT_NOT_EQUAL => "STRICT_NOT_EQUAL",
         _ => "UNKNOWN",
     }
 }

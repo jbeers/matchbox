@@ -433,7 +433,9 @@ fn collect_esp32_unsupported_features_in_expr(
             collect_esp32_unsupported_features_in_expr(left, findings, embedded_web_enabled);
             collect_esp32_unsupported_features_in_expr(right, findings, embedded_web_enabled);
         }
-        ExpressionKind::UnaryNot(inner) | ExpressionKind::Postfix { base: inner, .. } => {
+        ExpressionKind::UnaryNot(inner)
+        | ExpressionKind::UnaryBitwiseNot(inner)
+        | ExpressionKind::Postfix { base: inner, .. } => {
             collect_esp32_unsupported_features_in_expr(inner, findings, embedded_web_enabled);
         }
         ExpressionKind::Ternary {
