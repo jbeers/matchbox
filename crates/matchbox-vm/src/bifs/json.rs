@@ -38,7 +38,7 @@ pub fn json_serialize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn query_to_json(vm: &dyn BxVM, value: BxValue, format: &str) -> Option<JsonValue> {
+pub(crate) fn query_to_json(vm: &dyn BxVM, value: BxValue, format: &str) -> Option<JsonValue> {
     let id = value.as_gc_id()?;
     let query = vm.native_object_query_result(id)?;
     let columns = query
@@ -179,7 +179,7 @@ fn json_to_sql(value: &JsonValue) -> Option<crate::datasource::traits::SqlValue>
 }
 
 #[cfg(target_arch = "wasm32")]
-fn query_to_json(_vm: &dyn BxVM, _value: BxValue, _format: &str) -> Option<JsonValue> {
+pub(crate) fn query_to_json(_vm: &dyn BxVM, _value: BxValue, _format: &str) -> Option<JsonValue> {
     None
 }
 

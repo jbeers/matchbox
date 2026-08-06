@@ -586,7 +586,11 @@ pub fn query_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
 
     let mut query = BxQuery::new(columns);
     if args.len() > 2 && !args[2].is_null() {
-        populate_query_rows(vm, &mut query, args[2])?;
+        if vm.is_struct_value(args[2]) {
+            add_query_struct_row(vm, &mut query, args[2])?;
+        } else {
+            populate_query_rows(vm, &mut query, args[2])?;
+        }
     }
 
     let id = vm.native_object_new(Rc::new(RefCell::new(query)));

@@ -264,7 +264,16 @@ pub fn to_script(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         return Ok(BxValue::new_ptr(s_id));
     }
 
-    let json_val = bx_to_json_for_script(vm, val);
+    if vm
+        .type_name_from_value(val)
+        .is_some_and(|name| name.eq_ignore_ascii_case("datetime"))
+    {
+        let s_id = vm.string_new(format!("{} = new Date('{}');", js_var, str_val));
+        return Ok(BxValue::new_ptr(s_id));
+    }
+
+    let json_val = super::json::query_to_json(vm, val, "row")
+        .unwrap_or_else(|| bx_to_json_for_script(vm, val));
     let json_str = serde_json::to_string(&json_val)
         .map_err(|e| format!("Failed to serialize to JSON: {}", e))?;
     let s_id = vm.string_new(format!("{} = {};", js_var, json_str));
@@ -277,7 +286,16 @@ fn bx_to_json_for_script(vm: &dyn BxVM, val: BxValue) -> JsonValue {
     } else if val.is_bool() {
         JsonValue::Bool(val.as_bool())
     } else if val.is_number() {
-        JsonValue::Number(serde_json::Number::from_f64(val.as_number()).unwrap())
+        let number = val.as_number();
+        if number.is_finite()
+            && number.fract() == 0.0
+            && number >= i64::MIN as f64
+            && number <= i64::MAX as f64
+        {
+            JsonValue::Number(serde_json::Number::from(number as i64))
+        } else {
+            JsonValue::Number(serde_json::Number::from_f64(number).unwrap())
+        }
     } else if vm.is_struct_value(val) {
         if let Some(id) = val.as_gc_id() {
             let mut map = serde_json::Map::new();
