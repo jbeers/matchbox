@@ -1,0 +1,56 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/type/LenTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): testItReturnsByteArrayLength
+// requires a Java byte[] and testItReturnsSetLength constructs java.util.HashSet.
+
+// testItReturnsArrayLength
+arr = [ 1, 2, 3 ];
+result = arrayLen( arr );
+assert result == 3 : "testItReturnsArrayLength arrayLen";
+result = arr.len();
+result2 = [ 1, 2, 3 ].len();
+assert result == 3 : "testItReturnsArrayLength member-len";
+assert result2 == 3 : "testItReturnsArrayLength literal-len";
+
+// testItReturnsStructLength
+str = { foo: "bar", brad: "wood" };
+result = structCount( str );
+assert result == 2 : "testItReturnsStructLength structCount";
+result = str.len();
+result2 = str.count();
+assert result == 2 : "testItReturnsStructLength member-len";
+assert result2 == 2 : "testItReturnsStructLength count";
+result = { foo: "bar", brad: "wood" }.len();
+result2 = { foo: "bar", brad: "wood" }.count();
+assert result == 2 : "testItReturnsStructLength literal-len";
+assert result2 == 2 : "testItReturnsStructLength literal-count";
+
+// testItReturnsStringLength
+str = "BoxLang";
+result = len( str );
+assert result == 7 : "testItReturnsStringLength len";
+result = str.len();
+result2 = "BoxLang".len();
+assert result == 7 : "testItReturnsStringLength member-len";
+assert result2 == 7 : "testItReturnsStringLength literal-len";
+
+// testItReturnsNumberLength
+num = 123;
+result = len( num );
+assert result == 3 : "testItReturnsNumberLength len";
+result = num.len();
+result = ( 123 ).len();
+assert result == 3 : "testItReturnsNumberLength member-len";
+
+// testItReturnsQueryLength
+myQuery = queryNew( "id,name", "integer,varchar", [
+    [1, "Ortus Solutions"],
+    [2, "BoxLang"],
+    [3, "ColdBox"]
+] );
+result = myQuery.len();
+assert result == 3 : "testItReturnsQueryLength";

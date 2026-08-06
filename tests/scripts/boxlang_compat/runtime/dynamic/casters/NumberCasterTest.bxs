@@ -1,0 +1,78 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/casters/NumberCasterTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no `cast` BIF yet, so this file fails (red) until it
+// lands. Transcribed via `cast( value, "numeric" )`.
+// ---------------------------------------------------------------------------
+
+// testItCanCastADouble
+assert ( cast( 5, "numeric" ) == 5 ) : "testItCanCastADouble";
+
+// testItCanCastANull
+assert ( cast( null, "numeric" ) == 0 ) : "testItCanCastANull";
+
+// testItCanCastAString
+assert ( cast( "421", "numeric" ) == 421 ) : "testItCanCastAString 421";
+assert ( cast( "-42", "numeric" ) == -42 ) : "testItCanCastAString -42";
+assert ( cast( "+42", "numeric" ) == 42 ) : "testItCanCastAString +42";
+assert ( cast( "4.2", "numeric" ) == 4.2 ) : "testItCanCastAString 4.2";
+assert ( cast( "42.", "numeric" ) == 42 ) : "testItCanCastAString 42.";
+threw = false;
+try {
+    x = cast( "42.brad", "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastAString 42.brad-throws";
+
+// testItCanHandleFloatingPointMath
+assert ( cast( ".42", "numeric" ) == 0.42 ) : "testItCanHandleFloatingPointMath";
+
+// testItCanCastAChar
+assert ( cast( "5", "numeric" ) == 5 ) : "testItCanCastAChar";
+
+// testItWillNotCastABoolean
+threw = false;
+try {
+    x = cast( true, "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean true";
+threw = false;
+try {
+    x = cast( false, "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean false";
+threw = false;
+try {
+    x = cast( "true", "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean str-true";
+threw = false;
+try {
+    x = cast( "false", "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean str-false";
+threw = false;
+try {
+    x = cast( "yes", "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean yes";
+threw = false;
+try {
+    x = cast( "no", "numeric" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastABoolean no";

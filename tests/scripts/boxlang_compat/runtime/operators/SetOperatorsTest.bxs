@@ -1,0 +1,38 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/SetOperatorsTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no Set type yet, so `.toSet()` is not available; this
+// file is expected to fail (red) until it lands.
+// ---------------------------------------------------------------------------
+
+// testPlusUnion
+a = [1, 2, 3].toSet();
+b = [3, 4, 5].toSet();
+u = a + b;
+assert u.size() == 5 : "testPlusUnion size";
+assert u.contains( 1 ) : "testPlusUnion 1";
+assert u.contains( 5 ) : "testPlusUnion 5";
+
+// testMinusDifference
+a = [1, 2, 3, 4].toSet();
+b = [3, 4].toSet();
+d = a - b;
+assert d.size() == 2 : "testMinusDifference size";
+assert d.contains( 1 ) : "testMinusDifference 1";
+assert d.contains( 2 ) : "testMinusDifference 2";
+assert d.contains( 3 ) == false : "testMinusDifference 3";
+
+// testNumericPlusUnchanged
+result = 2 + 3;
+assert result == 5 : "testNumericPlusUnchanged";
+
+// testNumericMinusUnchanged
+result = 10 - 4;
+assert result == 6 : "testNumericMinusUnchanged";
+
+// testSetPlusArray
+a = [1, 2].toSet();
+r = a + [2, 3, 4].toSet();
+assert r.size() == 4 : "testSetPlusArray";

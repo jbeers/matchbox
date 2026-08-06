@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryKeyExistsTest.java
+q = queryNew( "a,b" );
+assert queryKeyExists( q, "a" ) : "testKeyExists";
+assert queryKeyExists( q, "zzz" ) == false : "testKeyNotExists";

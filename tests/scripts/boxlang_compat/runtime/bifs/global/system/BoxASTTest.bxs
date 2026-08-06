@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/BoxASTTest.java
+// Source parsing is kept active; JVM-only file fixtures and Java Map assertions
+// from the reference test are intentionally omitted.
+
+result = boxAST( source = "x = 1 + 2" );
+assert isStruct( result ) : "testParseSourceReturnStruct";
+assert structKeyExists( result, "ASTType" ) : "testParseSourceReturnStruct ASTType";
+
+json = boxAST( source = "x = 1 + 2", returnType = "json" );
+assert len( json ) > 0 : "testParseSourceReturnJSON";
+
+text = boxAST( source = "x = 1 + 2", returnType = "text" );
+assert len( text ) > 0 : "testParseSourceReturnText";

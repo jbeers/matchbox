@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayEveryTest.java
+r = arrayEvery( [2,4,6], function( item ) { return item % 2 == 0; } );
+assert r : "testEvery all-even";
+r = arrayEvery( [2,3,4], function( item ) { return item % 2 == 0; } );
+assert r == false : "testReturnEarlyOnFalse";
+r = arrayEvery( [2,4,6], function( item ) { return item % 2 == 0; }, true );
+assert r : "testEvery parallel";
+r = arrayEvery( [2,4,6], function( item ) { return item % 2 == 0; }, true, 2 );
+assert r : "testEvery parallel maxThreads";

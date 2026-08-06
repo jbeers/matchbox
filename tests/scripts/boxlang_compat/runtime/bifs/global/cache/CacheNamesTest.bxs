@@ -1,0 +1,9 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cache/CacheNamesTest.java
+// ---------------------------------------------------------------------------
+
+// canGetCacheNames
+result = cacheNames();
+assert isArray( result ) : "canGetCacheNames result-type";
+assert result != null : "canGetCacheNames result";
+assert arrayLen( result ) >= 1 : "canGetCacheNames size";

@@ -1,0 +1,42 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsLeapYearTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+anInteger = isLeapYear( 2024 );
+aStringInteger = isLeapYear( "2024" );
+aFloat = isLeapYear( 0.2024 );
+anotherFloat = isLeapYear( 20.24 );
+aTwoDigitInteger = isLeapYear( 20 );
+aStringFloat = isLeapYear( "20.24" );
+assert anInteger : "testTrueConditions integer";
+assert aStringInteger : "testTrueConditions string-integer";
+assert aFloat : "testTrueConditions float";
+assert anotherFloat : "testTrueConditions another-float";
+assert aTwoDigitInteger : "testTrueConditions two-digit";
+assert aStringFloat : "testTrueConditions string-float";
+
+// testCenturyTurns
+sixteenhundred = isLeapYear( 1600 );
+nineteenhundred = isLeapYear( 1900 );
+twothousand = isLeapYear( 2000 );
+assert sixteenhundred : "testCenturyTurns 1600";
+assert nineteenhundred == false : "testCenturyTurns 1900";
+assert twothousand : "testCenturyTurns 2000";
+
+// testFalseConditions
+anIntegerNonLeapYear = isLeapYear( 2023 );
+aStringNonLeapYear = isLeapYear( "2021" );
+assert anIntegerNonLeapYear == false : "testFalseConditions 2023";
+assert aStringNonLeapYear == false : "testFalseConditions 2021";
+
+// testException
+threw = false;
+try {
+    x = isLeapYear( "brad2024" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testException";

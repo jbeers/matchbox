@@ -1,0 +1,52 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/AsyncAnyTest.java
+
+// testAsyncAnyWithMultipleFutures
+f1 = futureNew( () => {
+    sleep( 1000 );
+    return "Result from f1";
+} );
+f2 = futureNew( () => {
+    sleep( 500 );
+    return "Result from f2";
+} );
+result = asyncAny( [f1, f2] );
+assert result.get() == "Result from f2" : "testAsyncAnyWithMultipleFutures";
+
+// testAsyncAnyWithClosures
+result = asyncAny( [
+    () => {
+        sleep( 1000 );
+        return "Closure Result 1";
+    },
+    () => {
+        sleep( 500 );
+        return "Closure Result 2";
+    }
+] );
+assert result.get() == "Closure Result 2" : "testAsyncAnyWithClosures";
+
+// testAsyncAnyWithLambdas
+result = asyncAny( [
+    () -> {
+        sleep( 1000 );
+        return "Lambda Result 1";
+    },
+    () -> {
+        sleep( 500 );
+        return "Lambda Result 2";
+    }
+] );
+assert result.get() == "Lambda Result 2" : "testAsyncAnyWithLambdas";
+
+// testAsyncAnyWithLambdasAndCustomExecutor
+result = asyncAny( [
+    () -> {
+        sleep( 1000 );
+        return "Lambda Result 1";
+    },
+    () -> {
+        sleep( 500 );
+        return "Lambda Result 2";
+    }
+], "io-tasks" );
+assert result.get() == "Lambda Result 2" : "testAsyncAnyWithLambdasAndCustomExecutor";

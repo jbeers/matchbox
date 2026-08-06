@@ -1,0 +1,42 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsNullTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+brad = function() {};
+badBrad = function() { return; };
+myArray = [];
+myStruct = {};
+variableReference = isNull( foo );
+noFunctionReturn = isNull( brad() );
+emptyFunctionReturn = isNull( badBrad() );
+structKey = isNull( myStruct.brad );
+arrayPosition = isNull( myArray[ 1 ] );
+assert variableReference : "testTrueConditions variable-reference";
+assert noFunctionReturn : "testTrueConditions no-return";
+assert emptyFunctionReturn : "testTrueConditions empty-return";
+assert structKey : "testTrueConditions struct-key";
+assert arrayPosition : "testTrueConditions array-position";
+
+// testNullValueMethod
+assert isNull( nullValue() ) : "testNullValueMethod";
+
+// testFalseConditions
+foo = "bar";
+brad = function() { return "1"; };
+myArray = [ 0, 1 ];
+myStruct = { "brad" : 1 };
+variableReference = isNull( foo );
+functionReturn = isNull( brad() );
+structKey = isNull( myStruct.brad );
+arrayPosition = isNull( myArray[ 1 ] );
+emptyStruct = isNull( {} );
+emptyArray = isNull( [] );
+assert variableReference == false : "testFalseConditions variable";
+assert functionReturn == false : "testFalseConditions function";
+assert structKey == false : "testFalseConditions struct-key";
+assert arrayPosition == false : "testFalseConditions array-position";
+assert emptyStruct == false : "testFalseConditions empty-struct";
+assert emptyArray == false : "testFalseConditions empty-array";

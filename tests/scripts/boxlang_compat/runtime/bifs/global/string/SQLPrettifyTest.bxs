@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/SQLPrettifyTest.java
+result = sqlPrettify( "SELECT * FROM users WHERE id = 1" );
+assert result contains "SELECT" : "testItCanPrettifySQL select";
+assert result contains "FROM" : "testItCanPrettifySQL from";
+assert result contains "WHERE" : "testItCanPrettifySQL where";
+assert sqlPrettify( null ) == "" : "testItCanHandleNull";
+assert sqlPrettify( "" ) == "" : "testItCanHandleEmpty";

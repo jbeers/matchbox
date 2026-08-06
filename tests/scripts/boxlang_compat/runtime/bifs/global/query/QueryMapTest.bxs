@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryMapTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+r = queryMap( q, ( row ) => row.a * 2 );
+assert queryGetCell( r, "a", 1 ) == 2 : "testMap 1";
+assert queryGetCell( r, "a", 2 ) == 4 : "testMap 2";

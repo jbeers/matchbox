@@ -1,0 +1,29 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ToNumericTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testCanCastDoubleAsNumber
+result = toNumeric( "123.45" );
+assert result == 123.45 : "testCanCastDoubleAsNumber";
+
+// testCanCastStringAsNumber
+result = toNumeric( "29.5" );
+assert result == 29.5 : "testCanCastStringAsNumber";
+
+// testCanCastBinaryValueAsNumber
+result = toNumeric( "0110", "bin" );
+assert result == 6 : "testCanCastBinaryValueAsNumber";
+
+// testCanCastHexValueAsNumber
+result = toNumeric( "000C", "hex" );
+assert result == 12 : "testCanCastHexValueAsNumber";
+
+// testCanCanOctalValueAsNumber
+result = toNumeric( "24", "oct" );
+assert result == 20 : "testCanCanOctalValueAsNumber";
+
+// testCanCastDecValueAsNumber
+result = toNumeric( "29", "dec" );
+assert result == 29 : "testCanCastDecValueAsNumber";

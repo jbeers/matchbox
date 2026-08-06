@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReplaceTest.java
+assert replace( "Hello World", "World", "BoxLang" ) == "Hello BoxLang" : "testReplace";
+assert replace( "a a a", "a", "b", "all" ) == "b b b" : "testReplaceAll";
+assert "a a".replace( "a", "b" ) == "b a" : "testReplaceMember";

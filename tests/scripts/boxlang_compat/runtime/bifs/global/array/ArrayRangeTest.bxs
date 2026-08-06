@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayRangeTest.java
+r = arrayRange( 1, 3 );
+assert arrayLen( r ) == 3 : "testRange size";
+assert r[1] == 1 : "testRange 1";
+assert r[3] == 3 : "testRange 3";
+r = arrayRange( "5.." );
+assert arrayLen( r ) == 1 : "testRange open-end size";
+r = arrayRange( "1..5" );
+assert arrayLen( r ) == 5 : "testRange literal size";
+r = arrayRange( 1, "10" );
+assert r[10] == 10 : "testRange string-end";

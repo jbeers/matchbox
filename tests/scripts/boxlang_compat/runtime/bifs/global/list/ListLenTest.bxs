@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListLenTest.java
+list = "a,b,c";
+assert listLen( list ) == 3 : "testLen default";
+list = "a:b:c";
+assert listLen( list, ":" ) == 3 : "testLen colon";
+list = "a,,b,c";
+assert listLen( list, ",", false ) == 3 : "testLen skip-empty";
+assert listLen( list, ",", true ) == 4 : "testLen include-empty";

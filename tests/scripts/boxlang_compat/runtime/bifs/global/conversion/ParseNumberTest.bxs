@@ -1,0 +1,37 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ParseNumberTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testParseBinaryString
+result = parseNumber( "1010", "bin" );
+assert result == 10 : "testParseBinaryString bin";
+result = parseNumber( "755", "oct" );
+assert result == 493 : "testParseBinaryString oct";
+result = parseNumber( "123.45", "dec" );
+assert result == 123.45 : "testParseBinaryString dec";
+result = parseNumber( "1A4", "hex" );
+assert result == 420 : "testParseBinaryString hex";
+result = parseNumber( "1A4", "HEX" );
+assert result == 420 : "testParseBinaryString HEX";
+
+// testBif
+assert parseNumber( "1.50", "en_US" ) == 1.50 : "testBif en-US";
+assert parseNumber( "1,50", "de_AT" ) == 1.50 : "testBif de-AT";
+threw = false;
+try {
+    x = parseNumber( "blah", "en_US" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBif invalid";
+
+// invalid radix throws
+threw = false;
+try {
+    x = parseNumber( "1A4", "HEX1" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testParseBinaryString invalid-radix";

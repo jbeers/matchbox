@@ -1,0 +1,52 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/CurrencyFormatTest.java
+
+// testBifCommonFormat
+result = currencyFormat( 12345, "local", "en_US" );
+assert result == "$12,345.00" : "testBifCommonFormat local";
+result = currencyFormat( 12345, "international", "en_US" );
+assert result == "USD 12,345.00" : "testBifCommonFormat international";
+result = currencyFormat( 12345, "none", "en_US" );
+assert result == "12,345.00" : "testBifCommonFormat none";
+
+// testMemberFunctions
+number = 12345;
+result = number.currencyFormat( "local", "en_US" );
+assert result == "$12,345.00" : "testMemberFunctions local";
+result = number.currencyFormat( "international", "en_US" );
+assert result == "USD 12,345.00" : "testMemberFunctions international";
+result = number.currencyFormat( "none", "en_US" );
+assert result == "12,345.00" : "testMemberFunctions none";
+
+// testBifEuro
+result = currencyFormat( 12345, "local", "de_AT" );
+assert result == char( 8364 ) & char( 160 ) & "12.345,00" : "testBifEuro local";
+result = currencyFormat( 12345, "international", "de_AT" );
+assert result == "EUR " & char( 160 ) & "12.345,00" : "testBifEuro international";
+result = currencyFormat( 12345, "none", "de_AT" );
+assert result == char( 160 ) & "12.345,00" : "testBifEuro none";
+
+// testBifYen
+result = currencyFormat( 12345, "local", "japan" );
+assert result == char( 65509 ) & "12,345" : "testBifYen local";
+result = currencyFormat( 12345, "international", "japan" );
+assert result == "JPY 12,345" : "testBifYen international";
+result = currencyFormat( 12345, "none", "japan" );
+assert result == "12,345" : "testBifYen none";
+
+// testBifError
+threw = false;
+try {
+    result = currencyFormat( 12345, "blah", "japan" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBifError";
+
+// testLSVariation
+result = currencyFormat( 12345, "local", "en_US" );
+assert result == "$12,345.00" : "testLSVariation";
+
+// testNumberString
+myNumber = "3.00";
+result = lsCurrencyFormat( myNumber, "local", "en_US" );
+assert result == "$3.00" : "testNumberString";

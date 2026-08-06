@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/IncrementValueTest.java
+// testItIncrementsIntegerPart
+assert incrementValue( 1.8 ) == 2.8 : "testItIncrements 1.8";
+assert incrementValue( -2.8 ) == -1.8 : "testItIncrements -2.8";
+assert incrementValue( 0 ) == 1 : "testItIncrements zero";
+// testItIncrementsIntegerPartMemberFunction
+assert ( 1.8 ).incrementValue() == 2.8 : "testItIncrementsMember 1.8";
+assert ( -2.8 ).incrementValue() == -1.8 : "testItIncrementsMember -2.8";
+assert ( 0 ).incrementValue() == 1 : "testItIncrementsMember zero";

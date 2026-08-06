@@ -1,0 +1,22 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructSortTest.java
+myStruct = { foo: "bar", bar: "foo", zena: "princess warrior" };
+r = structSort( myStruct );
+assert r[1] == "bar" : "testBif 1";
+assert r[2] == "foo" : "testBif 2";
+assert r[3] == "zena" : "testBif 3";
+myStruct = { foo: 3, bar: 1, zena: 2 };
+r = structSort( myStruct, "numeric" );
+assert r[1] == "bar" : "testBifNumeric 1";
+assert r[3] == "foo" : "testBifNumeric 3";
+
+// testBifPaths
+myStruct = { cow: { total: 12 }, pig: { total: 5 }, cat: { total: 3 } };
+r = structSort( myStruct, "numeric", "asc", "total" );
+assert r[1] == "cat" : "testBifPaths asc";
+assert r[3] == "cow" : "testBifPaths asc last";
+
+// testBifCallback
+myStruct = { cow: { total: 3 }, pig: { total: 2 }, cat: { total: 1 } };
+r = structSort( myStruct, ( a, b ) => compare( myStruct[b].total, myStruct[a].total ) );
+assert r[1] == "cow" : "testBifCallback first";
+assert r[3] == "cat" : "testBifCallback last";

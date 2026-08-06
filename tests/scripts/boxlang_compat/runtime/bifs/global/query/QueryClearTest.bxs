@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryClearTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryClear( q );
+assert queryRecordCount( q ) == 0 : "testClear";

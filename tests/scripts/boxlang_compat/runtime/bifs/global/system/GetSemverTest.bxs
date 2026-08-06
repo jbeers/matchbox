@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetSemverTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test asserts
+// methods and types from the org.semver4j Java library.

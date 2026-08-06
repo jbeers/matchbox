@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cli/CLIGetArgsTest.java
+
+// testEmpty
+result = CLIGetArgs();
+assert isStruct( result ) : "testEmpty struct";
+assert structCount( result ) == 2 : "testEmpty size";
+assert structCount( result.options ) == 0 : "testEmpty options";
+assert arrayLen( result.positionals ) == 0 : "testEmpty positionals";
+
+// testWithArgs
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test uses
+// Mockito to inject a Java CLIOptions mock and a Java List of command-line
+// arguments into BoxRuntime; MatchBox scripts have no equivalent mock hook.

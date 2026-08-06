@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructMapTest.java
+r = structMap( { a: 1, b: 2 }, ( k, v ) => v * 2 );
+assert r.a == 2 : "testMap a";
+assert r.b == 4 : "testMap b";
+r = structMap( { a: 1, b: 2 }, ( k, v ) => v * 2, true );
+assert r.a == 2 : "testMapParallel a";
+r = structMap( { a: 1, b: 2 }, ( k, v ) => v * 2, true, 3 );
+assert r.b == 4 : "testMapParallelMaxThreads b";
+r = structMap( { a: 1, b: 2 }, ( k, v ) => v * 2, true, true );
+assert r.a == 2 : "testMapParallelVirtual a";

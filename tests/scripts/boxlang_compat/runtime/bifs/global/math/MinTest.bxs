@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/MinTest.java
+assert min( 1, 2 ) == 1 : "testMin 1-2";
+assert min( -1, -2 ) == -2 : "testMin -1--2";
+assert min( -2, 2 ) == -2 : "testMin -2-2";

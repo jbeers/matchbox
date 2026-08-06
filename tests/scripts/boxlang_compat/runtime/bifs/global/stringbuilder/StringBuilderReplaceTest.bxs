@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderReplaceTest.java
+// testReplaceHeadless
+sb = sb{"Hello World"};
+stringBuilderReplace( sb, 7, 11, "BoxLang" );
+result = sb.toString();
+assert result == "Hello BoxLang" : "testReplaceHeadless";
+
+// testReplaceMember
+sb = sb{"Hello World"};
+sb.replace( 7, 11, "BoxLang" );
+result = sb.toString();
+assert result == "Hello BoxLang" : "testReplaceMember";

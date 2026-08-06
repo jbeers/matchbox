@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListFilterTest.java
+result = listFilter( "1,2,3,4", function( item ) { return item % 2 == 0; } );
+assert result == "2,4" : "testUseProvidedUDF";
+result = listFilter( "1,2,3,4,5", function( item ) { return item != 3 && item != 5; }, ",", false, true );
+assert result == "1,2,4" : "testFilterParallel";
+result = listFilter( "1,2,3,4,5", function( item ) { return item != 3 && item != 5; }, ",", false, true, 5 );
+assert result == "1,2,4" : "testFilterParallelMaxThreads";
+result = listFilter( list="1,2,3,4,5", filter=function( item ) { return item != 3 && item != 5; }, parallel=true, virtual=true );
+assert result == "1,2,4" : "testFilterParallelVirtual";

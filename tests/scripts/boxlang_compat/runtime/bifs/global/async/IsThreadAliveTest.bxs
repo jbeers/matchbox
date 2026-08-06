@@ -1,0 +1,17 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/IsThreadAliveTest.java
+
+// testNotAlive
+threadNew( runnable = () => {
+    sleep( 1000 );
+}, name = "testThreadNotAlive" );
+threadJoin( "testThreadNotAlive" );
+result = isThreadAlive( "testThreadNotAlive" );
+assert result == false : "testNotAlive";
+
+// testAlive
+threadNew( runnable = () => {
+    sleep( 1000 );
+}, name = "testThreadAlive" );
+result = isThreadAlive( "testThreadAlive" );
+assert result : "testAlive";
+threadJoin( "testThreadAlive" );

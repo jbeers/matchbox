@@ -1,0 +1,16 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayGroupByTest.java
+data = [1,2,3,4];
+r = arrayGroupBy( data, ( n ) => n % 2 == 0 ? "even" : "odd" );
+assert structCount( r ) == 2 : "testGroupBy buckets";
+assert arrayLen( r.odd ) == 2 : "testGroupBy odd";
+assert arrayLen( r.even ) == 2 : "testGroupBy even";
+
+// testGroupByStruct
+data = [
+    { id: 1, rank: "Captain" },
+    { id: 2, rank: "Commander" },
+    { id: 3, rank: "Captain" }
+];
+r = arrayGroupBy( data, ( item ) => item.rank );
+assert arrayLen( r.Captain ) == 2 : "testGroupByStruct Captain";
+assert r.Captain[1].id == 1 : "testGroupByStruct value";

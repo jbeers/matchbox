@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringEndsWithTest.java
+assert stringEndsWith( "Hello World", "World" ) : "testEndsWith";
+assert stringEndsWith( "Hello", "Hi" ) == false : "testEndsWithFalse";

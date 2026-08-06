@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/QueryStringToStructTest.java
+r = queryStringToStruct( "foo=bar&baz=qux" );
+assert r.foo == "bar" : "testQueryStringToStruct foo";
+assert r.baz == "qux" : "testQueryStringToStruct baz";

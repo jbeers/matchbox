@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/ModuleReloadTest.java
+// The JVM test is disabled because of suite-wide concurrency, but its
+// source-level BIF calls remain active for MatchBox compatibility.
+
+boxModuleReload();
+result = getModuleList();
+assert isStruct( result ) : "testReload module-list";

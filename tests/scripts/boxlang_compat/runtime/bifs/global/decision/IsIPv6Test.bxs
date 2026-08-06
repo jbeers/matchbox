@@ -1,0 +1,26 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsIPv6Test.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+ipv6loopback = isIPv6( "::1" );
+cloudflareipv6 = isIPv6( "2606:4700:4700::1001" );
+assert ipv6loopback : "testTrueConditions loopback";
+assert cloudflareipv6 : "testTrueConditions cloudflare";
+
+// testFalseConditions
+googleip = isIPv6( "8.8.8.8" );
+empty = isIPv6( hostname = "" );
+assert googleip == false : "testFalseConditions google-ipv4";
+assert empty == false : "testFalseConditions empty";
+
+// testThrow
+threw = false;
+try {
+    x = isIPv6( {} );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testThrow";

@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayShiftTest.java
+a = ["a","b"];
+v = arrayShift( a );
+assert v == "a" : "testShift value";
+assert arrayLen( a ) == 1 : "testShift size";
+assert a[1] == "b" : "testShift shifted";

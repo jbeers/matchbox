@@ -1,0 +1,20 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/MinusTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanSubtractNumberFromDate operates on a DateTime.
+
+// testItCanSubtractNumbers
+assert ( 3 - 2 ) == 1 : "testItCanSubtractNumbers 3-2";
+assert ( 3.5 - 2.5 ) == 1 : "testItCanSubtractNumbers 3.5-2.5";
+
+// testItCanSubtractStrings
+assert ( "3" - "2" ) == 1 : "testItCanSubtractStrings 3-2";
+assert ( "3.5" - "2.5" ) == 1 : "testItCanSubtractStrings 3.5-2.5";
+
+// testItCanCompountSubtract
+i = 4;
+i -= 2;
+assert i == 2 : "testItCanCompountSubtract";

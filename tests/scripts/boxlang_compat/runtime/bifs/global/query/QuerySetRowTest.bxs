@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QuerySetRowTest.java
+q = queryNew( "a,b" );
+queryAddRow( q, { a: 1, b: "x" } );
+querySetRow( q, 1, { a: 7, b: "y" } );
+assert queryGetCell( q, "a", 1 ) == 7 : "testSetRow a";
+assert queryGetCell( q, "b", 1 ) == "y" : "testSetRow b";

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringSortTest.java
+r = stringSort( "cba" );
+assert r == "abc" : "testSort";

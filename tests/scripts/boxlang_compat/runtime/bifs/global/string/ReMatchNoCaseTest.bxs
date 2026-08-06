@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReMatchNoCaseTest.java
+r = reMatchNoCase( "[a-z]+", "BoxLang IS great" );
+assert arrayLen( r ) == 3 : "testReMatchNoCase size";

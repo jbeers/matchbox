@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherListTest.java
+
+// testWatcherList
+watcherShutdownAll( false );
+watcherNew( "watcherOne", [ "./src" ], ( event, watcherContext ) => {} );
+watcherNew( "watcherTwo", [ "./src" ], ( event, watcherContext ) => {} );
+result = watcherList();
+assert arrayContains( result, "watcherOne" ) : "testWatcherList watcherOne";
+assert arrayContains( result, "watcherTwo" ) : "testWatcherList watcherTwo";
+
+// testWatcherListEmpty
+watcherShutdownAll( false );
+result = watcherList();
+assert arrayLen( result ) == 0 : "testWatcherListEmpty";

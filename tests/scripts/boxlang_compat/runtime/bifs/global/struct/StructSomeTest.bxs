@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructSomeTest.java
+r = structSome( { a: 1, b: 3 }, ( k, v ) => v == 3 );
+assert r : "testSome";
+r = structSome( { a: 1, b: 3 }, ( k, v ) => v == 9 );
+assert r == false : "testSomeFalse";
+r = structSome( { a: 1, b: 3 }, ( k, v ) => v == 3, true );
+assert r : "testSomeParallel";
+r = structSome( { a: 1, b: 3 }, ( k, v ) => v == 3, true, 2 );
+assert r : "testSomeParallelMaxThreads";
+r = structSome( { a: 1, b: 3 }, ( k, v ) => v == 3, true, true );
+assert r : "testSomeParallelVirtual";

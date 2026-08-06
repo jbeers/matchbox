@@ -1,0 +1,15 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderFindTest.java
+// testFindHeadless
+sb = sb{"Hello BoxLang Box"};
+result = stringBuilderFind( sb, "Box", 8 );
+assert result == 15 : "testFindHeadless";
+
+// testFindMemberNotFound
+sb = sb{"Hello BoxLang"};
+result = sb.find( "xyz" );
+assert result == 0 : "testFindMemberNotFound";
+
+// testFindNoCaseMember
+sb = sb{"Hello BoxLang"};
+result = sb.findNoCase( "box" );
+assert result == 7 : "testFindNoCaseMember";

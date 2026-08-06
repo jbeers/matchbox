@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetTickCountTest.java
+
+defaultTicks = getTickCount();
+milliTicks = getTickCount( "milli" );
+nanoTicks = getTickCount( "nano" );
+secondTicks = getTickCount( "second" );
+
+assert defaultTicks >= 0 : "testEcho";
+assert milliTicks >= 0 : "testMilli";
+assert nanoTicks >= 0 : "testNano";
+assert secondTicks > 0 : "testSecond positive";

@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListQualifyTest.java
+result = listQualify( "a,b,c", "'" );
+assert result == "'a','b','c'" : "testQualify default";
+result = listQualify( "a,b,c,2", "@", ",", "char" );
+assert result == "@a@,@b@,@c@,2" : "testQualifyChar";
+result = listQualify( "a|b|c", "@", "|", "char" );
+assert result == "@a@|@b@|@c@" : "testQualifyDelimiter";
+result = listQualify( list="a,b,c,,d", qualifier="@", includeEmptyFields=true );
+assert result == "@a@,@b@,@c@,@@,@d@" : "testQualifyIncludeEmpty";

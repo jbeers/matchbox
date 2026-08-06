@@ -1,0 +1,21 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BitXorTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBitwiseXorWithPositiveIntegers
+result = bitXor( 5, 3 );
+assert result == 6 : "testBitwiseXorWithPositiveIntegers";
+
+// testBitwiseXorWithNegativeIntegers
+result = bitXor( -5, -4 );
+assert result == 7 : "testBitwiseXorWithNegativeIntegers";
+
+// testBitwiseXorWithZero
+result = bitXor( 1, 2190225219 );
+assert result == 2190225218 : "testBitwiseXorWithZero";
+
+// testBitwiseXorWithLargeIntegers
+result = bitXor( 1, 4294967296 );
+assert result == 4294967297 : "testBitwiseXorWithLargeIntegers";

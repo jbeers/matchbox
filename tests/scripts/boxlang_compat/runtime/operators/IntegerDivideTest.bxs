@@ -1,0 +1,27 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/IntegerDivideTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: the `\` integer-divide operator is not parsed by MatchBox yet; this
+// file is expected to fail (red) until it lands.
+// ---------------------------------------------------------------------------
+
+// testItCanIntegerDivideNumbers
+assert ( 9 \ 3 ) == 3 : "testItCanIntegerDivideNumbers 9-3";
+assert ( 3 \ 1.5 ) == 3 : "testItCanIntegerDivideNumbers 3-1.5";
+assert ( 3 \ 2 ) == 1 : "testItCanIntegerDivideNumbers 3-2";
+assert ( 1 \ 2 ) == 0 : "testItCanIntegerDivideNumbers 1-2";
+
+// testItCanIntegerDivideStrings
+assert ( "9" \ "3" ) == 3 : "testItCanIntegerDivideStrings 9-3";
+assert ( "3" \ "1.5" ) == 3 : "testItCanIntegerDivideStrings 3-1.5";
+
+// testItCanNotIntegerDivideByZero
+threw = false;
+try {
+    x = 1 \ 0;
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanNotIntegerDivideByZero";

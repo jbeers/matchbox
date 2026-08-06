@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryExistsTest.java
+p = getTempDirectory();
+assert DirectoryExists( p ) : "testDirExists";
+assert DirectoryExists( p & "/no-such-matchbox-dir" ) == false : "testDirNotExists";

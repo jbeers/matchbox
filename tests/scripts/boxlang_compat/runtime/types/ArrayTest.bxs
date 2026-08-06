@@ -1,0 +1,97 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/types/ArrayTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: negative array indexing and out-of-bounds/non-integer reads are not
+// implemented in MatchBox yet (they return null instead of throwing), so
+// those assertions fail (red). Auto-expansion and basic indexing pass.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testParallelStreams exercises Java parallel streams.
+
+// testConstructors
+a = [];
+assert arrayLen( a ) == 0 : "testConstructors empty";
+a = ["foo"];
+a[2] = "bar";
+assert arrayLen( a ) == 2 : "testConstructors append";
+a = ["foo", "bar"];
+assert arrayLen( a ) == 2 : "testConstructors from-array";
+a = ["foo", "bar", "baz"];
+assert arrayLen( a ) == 3 : "testConstructors from-list";
+a = ["foo", "bar", "baz"];
+assert arrayLen( a ) == 3 : "testConstructors of";
+
+// testReferencing
+arr = [];
+arr[1] = "foo";
+assert arrayLen( arr ) == 1 : "testReferencing size";
+assert arr[1] == "foo" : "testReferencing get";
+assert arr[1] == "foo" : "testReferencing deref-num-key";
+assert arr[-1] == "foo" : "testReferencing deref-negative";
+threw = false;
+try {
+    x = arr[0];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testReferencing index-0-throws";
+threw = false;
+try {
+    x = arr["sdf"];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testReferencing non-integer-throws";
+threw = false;
+try {
+    x = arr[1.5];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testReferencing float-throws";
+threw = false;
+try {
+    x = arr[999];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testReferencing oob-throws";
+// Auto-expand the array with nulls
+arr2 = [];
+arr2[100] = "foo100";
+assert arrayLen( arr2 ) == 100 : "testReferencing autoexpand-size";
+assert arr2[100] == "foo100" : "testReferencing autoexpand-get";
+
+// testDereferencingNegative
+arr = ["b", "r", "a", "d"];
+assert arr[1] == "b" : "testDereferencingNegative 1";
+assert arr[2] == "r" : "testDereferencingNegative 2";
+assert arr[3] == "a" : "testDereferencingNegative 3";
+assert arr[4] == "d" : "testDereferencingNegative 4";
+assert arr[-1] == "d" : "testDereferencingNegative -1";
+assert arr[-2] == "a" : "testDereferencingNegative -2";
+assert arr[-3] == "r" : "testDereferencingNegative -3";
+assert arr[-4] == "b" : "testDereferencingNegative -4";
+threw = false;
+try {
+    x = arr[0];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testDereferencingNegative 0-throws";
+threw = false;
+try {
+    x = arr[5];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testDereferencingNegative 5-throws";
+threw = false;
+try {
+    x = arr[-5];
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testDereferencingNegative -5-throws";

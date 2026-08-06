@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryDeleteTest.java
+p = getTempDirectory() & "/matchbox-deldir-test";
+directoryCreate( p );
+directoryDelete( p );
+assert directoryExists( p ) == false : "testDelete";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayTransposeTest.java
+r = arrayTranspose( [[1,2],[3,4]] );
+assert r[1][1] == 1 : "testTranspose 11";
+assert r[1][2] == 3 : "testTranspose 12";
+assert r[2][1] == 2 : "testTranspose 21";

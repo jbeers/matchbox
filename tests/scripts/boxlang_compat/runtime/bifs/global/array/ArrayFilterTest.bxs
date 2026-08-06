@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFilterTest.java
+r = arrayFilter( [1,2,3,4], function( item ) { return item % 2 == 0; } );
+assert arrayLen( r ) == 2 : "testFilter size";
+assert r[1] == 2 : "testFilter 1";
+assert r[2] == 4 : "testFilter 2";
+r = [1,2,3,4].filter( function( item ) { return item > 2; } );
+assert arrayLen( r ) == 2 : "testFilterMember size";
+r = [1,2,3,4,5].filter( function( item ) { return item != 3 && item != 5; }, true );
+assert arrayLen( r ) == 3 : "testFilterParallel size";
+r = [1,2,3,4,5].filter( function( item ) { return item != 3 && item != 5; }, true, 2 );
+assert r[3] == 4 : "testFilterParallelMaxThreads";
+r = [1,2,3,4,5].filter( callback=function( item ) { return item != 3 && item != 5; }, parallel=true, virtual=true );
+assert arrayLen( r ) == 3 : "testFilterParallelVirtual";

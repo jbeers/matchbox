@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructEveryTest.java
+r = structEvery( { a: 2, b: 4 }, ( k, v ) => v % 2 == 0 );
+assert r : "testEvery";
+r = structEvery( { a: 2, b: 3 }, ( k, v ) => v % 2 == 0 );
+assert r == false : "testEveryFalse";
+r = structEvery( { a: 2, b: 4 }, ( k, v ) => v % 2 == 0, true );
+assert r : "testEveryParallel";
+r = structEvery( { a: 2, b: 4 }, ( k, v ) => v % 2 == 0, true, 2 );
+assert r : "testEveryParallelMaxThreads";
+r = structEvery( { a: 2, b: 4 }, ( k, v ) => v % 2 == 0, true, true );
+assert r : "testEveryParallelVirtual";

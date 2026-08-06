@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/SleepTest.java
+
+start = getTickCount( "milli" );
+sleep( 10 );
+finish = getTickCount( "milli" );
+assert finish - start >= 5 : "testSleep";

@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/GetTokenTest.java
+// testCanGet
+list = "a,b,c";
+assert getToken( list, 2 ) == "b" : "testCanGet 2";
+assert getToken( list, 6 ) == "" : "testCanGet oob";
+// testMemberFunction
+assert "a,b,c".getToken( 2 ) == "b" : "testMemberFunction 2";
+assert "a,b,c".getToken( 6 ) == "" : "testMemberFunction oob";

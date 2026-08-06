@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/LCaseTest.java
+assert lcase( "BRAD" ) == "brad" : "testLowercase";
+assert "BRAD".lcase() == "brad" : "testLowercaseMember";
+assert lcase( 5 ) == "5" : "testLowercaseNumber";

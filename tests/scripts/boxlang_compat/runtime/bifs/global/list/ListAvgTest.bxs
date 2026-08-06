@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListAvgTest.java
+list = "1,2,3";
+assert listAvg( list ) == 2 : "testCanAverage";
+list = "1|2|3";
+assert listAvg( list, "|" ) == 2 : "testCanAverageDelimiter";
+list = "1|2;3";
+assert listAvg( list, "|;" ) == 2 : "testCanAverageMultiDelimiter";
+list = "1,2,3";
+assert list.listAvg() == 2 : "testCanAverageMember";

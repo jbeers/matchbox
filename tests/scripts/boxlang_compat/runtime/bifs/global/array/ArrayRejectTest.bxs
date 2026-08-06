@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayRejectTest.java
+r = arrayReject( [1,2,3,4], function( item ) { return item % 2 == 0; } );
+assert arrayLen( r ) == 2 : "testReject size";
+assert r[1] == 1 : "testReject 1";
+assert r[2] == 3 : "testReject 2";

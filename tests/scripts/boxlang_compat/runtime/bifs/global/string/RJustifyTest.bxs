@@ -1,0 +1,2 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/RJustifyTest.java
+assert RJustify( "BoxLang", 10 ) == "   BoxLang" : "testRJustify";

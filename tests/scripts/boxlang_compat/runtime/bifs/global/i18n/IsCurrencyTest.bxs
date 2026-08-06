@@ -1,0 +1,25 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/IsCurrencyTest.java
+
+// testBif
+assert isCurrency( "$1.50", "en_US" ) : "testBif dollar-symbol";
+assert isCurrency( "1.50", "en_US" ) : "testBif plain-number";
+assert isCurrency( "£1.50", "English (UK)" ) : "testBif pound-symbol";
+assert isCurrency( "$1.50", "de_AT" ) == false : "testBif locale-mismatch";
+assert isCurrency( "£1.50", "China" ) == false : "testBif china-pound";
+assert isCurrency( "1.50", "China" ) : "testBif china-number";
+assert isCurrency( "blah", "en_US" ) == false : "testBif invalid";
+
+// The JVM test builds this value with DecimalFormat for ar_JO. These code
+// points preserve its Arabic-Indic digits, direction marks, and separators.
+arFormatted = char( 8207 ) & char( 1633 ) & char( 1644 ) & char( 1632 ) & char( 1632 ) & char( 1632 ) & char( 1643 ) & char( 1637 ) & char( 1633 ) & char( 1632 ) & char( 160 ) & char( 1583 ) & "." & char( 1571 ) & "." & char( 8207 );
+assert isCurrency( arFormatted, "ar_JO" ) : "testBif arabic-format";
+assert isCurrency( "¥1,000.51", "China" ) : "testBif china-format";
+
+// testCanParseFromFormatter (@Disabled in the JVM source, preserved as
+// source-level behavior checks)
+assert isCurrency( lsCurrencyFormat( 3.21, "local", "en_US" ) ) : "testCanParseFromFormatter local";
+assert isCurrency( lsCurrencyFormat( 3.21, "international", "en_US" ) ) : "testCanParseFromFormatter international";
+
+// testCanParseNumber (@Disabled in the JVM source, preserved as a
+// source-level behavior check)
+assert isCurrency( 5 ) : "testCanParseNumber";

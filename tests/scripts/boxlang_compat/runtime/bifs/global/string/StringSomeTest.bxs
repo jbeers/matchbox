@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringSomeTest.java
+r = stringSome( "abc", ( ch ) => ch == "b" );
+assert r : "testSomeTrue";
+r = stringSome( "abc", ( ch ) => ch == "z" );
+assert r == false : "testSomeFalse";

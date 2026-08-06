@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySpliceTest.java
+r = arraySplice( [1,2,3,4,5], 2, 2 );
+assert r[1] == 2 : "testSplice 1";
+assert r[2] == 3 : "testSplice 2";
+assert arrayLen( r ) == 2 : "testSplice size";

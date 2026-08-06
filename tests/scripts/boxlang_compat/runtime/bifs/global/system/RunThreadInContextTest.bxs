@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/RunThreadInContextTest.java
+// Java Thread/classloader and application-session cases are omitted; the
+// source-level callback result remains active.
+
+result = runThreadInContext( context = getBoxContext(), callback = () => "ran" );
+assert result == "ran" : "testCanRunCodeInContextReturnResult";

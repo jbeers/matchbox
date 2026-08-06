@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayUniqueTest.java
+r = arrayUnique( [1,2,2,3,1] );
+assert arrayLen( r ) == 3 : "testUnique size";
+assert r[1] == 1 : "testUnique 1";
+assert r[2] == 2 : "testUnique 2";
+assert r[3] == 3 : "testUnique 3";

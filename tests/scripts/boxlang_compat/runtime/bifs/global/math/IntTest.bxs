@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/IntTest.java
+// testIntFunction
+assert int( 3.7 ) == 3 : "testInt 3.7";
+assert int( -2.3 ) == -2 : "testInt -2.3";
+// member forms
+assert ( 4.8 ).int() == 4 : "testIntMember 4.8";
+assert ( -4.8 ).int() == -4 : "testIntMember -4.8";

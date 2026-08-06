@@ -1,0 +1,59 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/format/BooleanFormatTest.java
+
+// testBif
+assert booleanFormat( 0 ) == "false" : "testBif zero";
+assert booleanFormat( -1 ) == "true" : "testBif negative";
+assert booleanFormat( 1 ) == "true" : "testBif one";
+assert booleanFormat( 999 ) == "true" : "testBif large";
+assert booleanFormat( "Yes" ) == "true" : "testBif yes";
+assert booleanFormat( "No" ) == "false" : "testBif no";
+assert booleanFormat( "true" ) == "true" : "testBif true-string";
+assert booleanFormat( "false" ) == "false" : "testBif false-string";
+assert booleanFormat( "" ) == "false" : "testBif empty-string";
+threw = false;
+try {
+    result = booleanFormat( "blah" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBif invalid-string";
+
+// testStringMember
+assert "Yes".booleanFormat() == "true" : "testStringMember yes";
+assert "No".booleanFormat() == "false" : "testStringMember no";
+assert "true".booleanFormat() == "true" : "testStringMember true-string";
+assert "false".booleanFormat() == "false" : "testStringMember false-string";
+threw = false;
+try {
+    result = "blah".booleanFormat();
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testStringMember invalid-string";
+
+// testNumericMember
+assert javacast( "integer", 0 ).booleanFormat() == "false" : "testNumericMember zero";
+assert javacast( "integer", -1 ).booleanFormat() == "true" : "testNumericMember negative";
+assert javacast( "integer", 1 ).booleanFormat() == "true" : "testNumericMember one";
+
+// testDeprecatedTrueFalseFormatAlias
+assert trueFalseFormat( "true" ) == "true" : "testDeprecatedTrueFalseFormatAlias true-string";
+assert trueFalseFormat( true ) == "true" : "testDeprecatedTrueFalseFormatAlias true";
+assert trueFalseFormat( 1 ) == "true" : "testDeprecatedTrueFalseFormatAlias one";
+assert trueFalseFormat( 999 ) == "true" : "testDeprecatedTrueFalseFormatAlias large";
+assert trueFalseFormat( "yes" ) == "true" : "testDeprecatedTrueFalseFormatAlias yes";
+assert "true".trueFalseFormat() == "true" : "testDeprecatedTrueFalseFormatAlias member-true-string";
+assert true.trueFalseFormat() == "true" : "testDeprecatedTrueFalseFormatAlias member-true";
+assert ( 1 ).trueFalseFormat() == "true" : "testDeprecatedTrueFalseFormatAlias member-one";
+assert ( 999 ).trueFalseFormat() == "true" : "testDeprecatedTrueFalseFormatAlias member-large";
+assert "yes".trueFalseFormat() == "true" : "testDeprecatedTrueFalseFormatAlias member-yes";
+assert trueFalseFormat( "false" ) == "false" : "testDeprecatedTrueFalseFormatAlias false-string";
+assert trueFalseFormat( false ) == "false" : "testDeprecatedTrueFalseFormatAlias false";
+assert trueFalseFormat( 0 ) == "false" : "testDeprecatedTrueFalseFormatAlias zero";
+assert trueFalseFormat( "no" ) == "false" : "testDeprecatedTrueFalseFormatAlias no";
+assert "false".trueFalseFormat() == "false" : "testDeprecatedTrueFalseFormatAlias member-false-string";
+assert false.trueFalseFormat() == "false" : "testDeprecatedTrueFalseFormatAlias member-false";
+assert ( 0 ).trueFalseFormat() == "false" : "testDeprecatedTrueFalseFormatAlias member-zero";
+assert "no".trueFalseFormat() == "false" : "testDeprecatedTrueFalseFormatAlias member-no";
+assert trueFalseFormat( "" ) == "false" : "testDeprecatedTrueFalseFormatAlias empty-string";
+assert trueFalseFormat( null ) == "false" : "testDeprecatedTrueFalseFormatAlias null";

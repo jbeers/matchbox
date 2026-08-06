@@ -1,0 +1,37 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BitShTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBitwiseShlnWithPositiveIntegers
+result = bitShln( 5, 1 );
+assert result == 10 : "testBitwiseShlnWithPositiveIntegers";
+
+// testBitwiseShlnWithNegativeIntegers
+result = bitShln( -5, 2 );
+assert result == -20 : "testBitwiseShlnWithNegativeIntegers";
+
+// testBitwiseShlnWithZero
+result = bitShln( 0, 5 );
+assert result == 0 : "testBitwiseShlnWithZero";
+
+// testBitwiseShlnWithLargeIntegers
+result = bitShln( 123456789, 2 );
+assert result == 493827156 : "testBitwiseShlnWithLargeIntegers";
+
+// testBitwiseShrnWithPositiveIntegers
+result = bitShrn( 5, 1 );
+assert result == 2 : "testBitwiseShrnWithPositiveIntegers";
+
+// testBitwiseShrnWithNegativeIntegers
+result = bitShrn( -5, 2 );
+assert result == 1073741822 : "testBitwiseShrnWithNegativeIntegers";
+
+// testBitwiseShrnWithZero
+result = bitShrn( 0, 5 );
+assert result == 0 : "testBitwiseShrnWithZero";
+
+// testBitwiseShrnWithLargeIntegers
+result = bitShrn( 123456789, 2 );
+assert result == 30864197 : "testBitwiseShrnWithLargeIntegers";

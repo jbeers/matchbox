@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringBindTest.java
+result = stringBind( "Hello ${name}", { name: "World" } );
+assert result == "Hello World" : "testItCanDoStringBinding";
+result = stringBind( "Hello ${name}, ${greeting}", { name: "World", greeting: "Good Morning" } );
+assert result == "Hello World, Good Morning" : "testItCanDoStringBindingWithMultiplePlaceholders";
+value = "Hello ${name}";
+assert value.bind( { name: "World" } ) == "Hello World" : "testItCanDoStringBindingMember";

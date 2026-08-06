@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/SystemExecuteTest.java
+// File redirection and timeout command cases are omitted; the deterministic
+// command/result shape and empty-error assertion remain active.
+
+result = systemExecute( "echo", "hello" );
+assert isStruct( result ) : "testBifExecute struct";
+assert result.error == "" : "testBifExecute error";
+assert len( result.output ) > 0 : "testBifExecute output";

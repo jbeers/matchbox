@@ -1,0 +1,62 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsDefinedTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+result = true;
+variableName = "result";
+variables.foo = "bar";
+brad = { age: 42 };
+stringVarName = isDefined( variable = "result" );
+variableReference = isDefined( variableName );
+variableScope = isDefined( "variables.foo" );
+structReference = isDefined( "brad.age" );
+assert stringVarName : "testTrueConditions string-var-name";
+assert variableReference : "testTrueConditions variable-reference";
+assert variableScope : "testTrueConditions variable-scope";
+assert structReference : "testTrueConditions struct-reference";
+
+// testFalseConditions
+brad = { age: 42 };
+stringVarName = isDefined( variable = "doesntexist" );
+localReference = isDefined( "local.result" );
+variableScope = isDefined( "variables.bradzooks" );
+structReference = isDefined( "brad.oldAge" );
+assert stringVarName == false : "testFalseConditions string-var-name";
+assert localReference == false : "testFalseConditions local-reference";
+assert variableScope == false : "testFalseConditions variable-scope";
+assert structReference == false : "testFalseConditions struct-reference";
+
+// testFalseFunction
+function foo() {}
+result = isDefined( "foo" );
+assert result : "testFalseFunction";
+
+// testErrorCallingFunction
+result1 = isDefined( "foo()" );
+result2 = isDefined( "x[ foo() ]" );
+assert result1 == false : "testErrorCallingFunction r1";
+assert result2 == false : "testErrorCallingFunction r2";
+
+// testErrorInvalidChars
+result = isDefined( "^" );
+assert result == false : "testErrorInvalidChars";
+
+// testNonStringKeys
+str = {};
+result = isDefined( "str[ foo ]" );
+str[ foo ] = "bar";
+result2 = isDefined( "str[ foo ]" );
+assert result == false : "testNonStringKeys r1";
+assert result2 : "testNonStringKeys r2";
+
+// testNonStringKeysAssignment
+result = isDefined( "test[ isAdmin = true ]" );
+assert result == false : "testNonStringKeysAssignment";
+
+// testDotNotation
+variables[ "foo.bar" ] = "test";
+result = isDefined( "foo.bar" );
+assert result == false : "testDotNotation";

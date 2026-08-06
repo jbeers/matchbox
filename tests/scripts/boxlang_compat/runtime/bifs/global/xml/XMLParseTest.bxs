@@ -1,0 +1,15 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLParseTest.java
+// ---------------------------------------------------------------------------
+
+// testCanParse
+result = xmlParse( '<root><brad name="wood" /></root>' );
+assert isXML( result ) : "testCanParse result-type";
+
+// testCanParseFromFile
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test uses
+// java.io.File and a JVM-relative XML fixture path.
+
+// testCanParseWithInaccessibleDTD
+result = xmlParse( '<!DOCTYPE root SYSTEM "http://www.mach-ii.com/dtds/mach-ii_1_9_0.dtd"><root><brad name="wood" /></root>' );
+assert isXML( result ) : "testCanParseWithInaccessibleDTD result-type";

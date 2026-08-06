@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructFilterTest.java
+r = structFilter( { a: 1, b: 2, c: 3 }, function( k, v ) { return v % 2 == 0; } );
+assert structCount( r ) == 1 : "testFilter size";
+assert r.b == 2 : "testFilter value";
+r = structFilter( { a: 1, b: 2, c: 3 }, function( k, v ) { return v % 2 == 0; }, true );
+assert structCount( r ) == 1 : "testFilter parallel";
+r = structFilter( { a: 1, b: 2, c: 3 }, function( k, v ) { return v % 2 == 0; }, true, 3 );
+assert r.b == 2 : "testFilter parallel maxThreads";

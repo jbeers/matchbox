@@ -1,0 +1,17 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BitNotTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBitwiseNotWithPositiveIntegers
+result = bitNot( 5 );
+assert result == -6 : "testBitwiseNotWithPositiveIntegers";
+
+// testBitwiseNotWithNegativeIntegers
+result = bitNot( -5 );
+assert result == 4 : "testBitwiseNotWithNegativeIntegers";
+
+// testBitwiseNotWithLongRangeValues
+result = bitNot( 2190225219 );
+assert result == -2190225220 : "testBitwiseNotWithLongRangeValues";

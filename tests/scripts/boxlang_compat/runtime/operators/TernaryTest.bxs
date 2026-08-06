@@ -1,0 +1,14 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/TernaryTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItWork
+assert ( ( true ? "was true" : "was false" ) ) == "was true" : "testItWork true";
+assert ( ( false ? "was true" : "was false" ) ) == "was false" : "testItWork false";
+assert ( ( 1 ? "was true" : "was false" ) ) == "was true" : "testItWork 1";
+assert ( ( 0 ? "was true" : "was false" ) ) == "was false" : "testItWork 0";
+assert ( ( "yes" ? "was true" : "was false" ) ) == "was true" : "testItWork yes";
+// JVM: "no" is a falsy string; MatchBox currently treats it as truthy.
+assert ( ( "no" ? "was true" : "was false" ) ) == "was false" : "testItWork no";

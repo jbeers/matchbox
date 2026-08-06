@@ -1,0 +1,51 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DatePartTest.java
+
+fixedDate = parseDateTime( "2025-06-15T10:30:45.123Z" );
+
+// testDatePartYear
+result = datePart( "yyyy", fixedDate );
+assert result == 2025 : "testDatePartYear";
+
+// testDatePartQuarter
+result = DatePart( "q", fixedDate );
+assert result == 2 : "testDatePartQuarter";
+
+// testBifMonth
+result = datePart( "m", fixedDate );
+assert result == 6 : "testBifMonth";
+
+// testBifDay
+result = datePart( "d", fixedDate );
+assert result == 15 : "testBifDay";
+
+// testBifDayOfWeek
+result = datePart( "w", fixedDate );
+assert result == 1 : "testBifDayOfWeek";
+
+// testBifDayOfWeekAsString
+result = DatePart( "ww", fixedDate );
+assert result == 24 : "testBifDayOfWeekAsString";
+
+// testBifDayOfYear
+result = datePart( "y", fixedDate );
+assert result == 166 : "testBifDayOfYear";
+
+// testBifHour
+result = datePart( "h", fixedDate );
+assert result == 10 : "testBifHour";
+
+// testBifMinute
+result = datePart( "n", fixedDate );
+assert result == 30 : "testBifMinute";
+
+// testBifSecond
+result = datePart( "s", fixedDate );
+assert result == 45 : "testBifSecond";
+
+// testBifMillisecond
+result = datePart( "l", fixedDate );
+assert result == 123 : "testBifMillisecond";
+
+// testIncorrectCasing
+result = datePart( "YYYY", parseDateTime( "2000-01-01" ) );
+assert result == 2000 : "testIncorrectCasing";

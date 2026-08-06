@@ -1,0 +1,8 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/types/unmodifiable/UnmodifiableArrayTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only / internal BoxLang behavior, hard
+// requirement): the JVM test drives the internal unmodifiable Array Java wrapper. No BoxLang source is evaluated, so there is nothing
+// to transfer as a black-box script. Revisit when the underlying type lands
+// in MatchBox and its behavior is observable from BoxLang source.
+// ---------------------------------------------------------------------------

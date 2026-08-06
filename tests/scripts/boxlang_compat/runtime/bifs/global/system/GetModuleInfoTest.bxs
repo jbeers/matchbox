@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetModuleInfoTest.java
+
+result = getModuleInfo( "bogus" );
+assert isStruct( result ) : "testPrint struct";

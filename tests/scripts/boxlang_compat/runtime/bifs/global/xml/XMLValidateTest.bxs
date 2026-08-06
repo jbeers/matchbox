@@ -1,0 +1,134 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLValidateTest.java
+// ---------------------------------------------------------------------------
+
+// testBif
+xmlContent = '<?xml version="1.0" encoding="UTF-8"?>
+    <order xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://localhost:8500/something.xsd" id="4323251">
+    <customer firstname="Philip" lastname="Cramer" accountNum="21"/>
+    <items>
+    <item id="43">
+    <name> Deluxe Carpenter&apos;s Hammer</name>
+    <quantity>1</quantity>
+    <unitprice>15.95</unitprice>
+    </item>
+    <item id="54">
+    <name> 36&quot; Plastic Rake</name>
+    <quantity>2</quantity>
+    <unitprice>6.95</unitprice>
+    </item>
+    <item id="68">
+    <name> Standard paint thinner</name>
+    <quantity>3</quantity>
+    <unitprice>8.95</unitprice>
+    </item>
+    </items>
+    </order>';
+dtd = '<?xml version="1.0" encoding="UTF-8"?>
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+    <xs:element name="customer">
+    <xs:complexType>
+    <xs:attribute name="firstname" type="xs:string" use="required"/>
+    <xs:attribute name="lastname" type="xs:string" use="required"/>
+    <xs:attribute name="accountNum" type="xs:string" use="required"/>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="name" type="xs:string"/>
+    <xs:element name="quantity" type="xs:string"/>
+    <xs:element name="unitprice" type="xs:string"/>
+    <xs:element name="item">
+    <xs:complexType>
+    <xs:sequence>
+    <xs:element ref="name"/>
+    <xs:element ref="quantity"/>
+    <xs:element ref="unitprice"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:integer" use="required"/>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="items">
+    <xs:complexType>
+    <xs:sequence>
+    <xs:element ref="item" maxOccurs="unbounded"/>
+    </xs:sequence>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="order">
+    <xs:complexType>
+    <xs:sequence>
+    <xs:element ref="customer"/>
+    <xs:element ref="items"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:string" use="required"/>
+    </xs:complexType>
+    </xs:element>
+    </xs:schema>';
+result = xmlValidate( xmlContent, dtd );
+assert isStruct( result ) : "testBif result-type";
+assert structKeyExists( result, "status" ) : "testBif status-key";
+assert structKeyExists( result, "warning" ) : "testBif warning-key";
+assert structKeyExists( result, "errors" ) : "testBif errors-key";
+assert structKeyExists( result, "fatalErrors" ) : "testBif fatal-errors-key";
+assert result.status : "testBif status";
+
+// testBifError
+xmlContent = '<?xml version="1.0" encoding="UTF-8"?>
+    <order xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://localhost:8500/something.xsd" id="4323251">
+    <customer firstname="Philip" lastname="Cramer" accountNum="21"/>
+    <items>
+    <item id="43">
+    <name> Deluxe Carpenter&apos;s Hammer</name>
+    <quantity>1</quantity>
+    <unitprice>15.95</unitprice>
+    </item>
+    <item id="54">
+    <name> 36&quot; Plastic Rake</name>
+    <quantity>2</quantity>
+    <unitprice>6.95</unitprice>
+    </item>
+    <item id="68">
+    <name> Standard paint thinner</name>
+    <quantity>3</quantity>
+    <unitprice>8.95</unitprice>
+    </item>
+    </items>
+    </order>';
+// Invalid DTD source, matching the JVM test's truncated schema.
+dtd = '<?xml version="1.0" encoding="UTF-8"?>
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+    <xs:element name="customer">
+    <xs:complexType>
+    <xs:attribute name="firstname" type="xs:string" use="required"/>
+    <xs:attribute name="lastname" type="xs:string" use="required"/>
+    <xs:attribute name="accountNum" type="xs:string" use="required"/>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="name" type="xs:string"/>
+    <xs:element name="quantity" type="xs:string"/>
+    <xs:element name="unitprice" type="xs:string"/>
+    <xs:element name="item">
+    <xs:complexType>
+    <xs:sequence>
+    <xs:element ref="name"/>
+    <xs:element ref="quantity"/>
+    <xs:element ref="unitprice"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:integer" use="required"/>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="items">
+    <xs:complexType>
+    <xs:sequence>
+    <xs:element ref="item" maxOccurs="unbounded"/>
+    </xs:sequence>
+    </xs:complexType>
+    </xs:element>
+    <xs:element name="order">';
+result = xmlValidate( xmlContent, dtd );
+assert isStruct( result ) : "testBifError result-type";
+assert structKeyExists( result, "status" ) : "testBifError status-key";
+assert structKeyExists( result, "warning" ) : "testBifError warning-key";
+assert structKeyExists( result, "errors" ) : "testBifError errors-key";
+assert structKeyExists( result, "fatalErrors" ) : "testBifError fatal-errors-key";
+assert result.fatalErrors.len() == 1 : "testBifError fatal-errors";
+assert result.status == false : "testBifError status";

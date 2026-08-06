@@ -1,0 +1,29 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/casters/BooleanCasterTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no `cast` BIF yet, so this file fails (red) until it
+// lands. Transcribed via `cast( value, "boolean" )`.
+// ---------------------------------------------------------------------------
+
+// testItCanCastABoolean
+assert ( cast( true, "boolean" ) ) : "testItCanCastABoolean true";
+assert ( cast( false, "boolean" ) == false ) : "testItCanCastABoolean false";
+
+// testItCanCastANumber
+assert ( cast( 1, "boolean" ) ) : "testItCanCastANumber 1";
+assert ( cast( -1, "boolean" ) ) : "testItCanCastANumber -1";
+assert ( cast( 0, "boolean" ) == false ) : "testItCanCastANumber 0";
+assert ( cast( 123456.789, "boolean" ) ) : "testItCanCastANumber 123456.789";
+assert ( cast( "111111111111111111111111111111111", "boolean" ) ) : "testItCanCastANumber huge";
+
+// testItCanCastAString
+assert ( cast( "true", "boolean" ) ) : "testItCanCastAString true";
+assert ( cast( "TRUE", "boolean" ) ) : "testItCanCastAString TRUE";
+assert ( cast( "false", "boolean" ) == false ) : "testItCanCastAString false";
+assert ( cast( "FALSE", "boolean" ) == false ) : "testItCanCastAString FALSE";
+assert ( cast( "yes", "boolean" ) ) : "testItCanCastAString yes";
+assert ( cast( "Yes", "boolean" ) ) : "testItCanCastAString Yes";
+assert ( cast( "no", "boolean" ) == false ) : "testItCanCastAString no";
+assert ( cast( "No", "boolean" ) == false ) : "testItCanCastAString No";

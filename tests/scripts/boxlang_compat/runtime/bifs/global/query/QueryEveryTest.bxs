@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryEveryTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 2 } );
+queryAddRow( q, { a: 4 } );
+r = queryEvery( q, ( row ) => row.a % 2 == 0 );
+assert r : "testEvery";

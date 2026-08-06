@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/SinTest.java
+assert sin( 0 ) == 0 : "testItReturnsSine zero";
+assert abs( sin( 0.5 ) - 0.479425538604203 ) < 0.0000001 : "testItReturnsSine half";
+assert ( 0 ).sin() == 0 : "testItReturnsSineMember zero";
+assert abs( ( 0.5 ).sin() - 0.479425538604203 ) < 0.0000001 : "testItReturnsSineMember half";

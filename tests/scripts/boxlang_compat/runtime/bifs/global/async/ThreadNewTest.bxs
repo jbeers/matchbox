@@ -1,0 +1,25 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ThreadNewTest.java
+
+// testCanStartThread
+result = null;
+threadNew( () => {
+    println( "thread is done!" );
+    sleep( 1000 );
+    result = "done";
+} );
+println( "thread tag done" );
+sleep( 2000 );
+println( "test is done done" );
+assert result == "done" : "testCanStartThread";
+
+// testCanStartVirtualThread
+result = null;
+threadNew( runnable = () => {
+    println( "thread is done!" );
+    sleep( 1000 );
+    result = "done";
+}, virtual = true );
+println( "thread tag done" );
+sleep( 2000 );
+println( "test is done done" );
+assert result == "done" : "testCanStartVirtualThread";

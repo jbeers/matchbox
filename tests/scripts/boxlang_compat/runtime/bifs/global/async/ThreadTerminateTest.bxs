@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ThreadTerminateTest.java
+
+// testCanStopThread
+start = getTickCount();
+threadNew( runnable = () => {
+    sleep( 2000 );
+}, name = "myThread" );
+threadTerminate( "myThread" );
+threadJoin( "myThread", 1000 );
+result = bxthread.myThread;
+totalTime = getTickCount() - start;
+assert result.status == "TERMINATED" : "testCanStopThread status";
+assert totalTime < 1000 : "testCanStopThread totalTime";

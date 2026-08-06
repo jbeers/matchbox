@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/URLEncodedFormatTest.java
+
+result = urlEncodedFormat( "my param with spaces" );
+assert result == "my%20param%20with%20spaces" : "testSpaceFormatting";

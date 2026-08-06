@@ -1,0 +1,26 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/DuplicateTest.java
+
+ref = {
+    a: 10,
+    b: [ 20, 30 ],
+    c: [ { d: 40 } ]
+};
+result = duplicate( ref );
+result.z = 50;
+ref.a = 100;
+ref.b.append( 400 );
+ref.c[ 1 ].d = 500;
+ref.c[ 1 ].e = 600;
+
+assert !structKeyExists( ref, "z" ) : "testDuplicateStruct original-extra-key";
+assert structKeyExists( result, "z" ) : "testDuplicateStruct copied-extra-key";
+assert ref.a == 100 : "testDuplicateStruct original-scalar";
+assert result.a == 10 : "testDuplicateStruct copied-scalar";
+assert arrayLen( ref.b ) == 3 : "testDuplicateStruct original-array";
+assert arrayLen( result.b ) == 2 : "testDuplicateStruct copied-array";
+assert ref.c[ 1 ].d == 500 : "testDuplicateStruct original-nested-struct";
+assert result.c[ 1 ].d == 40 : "testDuplicateStruct copied-nested-struct";
+assert !structKeyExists( result.c[ 1 ], "e" ) : "testDuplicateStruct copied-no-new-key";
+
+assert duplicate( "foo" ) == "foo" : "testDuplicateOthers string";
+assert duplicate( 12345.4567 ) == 12345.4567 : "testDuplicateOthers number";

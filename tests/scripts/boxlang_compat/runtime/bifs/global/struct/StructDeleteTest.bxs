@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructDeleteTest.java
+myStruct = { flea: 1, blerg: 2 };
+r = StructDelete( myStruct, "flea" );
+assert r : "testDelete removed";
+assert structKeyExists( myStruct, "flea" ) == false : "testDelete gone";

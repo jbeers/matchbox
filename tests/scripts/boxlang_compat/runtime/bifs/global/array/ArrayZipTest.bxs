@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayZipTest.java
+r = arrayZip( [1,2], ["a","b"] );
+assert arrayLen( r ) == 2 : "testZip size";
+assert r[1][1] == 1 && r[1][2] == "a" : "testZip 1";
+assert r[2][1] == 2 && r[2][2] == "b" : "testZip 2";

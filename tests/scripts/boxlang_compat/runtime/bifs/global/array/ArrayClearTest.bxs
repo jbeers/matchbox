@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayClearTest.java
+nums = [1,2,3];
+arrayClear( nums );
+assert arrayLen( nums ) == 0 : "testClear";

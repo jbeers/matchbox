@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/SgnTest.java
+assert sgn( 0.3 ) == 1 : "testSgn 0.3";
+assert sgn( 0 ) == 0 : "testSgn zero";
+assert sgn( -0.3 ) == -1 : "testSgn -0.3";
+assert ( 0.3 ).sgn() == 1 : "testSgnMember 0.3";
+assert ( 0 ).sgn() == 0 : "testSgnMember zero";
+assert ( -0.3 ).sgn() == -1 : "testSgnMember -0.3";

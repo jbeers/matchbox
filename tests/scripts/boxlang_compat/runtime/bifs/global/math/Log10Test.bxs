@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/Log10Test.java
+assert log10( 1 ) == 0 : "testItReturnsLog10 one";
+assert abs( log10( 0.5 ) - ( -0.3010299956639812 ) ) < 0.0000001 : "testItReturnsLog10 half";
+assert abs( ( 1 ).log10() - 0 ) < 0.0000001 : "testItReturnsLog10Member one";
+assert abs( ( 0.5 ).log10() - ( -0.3010299956639812 ) ) < 0.0000001 : "testItReturnsLog10Member half";

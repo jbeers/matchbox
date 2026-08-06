@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ToStringTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+result = toString( "Hello World" );
+assert result == "Hello World" : "testString";
+result = toString( 42 );
+assert result == "42" : "testInt";
+result = toString( [1,2,3] );
+assert result == "[1,2,3]" : "testArray";
+result = "Hello World".toString();
+assert result == "Hello World" : "testMemberString";
+result = toString( now() );
+assert isString( result ) : "testDate";
+result = toString( { foo: "bar" } );
+assert result contains "foo" : "testStruct";
+result = toString( xmlParse( "<foo>bar</foo>" ) );
+assert result contains "<foo>bar</foo>" : "testXML";
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the remaining JVM
+// case compares the string form of a Java byte[] value.

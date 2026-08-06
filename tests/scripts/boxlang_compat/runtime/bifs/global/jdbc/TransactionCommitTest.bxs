@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/TransactionCommitTest.java
+
+// testNoTransactionContext
+threw = false;
+try {
+    transactionCommit();
+} catch ( e ) {
+    threw = true;
+    assert e.message == "Transaction not started; Please place this method call inside a transaction{} block." : "testNoTransactionContext message";
+}
+assert threw : "testNoTransactionContext throws";

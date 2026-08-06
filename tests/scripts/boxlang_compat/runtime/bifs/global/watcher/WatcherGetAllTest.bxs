@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherGetAllTest.java
+
+// testWatcherGetAll
+watcherShutdownAll( false );
+watcherNew( "watcherOne", [ "./src" ], ( event, watcherContext ) => {} );
+watcherNew( "watcherTwo", [ "./src" ], ( event, watcherContext ) => {} );
+result = watcherGetAll();
+assert structKeyExists( result, "watcherOne" ) : "testWatcherGetAll watcherOne";
+assert structKeyExists( result, "watcherTwo" ) : "testWatcherGetAll watcherTwo";
+
+// testWatcherGetAllEmpty
+watcherShutdownAll( false );
+result = watcherGetAll();
+assert structCount( result ) == 0 : "testWatcherGetAllEmpty";

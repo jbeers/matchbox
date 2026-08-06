@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/CreateGUIDTest.java
+
+guid = createGUID();
+assert len( guid ) == 36 : "testCreatesGUID length";
+assert reFind( "^[A-F0-9]+-[A-F0-9]+-[A-F0-9]+-[A-F0-9]+-[A-F0-9]+$", guid ) == 1 : "testCreatesGUID format";

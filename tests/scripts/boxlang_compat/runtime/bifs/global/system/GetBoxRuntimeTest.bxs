@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBoxRuntimeTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test compares
+// the returned internal BoxRuntime object by identity.

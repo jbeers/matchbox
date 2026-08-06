@@ -1,0 +1,17 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySortTest.java
+r = arraySort( [3,1,2] );
+assert r[1] == 1 : "testSort 1";
+assert r[2] == 2 : "testSort 2";
+assert r[3] == 3 : "testSort 3";
+
+// testTextNoCaseASC
+r = arraySort( ["b","d","C","a"], "textnocase", "asc" );
+assert r[1] == "a" : "testTextNoCaseASC 1";
+assert r[3] == "C" : "testTextNoCaseASC 3";
+
+// testSortFunction
+r = arraySort( [2,4.3,3,-1], function( a, b ) {
+    return a < b ? -1 : 1;
+} );
+assert r[1] == -1 : "testSortFunction 1";
+assert r[4] == 4.3 : "testSortFunction 4";

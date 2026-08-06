@@ -1,0 +1,239 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/TimeUnitsTest.java
+
+fixedDate = parseDateTime( "2025-01-15T14:30:45.123Z" );
+
+// testBifYear
+nowValue = now();
+result = year( nowValue );
+assert result >= 2026 : "testBifYear";
+
+// testMemberYear
+result = now().year();
+assert result >= 2026 : "testMemberYear";
+
+// testMemberYearString
+result = "2025-01-01".year();
+assert result == 2025 : "testMemberYearString";
+
+// testBifQuarter
+result = Quarter( fixedDate );
+assert result == 1 : "testBifQuarter";
+
+// testBifMonth
+result = month( fixedDate );
+assert result == 1 : "testBifMonth";
+
+// testMembefMonth
+result = fixedDate.month();
+assert result == 1 : "testMembefMonth";
+
+// testMemberMonthString
+result = "2025-01-01".month();
+assert result == 1 : "testMemberMonthString";
+
+// testBifMonthAsString
+result = monthAsString( fixedDate );
+assert result == "January" : "testBifMonthAsString";
+
+// testBifMonthAsStringWithLocale
+result = monthAsString( date=fixedDate, locale="es-SV" );
+assert result != "" : "testBifMonthAsStringWithLocale";
+
+// testMemberMonthAsString
+result = fixedDate.monthAsString();
+assert result == "January" : "testMemberMonthAsString";
+
+// testBifMonthShortAsString
+result = monthShortAsString( fixedDate );
+assert result == "Jan" : "testBifMonthShortAsString";
+
+// testMemberMonthShortAsString
+result = fixedDate.monthShortAsString();
+assert result == "Jan" : "testMemberMonthShortAsString";
+
+// testBifDay
+result = day( fixedDate );
+assert result == 15 : "testBifDay";
+
+// testMemberDay
+result = fixedDate.day();
+assert result == 15 : "testMemberDay";
+
+// testMemberDayString
+result = "2025-01-01".Day();
+assert result == 1 : "testMemberDayString";
+
+// testBifDaysInMonth
+result = daysInMonth( fixedDate );
+assert result == 31 : "testBifDaysInMonth";
+
+// testMemberDaysInMonth
+result = fixedDate.DaysInMonth();
+assert result == 31 : "testMemberDaysInMonth";
+
+// testBifDaysInYear
+result = daysInYear( fixedDate );
+assert result == 365 : "testBifDaysInYear";
+
+// testMemberDaysInYear
+result = fixedDate.DaysInYear();
+assert result == 365 : "testMemberDaysInYear";
+
+// testBifDayOfWeekWithSystemLocale
+result = dayOfWeek( fixedDate );
+assert result == 4 : "testBifDayOfWeekWithSystemLocale";
+
+// testBifDayOfWeekWithParseDateTime
+nowValue = parseDateTime( "2024-04-07" );
+result = dayOfWeek( nowValue );
+assert result == 1 : "testBifDayOfWeekWithParseDateTime";
+
+// testMemberDayOfWeek
+result = fixedDate.dayOfWeek();
+assert result == 4 : "testMemberDayOfWeek";
+
+// testBifDayOfWeekAsString
+result = dayOfWeekAsString( fixedDate );
+assert result == "Wednesday" : "testBifDayOfWeekAsString";
+
+// testMemberDayOfWeekAsString
+result = fixedDate.dayOfWeekAsString();
+assert result == "Wednesday" : "testMemberDayOfWeekAsString";
+
+// testBifDayOfWeekShortAsString
+result = dayOfWeekShortAsString( fixedDate );
+assert result == "Wed" : "testBifDayOfWeekShortAsString";
+
+// testMemberDayOfWeekShortAsString
+result = fixedDate.dayOfWeekShortAsString();
+assert result == "Wed" : "testMemberDayOfWeekShortAsString";
+
+// testBifDayOfYear
+result = dayOfYear( fixedDate );
+assert result == 15 : "testBifDayOfYear";
+
+// testMemberDayOfYear
+result = fixedDate.dayOfYear();
+assert result == 15 : "testMemberDayOfYear";
+
+// testBifFirstDayOfMonth
+result = FirstDayOfMonth( fixedDate );
+assert result == 1 : "testBifFirstDayOfMonth";
+
+// testMemberFirstDayOfMonth
+result = fixedDate.FirstDayOfMonth();
+assert result == 1 : "testMemberFirstDayOfMonth";
+
+// testBifWeek
+result = week( fixedDate );
+assert result == 3 : "testBifWeek";
+
+// testMemberWeek
+result = fixedDate.week();
+assert result == 3 : "testMemberWeek";
+
+// testBifHour
+result = hour( fixedDate );
+assert result == 14 : "testBifHour";
+
+// testMemberHour
+result = fixedDate.hour();
+assert result == 14 : "testMemberHour";
+
+// testBifMinute
+result = minute( fixedDate );
+assert result == 30 : "testBifMinute";
+
+// testMemberMinute
+result = fixedDate.minute();
+assert result == 30 : "testMemberMinute";
+
+// testBifSecond
+result = second( fixedDate );
+assert result == 45 : "testBifSecond";
+
+// testMemberSecond
+result = fixedDate.second();
+assert result == 45 : "testMemberSecond";
+
+// testBifMillisecond
+result = millisecond( fixedDate );
+assert result == 123 : "testBifMillisecond";
+
+// testMemberMillisecond
+result = fixedDate.millisecond();
+assert result == 123 : "testMemberMillisecond";
+
+// testBifNanosecond
+result = Nanosecond( fixedDate );
+assert result == 123000000 : "testBifNanosecond";
+
+// testMemberNanosecond
+result = fixedDate.Nanosecond();
+assert result == 123000000 : "testMemberNanosecond";
+
+// testBifOffset
+nowValue = now();
+result = offset( nowValue );
+assert result != "" : "testBifOffset";
+
+// testBifOffsetTZ
+nowValue = now();
+result = offset( nowValue, "America/Los_Angeles" );
+assert result != "" : "testBifOffsetTZ";
+
+// testMemberOffset
+result = now().offset();
+assert result != "" : "testMemberOffset";
+
+// testBifGetTimeZone
+nowValue = now();
+result = GetTimeZone( nowValue );
+assert result != "" : "testBifGetTimeZone date";
+result = GetTimeZone();
+assert result != "" : "testBifGetTimeZone default";
+
+// testBifGetTimeZoneWithTZ
+nowValue = now();
+result = GetTimeZone( nowValue, "America/Los_Angeles" );
+assert result != "" : "testBifGetTimeZoneWithTZ";
+
+// testMemberGetTimeZone
+result = now().timeZone();
+assert result != "" : "testMemberGetTimeZone";
+
+// testBifGetNumericDays
+result = GetNumericDate( fixedDate );
+assert result == 20103.60468892361 : "testBifGetNumericDays fixed date";
+result = GetNumericDate( "2018-01-01T12:00:00" );
+assert result == 17532.5 : "testBifGetNumericDays epoch";
+
+// testMemberGetTime
+result = fixedDate.getTime();
+assert isNumeric( result ) : "testMemberGetTime";
+
+// testLocalizedWeek
+result = Week( date=fixedDate, locale="es-SV" );
+assert result >= 1 : "testLocalizedWeek";
+
+// testMemberLocalizedWeek
+result = fixedDate.Week( locale="es-SV" );
+assert result >= 1 : "testMemberLocalizedWeek";
+
+// testLocalizedDayOfWeek
+result = DayOfWeek( date=fixedDate, locale="es-SV" );
+assert result >= 1 : "testLocalizedDayOfWeek";
+
+// testMemberLocalizedDayOfWeek
+result = fixedDate.DayOfWeek( locale="es-SV" );
+assert result >= 1 : "testMemberLocalizedDayOfWeek";
+
+// testBifMonthWithAltMaskPossible
+setLocale( "en_US" );
+result = month( "7/4/2021" );
+assert result == 7 : "testBifMonthWithAltMaskPossible";
+
+// testBifYearWithZero
+setLocale( "en_US" );
+result = year( 0 );
+assert result == 1970 : "testBifYearWithZero";

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/BoxRegisterInterceptorTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test depends
+// on interceptor classes, dynamic objects, and InterceptorService callbacks.

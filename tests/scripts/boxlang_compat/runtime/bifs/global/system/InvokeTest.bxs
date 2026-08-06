@@ -1,0 +1,17 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/InvokeTest.java
+// Java class and webservice invocation cases are JVM-only; source-level
+// function and struct invocation stay active.
+
+function foo() {
+    return "bar";
+}
+result = invoke( "", "foo", [] );
+assert result == "bar" : "testInvokeCurrentContext";
+
+target = {
+    foo: function() {
+        return "struct-result";
+    }
+};
+result = invoke( target, "foo", [] );
+assert result == "struct-result" : "testInvokeOnStruct";

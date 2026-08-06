@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/isInThreadTest.java
+
+// testNotInThread
+result = isInThread();
+assert result == false : "testNotInThread";
+
+// testInThread
+result = false;
+threadNew( runnable = () => {
+    result = isInThread();
+}, name = "testThread" );
+threadJoin( "testThread" );
+assert result : "testInThread";

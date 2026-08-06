@@ -1,0 +1,41 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/casters/DoubleCasterTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no `cast` BIF yet, so this file fails (red) until it
+// lands. Transcribed via `cast( value, "double" )`.
+// ---------------------------------------------------------------------------
+
+// testItCanCastADouble
+assert ( cast( 5, "double" ) == 5 ) : "testItCanCastADouble";
+
+// testItCanCastANull
+assert ( cast( null, "double" ) == 0 ) : "testItCanCastANull";
+
+// testItCanCastAString
+assert ( cast( "421", "double" ) == 421 ) : "testItCanCastAString 421";
+assert ( cast( "-42", "double" ) == -42 ) : "testItCanCastAString -42";
+assert ( cast( "+42", "double" ) == 42 ) : "testItCanCastAString +42";
+assert ( cast( "4.2", "double" ) == 4.2 ) : "testItCanCastAString 4.2";
+assert ( cast( "42.", "double" ) == 42 ) : "testItCanCastAString 42.";
+threw = false;
+try {
+    x = cast( "42.brad", "double" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanCastAString 42.brad-throws";
+
+// testItCanCastANaN
+// NaN is never equal to itself, which is how the cast result is observed here.
+assert ( cast( "NaN", "double" ) != cast( "NaN", "double" ) ) : "testItCanCastANaN";
+assert ( cast( "Infinity", "double" ) > 1e308 ) : "testItCanCastAInfinity";
+
+// testItCanCastLeadingZeroes
+assert ( cast( ".2", "double" ) == 0.2 ) : "testItCanCastLeadingZeroes .2";
+assert ( cast( "   .2   ", "double" ) == 0.2 ) : "testItCanCastLeadingZeroes padded";
+assert ( cast( ".2", "double" ) == 0.2 ) : "testItCanCastLeadingZeroes tab";
+
+// testItCanCastAChar
+assert ( cast( "5", "double" ) == 5 ) : "testItCanCastAChar";

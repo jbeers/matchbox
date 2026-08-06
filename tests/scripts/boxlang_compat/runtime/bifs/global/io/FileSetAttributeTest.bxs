@@ -1,0 +1,19 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileSetAttributeTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): open BoxFile and
+// Java filesystem-attribute assertions remain omitted; path calls and errors execute below.
+p = createTempFile();
+fileWrite( p, "file attribute test" );
+fileSetAttribute( p, "normal" );
+fileSetAttribute( p, "readonly" );
+fileSetAttribute( p, "hidden" );
+fileSetAttribute( p, "system" );
+fileSetAttribute( p, "archive" );
+assert fileExists( p ) : "testFilePathSetAttribute exists";
+threw = false;
+try {
+    fileSetAttribute( p, "blah" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testModeError";
+fileDelete( p );

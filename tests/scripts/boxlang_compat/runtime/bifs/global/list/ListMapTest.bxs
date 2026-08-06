@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListMapTest.java
+nums = "1,2,3";
+result = listMap( nums, function( item ) { return item * 2; } );
+assert result == "2,4,6" : "testMap";
+result = listMap( "1,2,3,4,5", function( item ) { return item * 2; }, ",", false, true );
+assert result == "2,4,6,8,10" : "testMapParallel";
+result = listMap( "1,2,3,4,5", function( item ) { return item * 2; }, ",", false, true, 4 );
+assert result == "2,4,6,8,10" : "testMapParallelMaxThreads";
+result = listMap( "1,,2", function( item ) { return item; }, ",", true );
+assert result == "1,,2" : "testMapIncludeEmpty";

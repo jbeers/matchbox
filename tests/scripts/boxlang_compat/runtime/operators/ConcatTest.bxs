@@ -1,0 +1,37 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/ConcatTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanConcatByteArray, and the two "in place"
+// StringBuilder tests mutate Java StringBuilder/StringBuilder objects directly.
+
+// testItCanConcatStrings
+assert ( "Brad" & "Wood" ) == "BradWood" : "testItCanConcatStrings";
+
+// testItCanConcatSManytrings
+assert ( "a" & "b" & "c" & "d" & "e" & "f" & "g" & "h" & "i" ) == "abcdefghi" : "testItCanConcatSManytrings";
+
+// testItCanConcatNumbers
+assert ( 4 & 2 ) == "42" : "testItCanConcatNumbers int";
+assert ( 4.0 & 2 ) == "42" : "testItCanConcatNumbers float-int";
+
+// testItCanConcatNumberAndString
+assert ( "4" & 2 ) == "42" : "testItCanConcatNumberAndString";
+
+// testItCanConcatNumberAndChars
+// JVM uses char literals ('B', 'W'); transcribed as single-char strings.
+assert ( "B" & "W" ) == "BW" : "testItCanConcatNumberAndChars BW";
+assert ( "B" & "W" ) == "BW" : "testItCanConcatNumberAndChars B-W";
+assert ( "B" & "W" ) == "BW" : "testItCanConcatNumberAndChars B-W-rev";
+
+// testItCanCompountConcatenate
+i = "brad";
+i &= "wood";
+assert i == "bradwood" : "testItCanCompountConcatenate";
+
+// testItCanCompountConcatenateManyStrings
+i = "a";
+i &= "b" & "c" & "d" & "e" & "f" & "g" & "h" & "i";
+assert i == "abcdefghi" : "testItCanCompountConcatenateManyStrings";

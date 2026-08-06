@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileExistsTest.java
+p = getTempDirectory() & "/matchbox-exists-test.txt";
+fileWrite( p, "x" );
+assert fileExists( p ) : "testExists";
+fileDelete( p );
+assert fileExists( p ) == false : "testNotExists";

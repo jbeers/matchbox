@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/WrapTest.java
+r = wrap( "This is a long sentence", 10 );
+assert len( r ) > 0 : "testWrap";

@@ -1,0 +1,33 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryMoveTest.java
+base = createTempDirectory();
+source = base & "/start";
+destination = base & "/end";
+directoryCreate( source, true );
+fileWrite( source & "/test.txt", "move me" );
+directoryMove( source, destination );
+assert directoryExists( destination ) : "testDirectoryMove destination";
+assert directoryExists( source ) == false : "testDirectoryMove source-gone";
+assert fileExists( destination & "/test.txt" ) : "testDirectoryMove file";
+directoryDelete( base, true );
+
+base = createTempDirectory();
+source = base & "/start";
+destination = base & "/missing/end";
+directoryCreate( source, true );
+threw = false;
+try {
+    directoryMove( source, destination, false );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testNoCreatePathsMove";
+directoryDelete( base, true );
+
+base = createTempDirectory();
+source = base & "/start";
+destination = base & "/end";
+directoryCreate( source, true );
+directoryRename( source, destination );
+assert directoryExists( destination ) : "testDirectoryRename destination";
+assert directoryExists( source ) == false : "testDirectoryRename source-gone";
+directoryDelete( base, true );

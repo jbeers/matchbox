@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/PropertyFileTest.java
+p = createTempFile();
+fileWrite( p, "key1=value1" & chr( 10 ) & "key2=value2" & chr( 10 ) & "key3=value3" );
+result = propertyFile( p );
+assert result.key1 == "value1" : "testFileWriteOverwrite key1";
+assert result.key2 == "value2" : "testFileWriteOverwrite key2";
+assert result.key3 == "value3" : "testFileWriteOverwrite key3";
+fileDelete( p );

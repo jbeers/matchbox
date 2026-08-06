@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayToStructTest.java
+r = arrayToStruct( ["a","b"] );
+assert isStruct( r ) : "testToStruct is-struct";
+assert structCount( r ) == 2 : "testToStruct size";

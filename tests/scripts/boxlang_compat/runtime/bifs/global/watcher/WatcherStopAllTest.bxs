@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherStopAllTest.java
+
+// testWatcherStopAll
+watcherShutdownAll( false );
+watcherNew( "watcherOne", [ "./src" ], ( event, watcherContext ) => {} );
+watcherNew( "watcherTwo", [ "./src" ], ( event, watcherContext ) => {} );
+watcherStart( "watcherOne" );
+watcherStart( "watcherTwo" );
+watcherStopAll();
+result = watcherList();
+assert arrayContains( result, "watcherOne" ) : "testWatcherStopAll watcherOne";
+assert arrayContains( result, "watcherTwo" ) : "testWatcherStopAll watcherTwo";

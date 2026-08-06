@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileAppendTest.java
+p = getTempDirectory() & "/matchbox-append-test.txt";
+fileWrite( p, "a" );
+fileAppend( p, "b" );
+assert fileRead( p ) == "ab" : "testAppend";

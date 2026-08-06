@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/CharsetEncodeTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertions
+// require constructing and comparing Java byte[] values.

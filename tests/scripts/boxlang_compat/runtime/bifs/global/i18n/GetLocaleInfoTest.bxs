@@ -1,0 +1,36 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/GetLocaleInfoTest.java
+
+function assertLocaleInfo( info, name, displayCountry, displayLanguage ) {
+    assert isStruct( info ) : name & " struct";
+    assert structKeyExists( info, "country" ) : name & " country-key";
+    assert structKeyExists( info, "display" ) : name & " display-key";
+    assert structKeyExists( info, "iso" ) : name & " iso-key";
+    assert structKeyExists( info, "language" ) : name & " language-key";
+    assert structKeyExists( info, "name" ) : name & " name-key";
+    assert structKeyExists( info, "variant" ) : name & " variant-key";
+    assert isStruct( info.display ) : name & " display-struct";
+    assert isStruct( info.iso ) : name & " iso-struct";
+    assert info.country == "US" : name & " country";
+    assert info.language == "en" : name & " language";
+    assert info.name == name : name & " name";
+    assert info.variant == "" : name & " variant";
+    assert info.display.country == displayCountry : name & " display-country";
+    assert info.display.language == displayLanguage : name & " display-language";
+}
+
+// testGetLocaleInfoNoArgs
+setLocale( "en_US" );
+result = getLocaleInfo();
+assertLocaleInfo( result, "English (United States)", "United States", "English" );
+
+// testGetLocaleInfo
+result = getLocaleInfo( "en-US", "English" );
+assertLocaleInfo( result, "English (United States)", "United States", "English" );
+
+// testGetLocaleInfoGerman
+result = getLocaleInfo( "en-US", "German" );
+assertLocaleInfo( result, "Englisch (Vereinigte Staaten)", "Vereinigte Staaten", "Englisch" );
+
+// testGetLocaleInfoChinese
+result = getLocaleInfo( "en-US", "Chinese" );
+assertLocaleInfo( result, "英语 (美国)", "美国", "英语" );

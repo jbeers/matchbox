@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayIndexExistsTest.java
+arr = ["a","b","c"];
+assert ArrayIndexExists( arr, 1 ) : "testIndexExists 1";
+assert ArrayIndexExists( arr, 3 ) : "testIndexExists 3";
+assert ArrayIndexExists( arr, 4 ) == false : "testIndexExists 4";
+assert ArrayIndexExists( arr, 0 ) == false : "testIndexExists 0";
+assert ArrayIndexExists( arr, -3 ) == false : "testIndexExists -3";

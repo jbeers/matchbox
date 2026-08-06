@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryRowDataTest.java
+q = queryNew( "a,b" );
+queryAddRow( q, { a: 1, b: "x" } );
+r = queryRowData( q, 1 );
+assert r.a == 1 : "testRowData a";
+assert r.b == "x" : "testRowData b";

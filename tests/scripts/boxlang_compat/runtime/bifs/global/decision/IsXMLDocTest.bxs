@@ -1,0 +1,33 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsXMLDocTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+xmlString = "<rootNode><subNode attr="value" /></rootNode>";
+
+// testDocument
+result = isXMLDoc( xmlParse( xmlString ) );
+assert result : "testDocument";
+
+// testString
+result = isXMLDoc( xmlString );
+assert result == false : "testString";
+
+// testRootNode
+result = isXMLDoc( xmlParse( xmlString ).rootNode );
+assert result == false : "testRootNode";
+
+// testElement
+result = isXMLDoc( xmlParse( xmlString ).rootNode.subNode );
+assert result == false : "testElement";
+
+// testRandomNode
+xml = xmlParse( xmlString );
+search = xmlSearch( xml, "//@attr" );
+result = isXMLDoc( search[1] );
+assert result == false : "testRandomNode";
+
+// testNonXMLVar
+result = isXMLDoc( [] );
+assert result == false : "testNonXMLVar";

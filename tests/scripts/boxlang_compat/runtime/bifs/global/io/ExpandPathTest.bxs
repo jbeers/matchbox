@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/ExpandPathTest.java
+r = ExpandPath( "/expand/path/test/expandPathTest.txt" );
+assert len( r ) > 0 : "testExpandPath";

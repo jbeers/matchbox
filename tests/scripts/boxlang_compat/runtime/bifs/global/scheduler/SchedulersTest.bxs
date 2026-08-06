@@ -1,0 +1,7 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/scheduler/SchedulersTest.java
+// ---------------------------------------------------------------------------
+
+// testBasicEmptyScheduling
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test requires
+// the src.test.bx.Scheduler component class and BoxLang's JVM scheduler service.

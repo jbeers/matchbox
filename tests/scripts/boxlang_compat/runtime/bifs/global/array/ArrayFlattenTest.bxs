@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFlattenTest.java
+r = arrayFlatten( [1,[2,[3,4]]] );
+assert r[1] == 1 : "testFlatten 1";
+assert r[3] == 3 : "testFlatten 3";
+assert arrayLen( r ) == 4 : "testFlatten size";

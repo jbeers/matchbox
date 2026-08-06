@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFindAllNoCaseTest.java
+data = ["brad","john","brad"];
+r = arrayFindAllNoCase( data, "BRAD" );
+assert arrayLen( r ) == 2 : "testFindAllNoCase size";

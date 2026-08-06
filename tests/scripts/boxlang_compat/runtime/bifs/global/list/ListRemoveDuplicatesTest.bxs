@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListRemoveDuplicatesTest.java
+nums = "1,2,3,2,1";
+result = listRemoveDuplicates( nums );
+assert result == "1,2,3" : "testRemoveDuplicates default";
+nums = "1,2,3,2,1";
+result = listRemoveDuplicates( list=nums, ignoreCase=true );
+assert result == "1,2,3" : "testRemoveDuplicates ignore-case";

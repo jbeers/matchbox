@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayContainsTest.java
+arr = ["a","b","c"];
+assert arrayContains( arr, "b" ) : "testContains b";
+assert arrayContains( arr, "B" ) == false : "testContains case-sensitive";
+assert arrayContains( arr, "x" ) == false : "testContains missing";
+arr = [1.234,2.345,3.456];
+assert arrayContains( arr, 3.456 ) : "testContains number";

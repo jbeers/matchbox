@@ -1,0 +1,215 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsValidTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): testComponent
+// constructs a Java-backed BoxLang component class.
+
+// testAny
+aStruct = isValid( "Any", {} );
+aBool = isValid( "Any", true );
+anInt = isValid( "Any", 12345 );
+namedArgs = isValid( type = "Any", value = 12345 );
+nullValue = isValid( "Any", null );
+assert aStruct : "testAny struct";
+assert aBool : "testAny bool";
+assert anInt : "testAny int";
+assert namedArgs : "testAny named";
+assert nullValue : "testAny null";
+
+// testCreditcard
+assert isValid( "creditcard", "4111111111111111" ) : "testCreditcard valid";
+assert isValid( "creditcard", "6011-2222-3333-4444" ) : "testCreditcard separators";
+assert isValid( "creditcard", "41111111111111114" ) == false : "testCreditcard too-long";
+assert isValid( "creditcard", "4111x1111x1111y11114" ) == false : "testCreditcard letters";
+
+// testDate
+assert isValid( "date", "2024-01-26" ) : "testDate valid";
+assert isValid( "date", "2024-01-26777" ) == false : "testDate invalid";
+assert isValid( "date", null ) == false : "testDate null";
+
+// testTime
+assert isValid( "time", "10:45" ) : "testTime valid";
+assert isValid( "time", "" ) == false : "testTime empty";
+assert isValid( "time", null ) == false : "testTime null";
+
+// testGuid
+assert isValid( "guid", "00000000-0000-0000-0000-000000000000" ) : "testGuid zero";
+assert isValid( "guid", createUUID() ) : "testGuid uuid";
+assert isValid( "guid", null ) == false : "testGuid null";
+
+// testArray
+assert isValid( "Array", [] ) : "testArray arr";
+assert isValid( "Array", {} ) == false : "testArray struct";
+assert isValid( "Array", null ) == false : "testArray null";
+
+// testBoolean
+aTrue = isValid( "boolean", true );
+aYes = isValid( "boolean", "yes" );
+aStringFalse = isValid( "boolean", "false" );
+anArray = isValid( "boolean", [] );
+aStruct = isValid( "boolean", {} );
+nullValue = isValid( "boolean", null );
+assert aTrue : "testBoolean true";
+assert aYes : "testBoolean yes";
+assert aStringFalse : "testBoolean str-false";
+assert anArray == false : "testBoolean array";
+assert aStruct == false : "testBoolean struct";
+assert nullValue == false : "testBoolean null";
+
+// testInteger
+int = isValid( "integer", 123 );
+intWithDec = isValid( "integer", 123.0 );
+stringInt = isValid( "integer", "123" );
+stringIntWithDec = isValid( "integer", "123.0" );
+bool = isValid( "integer", true );
+float = isValid( "integer", 123.45 );
+stringval = isValid( "integer", "3x" );
+stringWithDec = isValid( "integer", "3.5" );
+assert int : "testInteger int";
+assert intWithDec : "testInteger int-with-dec";
+assert stringInt : "testInteger string-int";
+assert stringIntWithDec : "testInteger string-int-dec";
+assert bool == false : "testInteger bool";
+assert float == false : "testInteger float";
+assert stringval == false : "testInteger 3x";
+assert stringWithDec == false : "testInteger 3.5";
+
+// testNumeric
+int = isValid( "numeric", 123 );
+float = isValid( "numeric", 123.45 );
+stringInt = isValid( "numeric", "123" );
+stringFloat = isValid( "numeric", "123.45" );
+bool = isValid( "numeric", true );
+stringval = isValid( "numeric", "3x" );
+assert int : "testNumeric int";
+assert float : "testNumeric float";
+assert stringInt : "testNumeric string-int";
+assert stringFloat : "testNumeric string-float";
+assert bool == false : "testNumeric bool";
+assert stringval == false : "testNumeric 3x";
+
+// testNumber
+int = isValid( "number", 123 );
+float = isValid( "number", 123.45 );
+stringInt = isValid( "number", "123" );
+stringFloat = isValid( "number", "123.45" );
+bool = isValid( "number", true );
+stringval = isValid( "number", "3x" );
+assert int : "testNumber int";
+assert float : "testNumber float";
+assert stringInt : "testNumber string-int";
+assert stringFloat : "testNumber string-float";
+assert bool == false : "testNumber bool";
+assert stringval == false : "testNumber 3x";
+
+// testFloat
+float = isValid( "float", 123.45 );
+stringFloat = isValid( "float", "123.45" );
+int = isValid( "float", 123 );
+bool = isValid( "float", true );
+stringval = isValid( "float", "3x" );
+assert isValid( "float", 1.23 ) : "testFloat 1.23";
+assert isValid( "float", "xyz" ) == false : "testFloat xyz";
+assert float : "testFloat float";
+assert stringFloat : "testFloat string-float";
+assert int : "testFloat int";
+assert bool == false : "testFloat bool";
+assert stringval == false : "testFloat 3x";
+
+// testString
+assert isValid( "String", "aString" ) : "testString str";
+assert isValid( "String", {} ) == false : "testString struct";
+assert isValid( "String", null ) == false : "testString null";
+
+// testStruct
+assert isValid( "Struct", {} ) : "testStruct struct";
+assert isValid( "Struct", [] ) == false : "testStruct array";
+assert isValid( "Struct", null ) == false : "testStruct null";
+
+// testRange
+is3in1through5 = isValid( "range", "3", 1, 5 );
+is1in1through5 = isValid( "range", "1", 1, 5 );
+is5in1through5 = isValid( "range", "5", 1, 5 );
+is6in1through5 = isValid( "range", "6", 1, 5 );
+is0in1through5 = isValid( "range", "0", 1, 5 );
+is10in1through5 = isValid( "range", "10", 10, 5 );
+isXin1through5 = isValid( "range", "x", 1, 5 );
+assert is3in1through5 : "testRange 3";
+assert is1in1through5 : "testRange 1";
+assert is5in1through5 : "testRange 5";
+assert is6in1through5 == false : "testRange 6";
+assert is0in1through5 == false : "testRange 0";
+assert is10in1through5 == false : "testRange 10";
+assert isXin1through5 == false : "testRange x";
+
+// testRegex
+singlechar = isValid( "regex", "abc", "..." );
+plusquantifier = isValid( "regex", "abc", ".+" );
+curlyquantifier = isValid( "regex", "abc", "[abc]{3}" );
+wrongCasing = isValid( "regex", "ABC", "[abc]{3}" );
+mismatch = isValid( "regex", "(abc", "[abc]{3}" );
+assert singlechar : "testRegex single-char";
+assert plusquantifier : "testRegex plus";
+assert curlyquantifier : "testRegex curly";
+assert wrongCasing == false : "testRegex wrong-casing";
+assert mismatch == false : "testRegex mismatch";
+
+// testRegular_expression
+singlechar = isValid( "regular_expression", "abc", "..." );
+plusquantifier = isValid( "regular_expression", "abc", ".+" );
+curlyquantifier = isValid( "regular_expression", "abc", "[abc]{3}" );
+wrongCasing = isValid( "regular_expression", "ABC", "[abc]{3}" );
+mismatch = isValid( "regular_expression", "(abc", "[abc]{3}" );
+assert singlechar : "testRegular_expression single-char";
+assert plusquantifier : "testRegular_expression plus";
+assert curlyquantifier : "testRegular_expression curly";
+assert wrongCasing == false : "testRegular_expression wrong-casing";
+assert mismatch == false : "testRegular_expression mismatch";
+
+// testVariablename
+assert isValid( "variablename", "foo" ) : "testVariablename foo";
+assert isValid( "variablename", "123" ) == false : "testVariablename 123";
+assert isValid( "variablename", null ) == false : "testVariablename null";
+
+// testLambda
+aLambdaIsLambda = isValid( "lambda", () -> {} );
+assert aLambdaIsLambda : "testLambda";
+
+// testClosure
+assert isValid( "closure", function() {} ) : "testClosure function";
+assert isValid( "closure", () => {} ) : "testClosure arrow";
+assert isValid( "closure", null ) == false : "testClosure null";
+
+// testFunctions
+function myFunkyUDF() {}
+aUDF = isValid( "function", myFunkyUDF );
+aClosure = isValid( "function", function() {} );
+aLambda = isValid( "function", () -> {} );
+fClosure = isValid( "udf", function() {} );
+fLambda = isValid( "udf", () -> {} );
+assert aUDF : "testFunctions udf";
+assert aClosure : "testFunctions closure";
+assert aLambda : "testFunctions lambda";
+assert fClosure == false : "testFunctions closure-as-udf";
+assert fLambda == false : "testFunctions lambda-as-udf";
+
+// testHex
+hex1 = isValid( "hex", "1234567890abcdef" );
+hex2 = isValid( "hex", "1234567890ABCDEF" );
+hex3 = isValid( "hex", "1A2B3C" );
+hex4 = isValid( "hex", "1a2b3C" );
+hex6 = isValid( "hex", "0xDEADBEEF" );
+hex7 = isValid( "hex", "1234567890ABCDEFx" );
+hex8 = isValid( "hex", "1G2B3C" );
+hex9 = isValid( "hex", "" );
+assert hex1 : "testHex 1";
+assert hex2 : "testHex 2";
+assert hex3 : "testHex 3";
+assert hex4 : "testHex 4";
+assert hex6 : "testHex 6";
+assert hex7 == false : "testHex 7";
+assert hex8 == false : "testHex 8";
+assert hex9 == false : "testHex 9";

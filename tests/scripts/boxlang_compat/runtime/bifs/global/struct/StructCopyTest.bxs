@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructCopyTest.java
+ref = { a: 1, b: { c: 2 } };
+result = StructCopy( ref );
+assert result.a == 1 : "testCopy a";
+assert result.b.c == 2 : "testCopy nested";
+assert result != ref : "testCopy not-same";

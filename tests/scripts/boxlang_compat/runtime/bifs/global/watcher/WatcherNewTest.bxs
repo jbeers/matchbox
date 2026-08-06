@@ -1,0 +1,75 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherNewTest.java
+
+// testWatcherNew
+watcherShutdownAll( false );
+result = watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+running = result.isRunning();
+assert result != null : "testWatcherNew result";
+assert watcherExists( "myWatcher" ) : "testWatcherNew registered";
+assert running == false : "testWatcherNew not-running";
+
+// testWatcherNewWithSinglePathStringAndClosureListener
+watcherShutdownAll( false );
+result = watcherNew( "singlePathWatcher", "./src", ( event ) => {} );
+assert result != null : "testWatcherNewWithSinglePathStringAndClosureListener result";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// inspects the internal Java WatcherInstance path collection and ClosureListener class.
+
+// testWatcherNewWithStructListener
+watcherShutdownAll( false );
+result = watcherNew(
+    "structListenerWatcher",
+    [ "./src" ],
+    {
+        onEvent: ( event ) => {}
+    }
+);
+assert result != null : "testWatcherNewWithStructListener result";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// checks the internal Java StructListener implementation class.
+
+// testWatcherNewWithClassListener
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test requires
+// the Java watchertests.components.Listener class and ClassListener infrastructure.
+
+// testWatcherNewAutoGeneratesName
+watcherShutdownAll( false );
+result = watcherNew( "", [ "./src" ], ( event ) => {} );
+generatedName = watcherList()[ 1 ];
+assert left( generatedName, 8 ) == "watcher-" : "testWatcherNewAutoGeneratesName prefix";
+assert watcherExists( generatedName ) : "testWatcherNewAutoGeneratesName registered";
+
+// testWatcherNewInvalidPathsType
+watcherShutdownAll( false );
+threw = false;
+try {
+    result = watcherNew( "badPaths", 123, ( event ) => {} );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testWatcherNewInvalidPathsType";
+
+// testWatcherNewInvalidListenerType
+watcherShutdownAll( false );
+threw = false;
+try {
+    result = watcherNew( "badListener", [ "./src" ], 42 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testWatcherNewInvalidListenerType";
+
+// testWatcherNewDuplicateAndForce
+watcherShutdownAll( false );
+watcherNew( "dupWatcher", [ "./src" ], ( event ) => {} );
+threw = false;
+try {
+    watcherNew( "dupWatcher", [ "./src" ], ( event ) => {} );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testWatcherNewDuplicateAndForce duplicate";
+replaced = watcherNew( "dupWatcher", [ "./src" ], ( event ) => {}, true, 0, 0, true, 0, 10, true );
+replacedName = replaced.getName().getName();
+assert replacedName == "dupWatcher" : "testWatcherNewDuplicateAndForce replacement";
+assert watcherExists( "dupWatcher" ) : "testWatcherNewDuplicateAndForce registered";

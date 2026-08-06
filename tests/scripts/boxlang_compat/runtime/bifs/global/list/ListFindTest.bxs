@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListFindTest.java
+nums = "1,2,3";
+assert listFind( nums, "3" ) == 3 : "testMatchNumber str";
+assert listFind( nums, 3 ) == 3 : "testMatchNumber int";
+assert listFind( nums, "foo" ) == 0 : "testMatchNumber missing";

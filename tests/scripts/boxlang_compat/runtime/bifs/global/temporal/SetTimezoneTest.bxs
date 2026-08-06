@@ -1,0 +1,33 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/SetTimezoneTest.java
+
+// testSetTimezone
+setTimezone( "America/Los_Angeles" );
+result = now();
+assert isDateObject( result ) : "testSetTimezone";
+
+// testSetTimezoneCode
+setTimezone( "PST" );
+result = now();
+assert isDateObject( result ) : "testSetTimezoneCode";
+
+// setSetTimezoneInsensitive
+setTimezone( "pst" );
+result = now();
+assert isDateObject( result ) : "setSetTimezoneInsensitive alias";
+setTimezone( "america/los_angeles" );
+result = now();
+assert isDateObject( result ) : "setSetTimezoneInsensitive name";
+
+// testSetTimezoneOffset
+setTimezone( "GMT-05:00" );
+result = now();
+assert isDateObject( result ) : "testSetTimezoneOffset";
+
+// testSetTimezoneError
+threw = false;
+try {
+    setTimezone( "XYZ" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testSetTimezoneError";

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructReduceTest.java
+r = structReduce( { a: 1, b: 2, c: 3 }, ( acc, k, v ) => acc + v, 0 );
+assert r == 6 : "testReduce";

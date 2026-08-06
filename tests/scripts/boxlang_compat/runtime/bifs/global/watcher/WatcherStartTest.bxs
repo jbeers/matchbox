@@ -1,0 +1,56 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherStartTest.java
+
+// testWatcherStart
+watcherShutdownAll( false );
+created = watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+beforeState = created.getStateAsString();
+beforeRunning = created.isRunning();
+result = watcherStart( "myWatcher" );
+afterState = result.getStateAsString();
+afterRunning = result.isRunning();
+assert result == created : "testWatcherStart returned-instance";
+assert watcherGet( "myWatcher" ) == result : "testWatcherStart registered-instance";
+assert beforeState == "CREATED" : "testWatcherStart before-state";
+assert beforeRunning == false : "testWatcherStart before-running";
+assert afterState == "RUNNING" : "testWatcherStart after-state";
+assert afterRunning : "testWatcherStart after-running";
+
+// testWatcherStartWhenAlreadyRunning
+watcherShutdownAll( false );
+created = watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+first = watcherStart( "myWatcher" );
+second = watcherStart( "myWatcher" );
+firstRunning = first.isRunning();
+secondRunning = second.isRunning();
+assert first == created : "testWatcherStartWhenAlreadyRunning first-instance";
+assert second == created : "testWatcherStartWhenAlreadyRunning second-instance";
+assert firstRunning : "testWatcherStartWhenAlreadyRunning first-running";
+assert secondRunning : "testWatcherStartWhenAlreadyRunning second-running";
+
+// testWatcherStartDispatchesFilesystemEvent
+watcherShutdownAll( false );
+tempRoot = createTempDirectory();
+received = false;
+eventKind = "";
+eventPath = "";
+eventWatchRoot = "";
+eventRelativePath = "";
+watcherNew( "eventWatcher", tempRoot, ( event, watcherContext ) => {
+    if ( event.getKind().toString() == "CREATED" ) {
+        received = true;
+        eventKind = event.getKind().toString();
+        eventPath = event.getPath().toString();
+        eventWatchRoot = event.getWatchRoot().toString();
+        eventRelativePath = event.getRelativePath().toString();
+    }
+}, false );
+watcherStart( "eventWatcher" );
+createdDir = tempRoot & "/created-dir";
+directoryCreate( createdDir );
+sleep( 5000 );
+assert received : "testWatcherStartDispatchesFilesystemEvent received";
+assert watcherGet( "eventWatcher" ).isRunning() : "testWatcherStartDispatchesFilesystemEvent running";
+assert eventKind == "CREATED" : "testWatcherStartDispatchesFilesystemEvent kind";
+assert eventPath == createdDir : "testWatcherStartDispatchesFilesystemEvent path";
+assert eventWatchRoot == tempRoot : "testWatcherStartDispatchesFilesystemEvent watch-root";
+assert eventRelativePath == "created-dir" : "testWatcherStartDispatchesFilesystemEvent relative-path";

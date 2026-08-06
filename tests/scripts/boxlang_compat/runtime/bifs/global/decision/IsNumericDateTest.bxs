@@ -1,0 +1,16 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsNumericDateTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+// JVM: result = isNumericDate( now() ) is true. Transcribed with now().
+result = isNumericDate( now() );
+assert result : "testTrueConditions now";
+
+// testFalseConditions
+isStringNumericDate = isNumericDate( "blah" );
+isNegativeNumberNumericDate = isNumericDate( -1 );
+assert isStringNumericDate == false : "testFalseConditions string";
+assert isNegativeNumberNumericDate == false : "testFalseConditions negative";

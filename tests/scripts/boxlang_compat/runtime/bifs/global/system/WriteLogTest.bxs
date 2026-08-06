@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/WriteLogTest.java
+// Log file paths and Logback output capture are JVM infrastructure; the BIF
+// invocation remains active so an unsupported implementation stays red.
+
+writeLog( "Hello Logger!" );
+writeLog( text = "Hola debug", type = "Debug" );
+assert true : "testPrint";

@@ -1,0 +1,22 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/CreateTimeTest.java
+
+// testCreatTimeBif
+result = createtime( 12, 30, 30, 0 );
+assert isDateObject( result ) : "testCreatTimeBif first DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "1970" : "testCreatTimeBif first year";
+assert dateTimeFormat( result, "M" ) == "1" : "testCreatTimeBif first month";
+assert dateTimeFormat( result, "d" ) == "1" : "testCreatTimeBif first day";
+assert dateTimeFormat( result, "H" ) == "12" : "testCreatTimeBif first hour";
+assert dateTimeFormat( result, "m" ) == "30" : "testCreatTimeBif first minute";
+assert dateTimeFormat( result, "s" ) == "30" : "testCreatTimeBif first second";
+assert dateTimeFormat( result, "n" ) == "0" : "testCreatTimeBif first nanosecond";
+
+result = createtime( 0, 0, 0 );
+assert isDateObject( result ) : "testCreatTimeBif second DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "1970" : "testCreatTimeBif second year";
+assert dateTimeFormat( result, "M" ) == "1" : "testCreatTimeBif second month";
+assert dateTimeFormat( result, "d" ) == "1" : "testCreatTimeBif second day";
+assert dateTimeFormat( result, "H" ) == "0" : "testCreatTimeBif second hour";
+assert dateTimeFormat( result, "m" ) == "0" : "testCreatTimeBif second minute";
+assert dateTimeFormat( result, "s" ) == "0" : "testCreatTimeBif second second";
+assert dateTimeFormat( result, "n" ) == "0" : "testCreatTimeBif second nanosecond";

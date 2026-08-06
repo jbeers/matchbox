@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/CompareNoCaseTest.java
+assert compareNoCase( "a", "a" ) == 0 : "testCompareEqual";
+assert compareNoCase( "a", "A" ) == 0 : "testCompareCaseSensitive";
+assert compareNoCase( "a", "C" ) == -1 : "testCompareFirst";
+assert compareNoCase( "B", "a" ) == 1 : "testCompareSecond";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/DateLenTest.java
+result = len( now() );
+assert result == 26 : "testDateLenFunction";
+result = now().len();
+assert result == 26 : "testDateLenMethod";

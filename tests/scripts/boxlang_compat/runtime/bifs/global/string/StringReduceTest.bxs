@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringReduceTest.java
+r = stringReduce( "abc", ( acc, ch ) => acc & ch, "" );
+assert r == "abc" : "testReduce";

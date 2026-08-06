@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReplaceListTest.java
+assert replaceList( "a,b,c", "a,b", "x,y" ) == "x,y,c" : "testReplaceList";
+assert replaceList( "a,b,c", "a,b", "x" ) == "x,c" : "testReplaceListShort";

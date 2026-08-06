@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/DerbySleep.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): DerbySleep is a Java
+// static method used as a Derby external-function fixture for a thread test.

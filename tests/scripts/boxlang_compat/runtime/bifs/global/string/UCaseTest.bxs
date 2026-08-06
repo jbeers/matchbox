@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/UCaseTest.java
+assert ucase( "brad" ) == "BRAD" : "testUppercase";
+assert "brad".ucase() == "BRAD" : "testUppercaseMember";
+assert ucase( 5 ) == "5" : "testUppercaseNumber";

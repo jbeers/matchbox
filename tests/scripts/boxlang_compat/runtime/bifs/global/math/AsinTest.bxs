@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/AsinTest.java
+// testItReturnsASine
+assert asin( 0 ) == 0.0 : "testItReturnsASine zero";
+assert abs( asin( 0.5 ) - 0.5235987755982989 ) < 0.0000001 : "testItReturnsASine half";
+// testItReturnsASineMember
+assert ( 0 ).asin() == 0.0 : "testItReturnsASineMember zero";
+assert abs( ( 0.5 ).asin() - 0.5235987755982989 ) < 0.0000001 : "testItReturnsASineMember half";
+// testItThrowsAnExceptionWhenTheInputIsOutOfRange
+threw = false;
+try { x = asin( 1.1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrowsOutOfRange 1.1";
+threw = false;
+try { x = asin( -1.1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrowsOutOfRange -1.1";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayPushTest.java
+a = [1,2];
+arrayPush( a, "test" );
+assert a[3] == "test" : "testPush value";
+assert arrayLen( a ) == 3 : "testPush size";

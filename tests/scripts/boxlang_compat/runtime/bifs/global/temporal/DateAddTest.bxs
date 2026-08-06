@@ -1,0 +1,83 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DateAddTest.java
+
+// testBif
+result = dateAdd( "d", 1, createDate( 2023, 12, 31 ) );
+assert isDateObject( result ) : "testBif DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "2024" : "testBif year";
+assert dateTimeFormat( result, "M" ) == "1" : "testBif month";
+assert dateTimeFormat( result, "d" ) == "1" : "testBif day";
+
+// testBifWithDateString
+result = dateAdd( "d", 1, "2023-12-31" );
+assert isDateObject( result ) : "testBifWithDateString DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "2024" : "testBifWithDateString year";
+assert dateTimeFormat( result, "M" ) == "1" : "testBifWithDateString month";
+assert dateTimeFormat( result, "d" ) == "1" : "testBifWithDateString day";
+
+// testMemberFunction
+ref = createDate( 2023, 12, 31 );
+result = ref.add( datepart="d", number=1 );
+assert isDateObject( result ) : "testMemberFunction DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "2024" : "testMemberFunction year";
+assert dateTimeFormat( result, "M" ) == "1" : "testMemberFunction month";
+assert dateTimeFormat( result, "d" ) == "1" : "testMemberFunction day";
+
+// testValueSemantics
+original = createDate( 2023, 12, 31 );
+modified = dateAdd( "d", 1, original );
+assert dateTimeFormat( modified, "yyyy" ) == "2024" : "testValueSemantics modified year";
+assert dateTimeFormat( modified, "M" ) == "1" : "testValueSemantics modified month";
+assert dateTimeFormat( modified, "d" ) == "1" : "testValueSemantics modified day";
+assert dateTimeFormat( original, "yyyy" ) == "2023" : "testValueSemantics original year";
+assert dateTimeFormat( original, "M" ) == "12" : "testValueSemantics original month";
+assert dateTimeFormat( original, "d" ) == "31" : "testValueSemantics original day";
+
+// testBifWithDecimalNumber
+epochDate = parseDateTime( "1970-01-01T00:00:00.000Z" );
+updatedDate = dateAdd( "s", 500 / 1000, epochDate );
+result = dateTimeFormat( updatedDate, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC" );
+assert result == "1970-01-01T00:00:01.000Z" : "testBifWithDecimalNumber";
+
+// testBifWithFractionalDays
+dateVal = parseDateTime( "2025-01-01T00:00:00Z" );
+fractionalDays = dateVal.toEpochMillis() * 1.1574074074074e-8;
+updatedDate = dateAdd( "d", 1, fractionalDays );
+result = dateTimeFormat( updatedDate, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC" );
+assert result == "2025-01-02T00:00:00.000Z" : "testBifWithFractionalDays";
+
+// testBifWithZeroQuantity
+dateVal = parseDateTime( "2025-01-01T00:00:00Z" );
+updatedDate = dateAdd( "w", 0, dateVal );
+result = dateTimeFormat( updatedDate, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC" );
+assert result == "2025-01-01T00:00:00.000Z" : "testBifWithZeroQuantity";
+
+// testBIFCaseSensitivity
+dateVal = parseDateTime( "2000-01-01T00:00:00Z" );
+updatedDate = dateAdd( "YYYY", 1, dateVal );
+result = dateTimeFormat( updatedDate, "yyyy-MM-dd'T'HH:mm:ss.SSSX", "UTC" );
+assert result == "2001-01-01T00:00:00.000Z" : "testBIFCaseSensitivity";
+
+// testBIFWithPositiveNegativeWeekOverlaps
+d = createDate( 2024, 1, 8 );
+baseDate = dateFormat( d, "full" );
+addZero = dateFormat( dateAdd( "w", 0, d ), "full" );
+addOne = dateFormat( dateAdd( "w", 1, d ), "full" );
+addTwo = dateFormat( dateAdd( "w", 2, d ), "full" );
+subFive = dateFormat( dateAdd( "w", -5, d ), "full" );
+addFive = dateFormat( dateAdd( "w", 5, d ), "full" );
+addTen = dateFormat( dateAdd( "w", 10, d ), "full" );
+addZeroWW = dateFormat( dateAdd( "ww", 0, d ), "full" );
+subFiveWW = dateFormat( dateAdd( "ww", -5, d ), "full" );
+addFiveWW = dateFormat( dateAdd( "ww", 5, d ), "full" );
+addTenWW = dateFormat( dateAdd( "ww", 10, d ), "full" );
+assert baseDate == "Monday, January 8, 2024" : "testBIFWithPositiveNegativeWeekOverlaps baseDate";
+assert addZero == "Monday, January 8, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addZero";
+assert addOne == "Tuesday, January 9, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addOne";
+assert addTwo == "Wednesday, January 10, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addTwo";
+assert subFive == "Monday, January 1, 2024" : "testBIFWithPositiveNegativeWeekOverlaps subFive";
+assert addFive == "Monday, January 15, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addFive";
+assert addTen == "Monday, January 22, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addTen";
+assert addZeroWW == "Monday, January 8, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addZeroWW";
+assert subFiveWW == "Monday, December 4, 2023" : "testBIFWithPositiveNegativeWeekOverlaps subFiveWW";
+assert addFiveWW == "Monday, February 12, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addFiveWW";
+assert addTenWW == "Monday, March 18, 2024" : "testBIFWithPositiveNegativeWeekOverlaps addTenWW";

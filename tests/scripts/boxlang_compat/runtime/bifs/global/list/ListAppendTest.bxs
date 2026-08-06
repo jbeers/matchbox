@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListAppendTest.java
+nums = ",1,2,3,4,5";
+result = listAppend( nums, 6 );
+assert result == "1,2,3,4,5,6" : "testAppendNumber";
+// testAppendNull
+result = "brad,jon".listAppend( null );
+assert result == "brad,jon" : "testAppendNull";
+result = listAppend( "1|2|3|4|5", 6, "|" );
+assert result == "1|2|3|4|5|6" : "testAppendArguments";
+result = listAppend( "1|2||3|4|5", 6, "|", true );
+assert result == "1|2||3|4|5|6" : "testAppendIncludeEmpty";
+result = listAppend( "1-and-2-and-3", 4, "-and-", true, true );
+assert result == "1-and-2-and-3-and-4" : "testAppendMultiCharacterDelimiter";

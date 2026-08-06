@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListPrependTest.java
+nums = "2,3,4";
+result = listPrepend( nums, "1" );
+assert result == "1,2,3,4" : "testPrepend str";
+nums = "2,3,4";
+result = listPrepend( nums, 1 );
+assert result == "1,2,3,4" : "testPrepend int";

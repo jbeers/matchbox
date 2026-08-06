@@ -1,0 +1,59 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsEmptyTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+emptyString = isEmpty( "" );
+emptyArray = isEmpty( [] );
+emptyStruct = isEmpty( {} );
+assert emptyString : "testTrueConditions string";
+assert emptyArray : "testTrueConditions array";
+assert emptyStruct : "testTrueConditions struct";
+
+// structMemberFunction
+myStruct = { a: "b" };
+myEmptyStruct = {};
+onPopulated = myStruct.isEmpty();
+onEmpty = myEmptyStruct.isEmpty();
+assert onPopulated == false : "structMemberFunction populated";
+assert onEmpty : "structMemberFunction empty";
+
+// arrayMemberFunction
+myArray = [ "a" ];
+myEmptyArray = [];
+onPopulated = myArray.isEmpty();
+onEmpty = myEmptyArray.isEmpty();
+assert onPopulated == false : "arrayMemberFunction populated";
+assert onEmpty : "arrayMemberFunction empty";
+
+// stringMemberFunction
+myString = "brad";
+myEmptyString = "";
+onPopulated = myString.isEmpty();
+onEmpty = myEmptyString.isEmpty();
+assert onPopulated == false : "stringMemberFunction populated";
+assert onEmpty : "stringMemberFunction empty";
+
+// testFalseConditions
+boolValue = isEmpty( true );
+zero = isEmpty( 0 );
+one = isEmpty( 1 );
+stringValue = isEmpty( "2" );
+stringWithSpaces = isEmpty( "   " );
+nestedArray = isEmpty( [[[],[]]] );
+nestedStruct = isEmpty( { a: {}, b: {} } );
+stringArray = isEmpty( [ "abc" ] );
+structWithValues = isEmpty( { a: "b" } );
+nestedStructValues = isEmpty( { a: { "name" : "brad" } } );
+assert boolValue == false : "testFalseConditions bool";
+assert zero == false : "testFalseConditions zero";
+assert one == false : "testFalseConditions one";
+assert stringValue == false : "testFalseConditions string";
+assert stringWithSpaces == false : "testFalseConditions spaces";
+assert nestedArray == false : "testFalseConditions nested-array";
+assert nestedStruct == false : "testFalseConditions nested-struct";
+assert stringArray == false : "testFalseConditions string-array";
+assert structWithValues == false : "testFalseConditions struct-values";
+assert nestedStructValues == false : "testFalseConditions nested-struct-values";

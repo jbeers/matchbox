@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/ObjectMarshallerTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test depends
+// on Java object serialization and deserialization implementation classes.

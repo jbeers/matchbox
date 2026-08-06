@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListIndexExistsTest.java
+list = "a,b,c";
+assert listIndexExists( list, 3 ) : "testIndexExists 3";
+assert listIndexExists( list, 4 ) == false : "testIndexExists 4";
+assert listIndexExists( list, -1 ) == false : "testIndexExists -1";
+list = "a:b:c";
+assert listIndexExists( list, 3, ":" ) : "testIndexExists colon-delim";
+assert listIndexExists( list, 4, ":", true ) == false : "testIndexExists 4&include-empty";
+list = "a,b,c";
+assert listIndexExists( list, 4, ",", false ) == false : "testIndexExists skip-empty";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReMatchTest.java
+r = reMatch( "[0-9]+", "BoxLang 1 is 2 great" );
+assert arrayLen( r ) == 2 : "testReMatch size";
+assert r[1] == "1" : "testReMatch 1";
+assert r[2] == "2" : "testReMatch 2";

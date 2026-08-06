@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayContainsNoCaseTest.java
+arr = ["a","b","c"];
+assert arrayContainsNoCase( arr, "b" ) : "testContainsNoCase b";
+assert arrayContainsNoCase( arr, "B" ) : "testContainsNoCase B";
+assert arrayContainsNoCase( arr, "x" ) == false : "testContainsNoCase missing";

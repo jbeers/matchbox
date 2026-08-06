@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/IsStringBuilderTest.java
+// testIsStringBuilderTrue
+result = isStringBuilder( sb{"hello"} );
+assert result == true : "testIsStringBuilderTrue";
+
+// testIsStringBuilderFalse
+result = isStringBuilder( "hello" );
+assert result == false : "testIsStringBuilderFalse";

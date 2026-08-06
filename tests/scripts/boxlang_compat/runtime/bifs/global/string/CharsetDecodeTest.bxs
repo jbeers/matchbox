@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/CharsetDecodeTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertions
+// require inspecting Java byte[] return values.

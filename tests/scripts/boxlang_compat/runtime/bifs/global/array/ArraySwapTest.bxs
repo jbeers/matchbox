@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySwapTest.java
+arr = ["a","b","c"];
+arraySwap( arr, 1, 3 );
+assert arr[1] == "c" : "testSwap 1";
+assert arr[3] == "a" : "testSwap 3";

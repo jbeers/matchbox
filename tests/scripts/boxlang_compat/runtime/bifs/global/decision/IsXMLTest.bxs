@@ -1,0 +1,25 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsXMLTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testValidXML
+result = isXML( "<root />" );
+assert result : "testValidXML";
+
+// testRejectInvalid
+result = isXML( null );
+result2 = isXML( "" );
+result3 = isXML( 56 );
+result4 = isXML( {} );
+result5 = isXML( [] );
+result6 = isXML( "<foo>" );
+result7 = isXML( "This is a test of the emergency broadcast system." );
+assert result == false : "testRejectInvalid null";
+assert result2 == false : "testRejectInvalid empty";
+assert result3 == false : "testRejectInvalid integer";
+assert result4 == false : "testRejectInvalid struct";
+assert result5 == false : "testRejectInvalid array";
+assert result6 == false : "testRejectInvalid unclosed";
+assert result7 == false : "testRejectInvalid plain-text";

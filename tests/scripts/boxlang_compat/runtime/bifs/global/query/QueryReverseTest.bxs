@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryReverseTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+queryReverse( q );
+assert queryGetCell( q, "a", 1 ) == 2 : "testReverse 1";
+assert queryGetCell( q, "a", 2 ) == 1 : "testReverse 2";

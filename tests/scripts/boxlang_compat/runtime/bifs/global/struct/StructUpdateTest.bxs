@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructUpdateTest.java
+myStruct = { foo: "bar" };
+structUpdate( myStruct, "foo", "baz" );
+assert myStruct.foo == "baz" : "testUpdate";

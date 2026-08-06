@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/AcosTest.java
+// testItReturnsACosine
+assert acos( 1 ) == 0.0 : "testItReturnsACosine one";
+assert abs( acos( 0.5 ) - 1.0471975511965979 ) < 0.0000001 : "testItReturnsACosine half";
+// testItReturnsACosineMember
+assert ( 1 ).acos() == 0.0 : "testItReturnsACosineMember one";
+assert abs( ( 0.5 ).acos() - 1.0471975511965979 ) < 0.0000001 : "testItReturnsACosineMember half";
+// testItThrowsAnExceptionWhenTheInputIsOutOfRange
+threw = false;
+try { x = acos( 1.1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrowsOutOfRange 1.1";
+threw = false;
+try { x = acos( -1.1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrowsOutOfRange -1.1";

@@ -1,0 +1,15 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cache/CacheFilterTest.java
+// ---------------------------------------------------------------------------
+
+// canGetDefaultCache
+result = cacheFilter( "test*" );
+assert result != null : "canGetDefaultCache result";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// checks the internal Java WildcardFilter implementation class.
+
+// canGetNamedCache
+result = cacheFilter( "test.*", true );
+assert result != null : "canGetNamedCache result";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// checks the internal Java RegexFilter implementation class.

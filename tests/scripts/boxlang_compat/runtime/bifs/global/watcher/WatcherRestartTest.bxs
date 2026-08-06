@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherRestartTest.java
+
+// testWatcherRestart
+watcherShutdownAll( false );
+created = watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+watcherStart( "myWatcher" );
+result = watcherRestart( "myWatcher" );
+assert result == created : "testWatcherRestart";

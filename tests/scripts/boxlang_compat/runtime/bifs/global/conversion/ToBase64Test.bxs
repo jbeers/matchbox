@@ -1,0 +1,10 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ToBase64Test.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBif (Java fixtures with getBytes() are JVM-only; the string form is
+// transferred)
+result = toBase64( "Hello World" );
+assert result == "SGVsbG8gV29ybGQ=" : "testBif string";

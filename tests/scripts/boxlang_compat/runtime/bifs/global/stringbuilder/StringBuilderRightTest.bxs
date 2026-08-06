@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderRightTest.java
+// testRightHeadless
+sb = sb{"The quick brown fox"};
+result = stringBuilderRight( sb, 3 );
+assert result == "fox" : "testRightHeadless";
+
+// testRightMemberNegative
+sb = sb{"abcdef"};
+result = sb.right( -2 );
+assert result == "cdef" : "testRightMemberNegative";

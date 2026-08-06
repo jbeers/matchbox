@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructGetTest.java
+myStruct = { foo: { bar: "found" } };
+r = StructGet( "myStruct.foo.bar" );
+assert r == "found" : "testGet";

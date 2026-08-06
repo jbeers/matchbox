@@ -1,0 +1,738 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/QueryExecuteTest.java
+// The JVM fixture is recreated with the source-level datasource API. The
+// MATCHBOX_TEST_DB_HOST environment variable is used by the PostgreSQL test
+// datasource when the datasource feature is enabled.
+
+// testMissingDefaultDataSource
+threw = false;
+try {
+    result = queryExecute( "SELECT * FROM developers" );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "No default datasource" : "testMissingDefaultDataSource message";
+}
+assert threw : "testMissingDefaultDataSource throws";
+assert result == null : "testMissingDefaultDataSource result";
+
+host = getSystemSetting( "MATCHBOX_TEST_DB_HOST", "localhost" );
+datasourceConfig = {
+    driver: "postgresql",
+    host: host,
+    port: 5432,
+    database: "matchbox_test",
+    username: "matchbox",
+    password: "matchbox_test",
+    maxConnections: 2
+};
+datasourceRegister( "default", datasourceConfig );
+
+function resetDevelopers() {
+    queryExecute( "TRUNCATE TABLE developers" );
+    queryExecute( "INSERT INTO developers ( id, name, role, createdAt ) VALUES " &
+        "( 77, 'Michael Born', 'Developer', CURRENT_TIMESTAMP )," &
+        "( 1, 'Luis Majano', 'CEO', CURRENT_TIMESTAMP )," &
+        "( 42, 'Eric Peterson', 'Developer', CURRENT_TIMESTAMP )," &
+        "( 9001, 'Bob O''Reily', 'QA', CURRENT_TIMESTAMP )" );
+}
+
+queryExecute( "DROP TABLE IF EXISTS developers" );
+queryExecute( "CREATE TABLE developers ( id INTEGER, name VARCHAR(155), role VARCHAR(155), createdAt TIMESTAMP )" );
+resetDevelopers();
+
+// testSimpleExecute
+result = queryExecute( "SELECT * FROM developers ORDER BY id" );
+assert isQuery( result ) : "testSimpleExecute query";
+assert result.recordCount == 4 : "testSimpleExecute count";
+assert result.id[1] == 1 : "testSimpleExecute Luis id";
+assert result.name[1] == "Luis Majano" : "testSimpleExecute Luis name";
+assert result.role[1] == "CEO" : "testSimpleExecute Luis role";
+assert result.id[2] == 42 : "testSimpleExecute Eric id";
+assert result.name[2] == "Eric Peterson" : "testSimpleExecute Eric name";
+assert result.role[2] == "Developer" : "testSimpleExecute Eric role";
+assert result.id[3] == 77 : "testSimpleExecute Michael id";
+assert result.name[3] == "Michael Born" : "testSimpleExecute Michael name";
+assert result.role[3] == "Developer" : "testSimpleExecute Michael role";
+
+// testArrayBindings
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers WHERE id = ?", [ 77 ] );
+assert isQuery( result ) : "testArrayBindings query";
+assert result.recordCount == 1 : "testArrayBindings count";
+assert result.id[1] == 77 : "testArrayBindings id";
+assert result.name[1] == "Michael Born" : "testArrayBindings name";
+assert result.role[1] == "Developer" : "testArrayBindings role";
+
+// testListStringBindings
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id IN (:ids)",
+    { ids: { value: "77,1,42", list: true } }
+);
+assert isQuery( result ) : "testListStringBindings query";
+assert result.recordCount == 3 : "testListStringBindings count";
+
+// testListArrayNamedBindings
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id IN (:ids)",
+    { ids: { value: [77, 1, 42], list: true } }
+);
+assert isQuery( result ) : "testListArrayNamedBindings query";
+assert result.recordCount == 3 : "testListArrayNamedBindings count";
+
+// testListArrayPositionalBinding
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id IN (?)",
+    [ { value: [77, 1, 42], list: true } ]
+);
+assert isQuery( result ) : "testListArrayPositionalBinding query";
+assert result.recordCount == 3 : "testListArrayPositionalBinding count";
+
+// testParamReuse
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id = :id OR name = :id",
+    { id: 77 }
+);
+assert isQuery( result ) : "testParamReuse query";
+assert result.recordCount == 1 : "testParamReuse count";
+
+// testParameterTypeMix
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id = ? OR id IN (?)",
+    [ 77, { value: [1, 42], list: true } ]
+);
+assert isQuery( result ) : "testParameterTypeMix query";
+assert result.recordCount == 3 : "testParameterTypeMix count";
+
+// testNamedParamInsideParamArray
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id = :foo",
+    [ { name: "foo", value: "1" } ]
+);
+assert isQuery( result ) : "testNamedParamInsideParamArray query";
+assert result.recordCount == 1 : "testNamedParamInsideParamArray count";
+
+// testStructBindings
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers WHERE id = :id", { id: 77 } );
+assert isQuery( result ) : "testStructBindings query";
+assert result.recordCount == 1 : "testStructBindings count";
+assert result.id[1] == 77 : "testStructBindings id";
+assert result.name[1] == "Michael Born" : "testStructBindings name";
+assert result.role[1] == "Developer" : "testStructBindings role";
+
+// testSqlType
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id = :id",
+    { id: { value: 77, sqltype: "integer" } }
+);
+assert isQuery( result ) : "testSqlType query";
+assert result.recordCount == 1 : "testSqlType count";
+assert result.id[1] == 77 : "testSqlType id";
+assert result.name[1] == "Michael Born" : "testSqlType name";
+assert result.role[1] == "Developer" : "testSqlType role";
+
+// testCFSqlType
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE id = :id",
+    { id: { value: 77, sqltype: "cf_sql_integer" } }
+);
+assert isQuery( result ) : "testCFSqlType query";
+assert result.recordCount == 1 : "testCFSqlType count";
+assert result.id[1] == 77 : "testCFSqlType id";
+assert result.name[1] == "Michael Born" : "testCFSqlType name";
+assert result.role[1] == "Developer" : "testCFSqlType role";
+
+// testInvalidSqlType
+resetDevelopers();
+threw = false;
+try {
+    result = queryExecute(
+        "SELECT * FROM developers WHERE id = :id",
+        { id: { value: 77, sqltype: "fooey" } }
+    );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "Unknown QueryColumnType" : "testInvalidSqlType message";
+}
+assert threw : "testInvalidSqlType throws";
+
+// testMissingStructBinding
+resetDevelopers();
+threw = false;
+try {
+    result = queryExecute( "SELECT * FROM developers WHERE id = :id", { name: "Michael Born" } );
+} catch ( e ) {
+    threw = true;
+    assert e.message == "Named parameter [:id] not provided to query." : "testMissingStructBinding message";
+}
+assert threw : "testMissingStructBinding throws";
+assert result == null : "testMissingStructBinding result";
+
+// testNamedDataSource
+datasourceRegister( "derby", datasourceConfig );
+queryExecute( "DROP TABLE IF EXISTS developers", [], { datasource: "derby" } );
+queryExecute( "CREATE TABLE developers ( id INTEGER, name VARCHAR(155), role VARCHAR(155) )", [], { datasource: "derby" } );
+queryExecute( "INSERT INTO developers ( id, name, role ) VALUES ( 77, 'Michael Born', 'Developer' )", [], { datasource: "derby" } );
+result = queryExecute( "SELECT * FROM developers ORDER BY id", [], { datasource: "derby" } );
+assert isQuery( result ) : "testNamedDataSource query";
+assert result.recordCount == 1 : "testNamedDataSource count";
+assert result.id[1] == 77 : "testNamedDataSource id";
+assert result.name[1] == "Michael Born" : "testNamedDataSource name";
+assert result.role[1] == "Developer" : "testNamedDataSource role";
+queryExecute( "DROP TABLE IF EXISTS developers", [], { datasource: "derby" } );
+queryExecute( "CREATE TABLE developers ( id INTEGER, name VARCHAR(155), role VARCHAR(155), createdAt TIMESTAMP )" );
+resetDevelopers();
+
+// testNullParam
+queryExecute( "DROP TABLE IF EXISTS developers_new", [], { datasource: "derby" } );
+queryExecute( "CREATE TABLE developers_new ( id INTEGER, name VARCHAR(155), role VARCHAR(155) )", [], { datasource: "derby" } );
+queryExecute(
+    "INSERT INTO developers_new ( id, name, role ) VALUES ( :id, :name, :role )",
+    { id: 77, name: "Michael Born", role: nullValue() },
+    { datasource: "derby" }
+);
+result = queryExecute( "SELECT * FROM developers_new WHERE id = 77", [], { datasource: "derby" } );
+assert isQuery( result ) : "testNullParam query";
+assert result.recordCount == 1 : "testNullParam count";
+assert result.id[1] == 77 : "testNullParam id";
+assert result.name[1] == "Michael Born" : "testNullParam name";
+assert result.role[1] == null : "testNullParam role";
+
+// The JVM test requires a live MySQL module and a separate MySQL fixture.
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test requires
+// a live MySQL service and the MySQL module to test query-time credentials.
+
+// testMissingNamedDataSource
+resetDevelopers();
+threw = false;
+try {
+    result = queryExecute(
+        "SELECT * FROM developers WHERE name = :name",
+        { name: "Michael Born" },
+        { datasource: "not_found" }
+    );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "Datasource with name [not_found] not found" : "testMissingNamedDataSource message";
+}
+assert threw : "testMissingNamedDataSource throws";
+assert result == null : "testMissingNamedDataSource result";
+
+// testReturnTypeArray
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers ORDER BY id", [], { returntype: "array" } );
+assert isArray( result ) : "testReturnTypeArray array";
+assert len( result ) == 4 : "testReturnTypeArray count";
+assert isStruct( result[1] ) : "testReturnTypeArray Luis struct";
+assert result[1].id == 1 : "testReturnTypeArray Luis id";
+assert result[1].name == "Luis Majano" : "testReturnTypeArray Luis name";
+assert result[1].role == "CEO" : "testReturnTypeArray Luis role";
+assert isStruct( result[2] ) : "testReturnTypeArray Eric struct";
+assert result[2].id == 42 : "testReturnTypeArray Eric id";
+assert result[2].name == "Eric Peterson" : "testReturnTypeArray Eric name";
+assert result[2].role == "Developer" : "testReturnTypeArray Eric role";
+assert isStruct( result[3] ) : "testReturnTypeArray Michael struct";
+assert result[3].id == 77 : "testReturnTypeArray Michael id";
+assert result[3].name == "Michael Born" : "testReturnTypeArray Michael name";
+assert result[3].role == "Developer" : "testReturnTypeArray Michael role";
+
+// testReturnTypeStruct
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers ORDER BY id",
+    [],
+    { returntype: "struct", columnKey: "role" }
+);
+assert isStruct( result ) : "testReturnTypeStruct struct";
+assert len( result ) == 3 : "testReturnTypeStruct key count";
+assert isArray( result.CEO ) : "testReturnTypeStruct CEO array";
+assert len( result.CEO ) == 1 : "testReturnTypeStruct CEO count";
+assert result.CEO[1].id == 1 : "testReturnTypeStruct CEO id";
+assert result.CEO[1].name == "Luis Majano" : "testReturnTypeStruct CEO name";
+assert isArray( result.Developer ) : "testReturnTypeStruct Developer array";
+assert len( result.Developer ) == 2 : "testReturnTypeStruct Developer count";
+assert result.Developer[1].id == 42 : "testReturnTypeStruct Eric id";
+assert result.Developer[1].name == "Eric Peterson" : "testReturnTypeStruct Eric name";
+assert result.Developer[2].id == 77 : "testReturnTypeStruct Michael id";
+assert result.Developer[2].name == "Michael Born" : "testReturnTypeStruct Michael name";
+
+// testMissingColumnKey
+threw = false;
+try {
+    result = queryExecute( "SELECT * FROM developers ORDER BY id", [], { returnType: "struct" } );
+} catch ( e ) {
+    threw = true;
+    assert e.message == "You must define a `columnKey` option when using `returnType: struct`." : "testMissingColumnKey message";
+}
+assert threw : "testMissingColumnKey throws";
+assert result == null : "testMissingColumnKey result";
+
+// testInvalidReturnType
+threw = false;
+try {
+    result = queryExecute( "SELECT * FROM developers ORDER BY id", [], { returnType: "foobar" } );
+} catch ( e ) {
+    threw = true;
+    assert e.message == "Unknown return type: foobar" : "testInvalidReturnType message";
+}
+assert threw : "testInvalidReturnType throws";
+assert result == null : "testInvalidReturnType result";
+
+// testResultVariable
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE role = ?",
+    [ "Developer" ],
+    { result: "queryResults" }
+);
+meta = queryResults;
+assert isStruct( meta ) : "testResultVariable struct";
+assert meta.keyExists( "sql" ) : "testResultVariable sql key";
+assert meta.sql == "SELECT * FROM developers WHERE role = 'Developer'" : "testResultVariable sql";
+assert meta.keyExists( "sqlParameters" ) : "testResultVariable parameters key";
+assert meta.sqlParameters[1] == "Developer" : "testResultVariable parameter";
+assert meta.keyExists( "recordCount" ) : "testResultVariable recordCount key";
+assert meta.recordCount == 2 : "testResultVariable recordCount";
+assert meta.keyExists( "columnList" ) : "testResultVariable columnList key";
+assert meta.columnList == "ID,NAME,ROLE,CREATEDAT" : "testResultVariable columnList";
+assert meta.keyExists( "executionTime" ) : "testResultVariable executionTime key";
+assert meta.executionTime >= 0 : "testResultVariable executionTime";
+assert meta.keyExists( "generatedKey" ) == false : "testResultVariable generatedKey";
+
+// testAdHocDataSource
+threw = false;
+try {
+    result = queryExecute(
+        "SELECT * FROM developers ORDER BY id",
+        [],
+        { datasource: { driver: "derby", connectionString: "jdbc:derby:memory:foo123;create=true" } }
+    );
+} catch ( e ) {
+    threw = true;
+    assert e.message == "Table/View 'DEVELOPERS' does not exist." : "testAdHocDataSource message";
+}
+assert threw : "testAdHocDataSource throws";
+
+// testMaxRows
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers", {}, { maxrows: 1 } );
+assert isQuery( result ) : "testMaxRows query";
+assert result.recordCount == 1 : "testMaxRows count";
+
+// testDeleteQueryResult
+resetDevelopers();
+result = queryExecute(
+    "DELETE FROM developers WHERE id = :id",
+    { id: 1 },
+    { result: "queryResults" }
+);
+assert isQuery( result ) : "testDeleteQueryResult query";
+assert queryResults.recordCount == 1 : "testDeleteQueryResult recordCount";
+
+// testConnectionClose
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): pool active-connection
+// counters are internal Java datasource state, but the query remains active.
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers", {}, { maxrows: 1 } );
+assert isQuery( result ) : "testConnectionClose query";
+
+// testSQLDate
+resetDevelopers();
+result = queryExecute( "SELECT CURRENT_DATE as my_date" );
+isDate = isNumeric( result.my_date[1] );
+assert isDate == false : "testSQLDate";
+
+// testSQLTime
+resetDevelopers();
+result = queryExecute( "SELECT CURRENT_TIMESTAMP as my_date" );
+isDate = isNumeric( result.my_date[1] );
+assert isDate == false : "testSQLTime";
+
+// testQueryCaching
+resetDevelopers();
+sql = "SELECT id,name,role FROM developers WHERE role = ?";
+params = [ "Developer" ];
+result = queryExecute( sql, params, { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 2 ), result: "queryMeta", returnType: "array" } );
+assert queryMeta.cached == false : "testQueryCaching first cached";
+result2 = queryExecute( sql, params, { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 2 ), result: "queryMeta2", returnType: "array" } );
+assert queryMeta2.cached == true : "testQueryCaching second cached";
+result3 = queryExecute( sql, [ "Admin" ], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 2 ), result: "queryMeta3", returnType: "array" } );
+assert queryMeta3.cached == false : "testQueryCaching different params";
+result4 = queryExecute( sql, params, { cache: false, cacheTimeout: createTimespan( 0, 0, 0, 2 ), result: "queryMeta4", returnType: "array" } );
+assert queryMeta4.cached == false : "testQueryCaching disabled";
+assert result == result2 : "testQueryCaching first equals second";
+assert result2 == result4 : "testQueryCaching second equals fourth";
+assert result != result3 : "testQueryCaching different result";
+
+// testCustomCacheProvider
+resetDevelopers();
+result = queryExecute(
+    "SELECT id,name,role FROM developers WHERE role = ?",
+    [ "Developer" ],
+    { cache: true, cacheProvider: "default", result: "queryMeta", returnType: "array" }
+);
+assert queryMeta.cached == false : "testCustomCacheProvider first";
+result2 = queryExecute(
+    "SELECT id,name,role FROM developers WHERE role = ?",
+    [ "Developer" ],
+    { cache: true, cacheProvider: "default", result: "queryMeta2", returnType: "array" }
+);
+assert result == result2 : "testCustomCacheProvider results";
+assert queryMeta2.cached == true : "testCustomCacheProvider second";
+
+// testCacheResultMeta
+resetDevelopers();
+result = queryExecute(
+    "SELECT * FROM developers WHERE role = ?",
+    [ "Admin" ],
+    {
+        cache: true,
+        cacheProvider: "default",
+        cacheKey: "adminDevs",
+        cacheTimeout: createTimespan( 0, 1, 0, 0 ),
+        cacheLastAccessTimeout: createTimespan( 0, 0, 30, 0 ),
+        result: "queryMeta"
+    }
+);
+result2 = queryExecute(
+    "SELECT * FROM developers WHERE role = ?",
+    [ "Admin" ],
+    {
+        cache: true,
+        cacheProvider: "default",
+        cacheKey: "adminDevs",
+        cacheTimeout: createTimespan( 0, 1, 0, 0 ),
+        cacheLastAccessTimeout: createTimespan( 0, 0, 30, 0 ),
+        result: "queryMeta2"
+    }
+);
+assert queryMeta.cached == false : "testCacheResultMeta first";
+assert queryMeta2.cached == true : "testCacheResultMeta second";
+assert queryMeta2.keyExists( "cached" ) : "testCacheResultMeta cached key";
+assert queryMeta2.keyExists( "cacheProvider" ) : "testCacheResultMeta provider key";
+assert queryMeta2.keyExists( "cacheKey" ) : "testCacheResultMeta key key";
+assert queryMeta2.keyExists( "cacheTimeout" ) : "testCacheResultMeta timeout key";
+assert queryMeta2.keyExists( "cacheLastAccessTimeout" ) : "testCacheResultMeta last access key";
+assert queryMeta2.cacheProvider == "default" : "testCacheResultMeta provider";
+assert queryMeta2.cacheKey == "adminDevs" : "testCacheResultMeta key";
+assert queryMeta2.cacheTimeout == createTimespan( 0, 1, 0, 0 ) : "testCacheResultMeta timeout";
+assert queryMeta2.cacheLastAccessTimeout == createTimespan( 0, 0, 30, 0 ) : "testCacheResultMeta last access";
+
+// testZeroCacheTimeout
+resetDevelopers();
+sql = "SELECT id,name,role FROM developers WHERE role = ?";
+params = [ "Developer" ];
+result = queryExecute( sql, params, { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 0 ), result: "queryMeta", returnType: "array" } );
+assert queryMeta.cached == false : "testZeroCacheTimeout first";
+result2 = queryExecute( sql, params, { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 0 ), result: "queryMeta2", returnType: "array" } );
+assert queryMeta2.cached == true : "testZeroCacheTimeout second";
+assert result == result2 : "testZeroCacheTimeout results";
+
+// testNegativeCacheTimeout
+resetDevelopers();
+sql = "SELECT id,name,role FROM developers WHERE role = ?";
+params = [ "Developer" ];
+queryExecute( sql, params, { cache: true, cacheTimeout: createTimespan( 0, 0, 0, -1 ), result: "queryMeta", returnType: "array" } );
+result = queryMeta;
+assert result.cached == false : "testNegativeCacheTimeout";
+
+// testNegativeCacheTimeoutClearsCache
+resetDevelopers();
+result = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 1 ), result: "queryMeta" } );
+result2 = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 1 ), result: "queryMeta2" } );
+result3 = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 0 ), result: "zeroTimeoutQueryMeta" } );
+result4 = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, -1 ), result: "negativeTimeoutQueryMeta" } );
+result5 = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 1 ), result: "queryMeta5" } );
+result6 = queryExecute( "SELECT CURRENT_TIMESTAMP as timestamp FROM developers", [], { cache: true, cacheTimeout: createTimespan( 0, 0, 0, 1 ), result: "queryMeta6" } );
+assert queryMeta.cached == false : "testNegativeCacheTimeoutClearsCache first";
+assert queryMeta2.cached == true : "testNegativeCacheTimeoutClearsCache second";
+assert result2.timestamp[1] == result.timestamp[1] : "testNegativeCacheTimeoutClearsCache second value";
+assert queryMeta3.cached == true : "testNegativeCacheTimeoutClearsCache zero timeout";
+assert result3.timestamp[1] == result2.timestamp[1] : "testNegativeCacheTimeoutClearsCache zero value";
+assert result3.timestamp[1] == result.timestamp[1] : "testNegativeCacheTimeoutClearsCache initial value";
+assert queryMeta4.cached == false : "testNegativeCacheTimeoutClearsCache negative";
+assert queryMeta5.cached == false : "testNegativeCacheTimeoutClearsCache after clear";
+assert queryMeta6.cached == true : "testNegativeCacheTimeoutClearsCache final";
+assert result6.timestamp[1] == result5.timestamp[1] : "testNegativeCacheTimeoutClearsCache final value";
+
+// testDuplicateColumnResultSets
+resetDevelopers();
+result = queryExecute( "SELECT name, CURRENT_DATE AS name, id, role FROM developers WHERE id=1" );
+assert isQuery( result ) : "testDuplicateColumnResultSets query";
+assert result.recordCount == 1 : "testDuplicateColumnResultSets count";
+assert result.name[1] == "Luis Majano" : "testDuplicateColumnResultSets name";
+assert result.id[1] == 1 : "testDuplicateColumnResultSets id";
+assert result.role[1] == "CEO" : "testDuplicateColumnResultSets role";
+
+// testDifferentConnectionManagerPerThread
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test creates
+// a Java Derby external function and exercises application/thread connection
+// managers that have no source-level equivalent.
+
+// testMultipleResultSets
+// The JVM test is @Disabled because the behavior is not implemented there;
+// it remains active here so a MatchBox behavior gap is red rather than hidden.
+resetDevelopers();
+result = queryExecute( "SELECT * FROM developers WHERE id = 1; SELECT * FROM developers WHERE id = 77;" );
+assert result.recordCount == 1 : "testMultipleResultSets count";
+assert result.name[1] == "Luis Majano" : "testMultipleResultSets first result";
+
+// testObjectMarshallingOfExecutedQuery
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test directly
+// constructs ExecutedQuery and invokes the Java ObjectMarshaller API.
+
+// testTransformerClosure
+resetDevelopers();
+result = queryExecute(
+    "SELECT id, name, role FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => {
+        return {
+            count: query.recordCount,
+            columns: query.getColumnNames(),
+            data: query.toArrayOfStructs()
+        };
+    } }
+);
+assert isStruct( result ) : "testTransformerClosure struct";
+assert result.count == 4 : "testTransformerClosure count";
+assert isArray( result.columns ) : "testTransformerClosure columns";
+assert isArray( result.data ) : "testTransformerClosure data";
+assert len( result.data ) == 4 : "testTransformerClosure rows";
+
+// testTransformerClassInstance
+class TestTransformer {
+    function transform( query, metadata ) {
+        return {
+            total: query.recordCount,
+            firstRow: query.getRowAsStruct( 0 )
+        };
+    }
+}
+transformer = new TestTransformer();
+result = queryExecute( "SELECT id, name FROM developers ORDER BY id", [], { transformer: transformer } );
+assert isStruct( result ) : "testTransformerClassInstance struct";
+assert result.total == 4 : "testTransformerClassInstance total";
+assert isStruct( result.firstRow ) : "testTransformerClassInstance first row";
+assert result.firstRow.id == 1 : "testTransformerClassInstance id";
+assert result.firstRow.name == "Luis Majano" : "testTransformerClassInstance name";
+
+// testTransformerRegisteredName
+result = queryExecute(
+    "SELECT id, name FROM developers",
+    [],
+    { transformer: ( query, metadata ) => {
+        return { rows: query.recordCount, cols: query.getColumnList() };
+    } }
+);
+assert isStruct( result ) : "testTransformerRegisteredName struct";
+assert result.rows == 4 : "testTransformerRegisteredName rows";
+assert result.cols == "ID,NAME" : "testTransformerRegisteredName columns";
+
+// testTransformerNameNotFound
+threw = false;
+try {
+    result = queryExecute( "SELECT id FROM developers", [], { transformer: "nonexistent" } );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "Query transformer 'nonexistent' not found" : "testTransformerNameNotFound message";
+}
+assert threw : "testTransformerNameNotFound throws";
+
+// testTransformerNamed
+// The application tag used by the JVM fixture is not part of the script
+// runner, so the named-transformer lookup itself remains an active assertion.
+threw = false;
+try {
+    result = queryExecute( "SELECT id FROM developers", [], { transformer: "myTransformer" } );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "Query transformer 'myTransformer' not found" : "testTransformerNamed message";
+}
+assert threw : "testTransformerNamed lookup";
+
+// testTransformerPrecedence
+result = queryExecute(
+    "SELECT id, name FROM developers ORDER BY id",
+    [],
+    { returnType: "array", transformer: ( query, metadata ) => "transformer wins" }
+);
+assert result == "transformer wins" : "testTransformerPrecedence";
+
+// testTransformerReceivesMetadata
+result = queryExecute(
+    "SELECT id, name FROM developers WHERE id = ?",
+    [ 1 ],
+    {
+        result: "queryMeta",
+        transformer: ( query, metadata ) => {
+            return {
+                hasSql: metadata.keyExists( "sql" ),
+                hasRecordCount: metadata.keyExists( "recordCount" ),
+                hasColumnList: metadata.keyExists( "columnList" )
+            };
+        }
+    }
+);
+assert isStruct( result ) : "testTransformerReceivesMetadata struct";
+assert result.hasSql == true : "testTransformerReceivesMetadata sql";
+assert result.hasRecordCount == true : "testTransformerReceivesMetadata recordCount";
+assert result.hasColumnList == true : "testTransformerReceivesMetadata columnList";
+
+// testTransformerReturnsAnyType
+result1 = queryExecute( "SELECT id FROM developers", [], { transformer: ( q, m ) => "string result" } );
+assert result1 == "string result" : "testTransformerReturnsAnyType string";
+result2 = queryExecute( "SELECT id FROM developers", [], { transformer: ( q, m ) => 42 } );
+assert result2 == 42 : "testTransformerReturnsAnyType number";
+result3 = queryExecute( "SELECT id FROM developers", [], { transformer: ( q, m ) => [ 1, 2, 3 ] } );
+assert isArray( result3 ) : "testTransformerReturnsAnyType array";
+
+// testTransformerJDBCMetadata
+result = queryExecute(
+    "SELECT id, name, role FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => {
+        colMeta = query.getColumnMeta();
+        return {
+            idNullable: colMeta.id.nullable,
+            idReadOnly: colMeta.id.readOnly,
+            nameMaxLength: colMeta.name.maxLength,
+            hasDecimals: colMeta.id.keyExists( "decimals" )
+        };
+    } }
+);
+assert isStruct( result ) : "testTransformerJDBCMetadata struct";
+assert result.keyExists( "idNullable" ) : "testTransformerJDBCMetadata nullable";
+assert result.keyExists( "idReadOnly" ) : "testTransformerJDBCMetadata readOnly";
+assert result.keyExists( "nameMaxLength" ) : "testTransformerJDBCMetadata maxLength";
+assert result.keyExists( "hasDecimals" ) : "testTransformerJDBCMetadata decimals";
+
+// testTransformerTabularFormat
+result = queryExecute(
+    "SELECT id, name FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => {
+        data = [];
+        for ( var i = 1; i <= query.recordCount; i++ ) {
+            data.append( [ query.id[i], query.name[i] ] );
+        }
+        return { columns: query.getColumnNames(), data: data };
+    } }
+);
+assert isStruct( result ) : "testTransformerTabularFormat struct";
+assert len( result.columns ) == 2 : "testTransformerTabularFormat columns count";
+assert result.columns[1] == "ID" : "testTransformerTabularFormat first column";
+assert result.columns[2] == "NAME" : "testTransformerTabularFormat second column";
+assert len( result.data ) == 4 : "testTransformerTabularFormat data count";
+assert result.data[1][1] == 1 : "testTransformerTabularFormat first id";
+assert result.data[1][2] == "Luis Majano" : "testTransformerTabularFormat first name";
+
+// testTransformerRichFormat
+result = queryExecute(
+    "SELECT id, name FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => {
+        colMeta = query.getColumnMeta();
+        columns = [];
+        for ( var colName in query.getColumnNames() ) {
+            info = colMeta[colName];
+            columns.append( {
+                name: colName,
+                type: info.type,
+                nullable: info.nullable,
+                readOnly: info.readOnly,
+                decimals: info.decimals,
+                maxLength: info.maxLength
+            } );
+        }
+        data = [];
+        for ( var i = 1; i <= query.recordCount; i++ ) {
+            data.append( [ query.id[i], query.name[i] ] );
+        }
+        return { count: query.recordCount, columns: columns, data: data };
+    } }
+);
+assert isStruct( result ) : "testTransformerRichFormat struct";
+assert result.count == 4 : "testTransformerRichFormat count";
+assert len( result.columns ) == 2 : "testTransformerRichFormat columns";
+assert result.columns[1].name == "ID" : "testTransformerRichFormat id name";
+assert result.columns[1].keyExists( "type" ) : "testTransformerRichFormat type";
+assert result.columns[1].keyExists( "nullable" ) : "testTransformerRichFormat nullable";
+assert result.columns[1].keyExists( "readOnly" ) : "testTransformerRichFormat readOnly";
+assert len( result.data ) == 4 : "testTransformerRichFormat data";
+
+// testTransformerEmptyResultSet
+result = queryExecute(
+    "SELECT id, name FROM developers WHERE id = 99999",
+    [],
+    { transformer: ( query, metadata ) => {
+        return { count: query.recordCount, isEmpty: query.recordCount == 0 };
+    } }
+);
+assert isStruct( result ) : "testTransformerEmptyResultSet struct";
+assert result.count == 0 : "testTransformerEmptyResultSet count";
+assert result.isEmpty == true : "testTransformerEmptyResultSet empty";
+
+// testTransformerThrowsError
+threw = false;
+try {
+    result = queryExecute(
+        "SELECT id FROM developers",
+        [],
+        { transformer: ( query, metadata ) => { throw( "Custom transformer error" ); } }
+    );
+} catch ( e ) {
+    threw = true;
+    assert e.message contains "Custom transformer error" : "testTransformerThrowsError message";
+}
+assert threw : "testTransformerThrowsError throws";
+
+// testTransformerClosureScope
+prefix = "DEV-";
+result = queryExecute(
+    "SELECT id, name FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => {
+        return query.toArrayOfStructs().map( row => {
+            row.displayName = prefix & row.name;
+            return row;
+        } );
+    } }
+);
+assert isArray( result ) : "testTransformerClosureScope array";
+assert result[1].displayName == "DEV-Luis Majano" : "testTransformerClosureScope name";
+
+// testTransformerClassInstanceVariables
+class PrefixTransformer {
+    variables.prefix = "USER-";
+    function transform( query, metadata ) {
+        return query.toArrayOfStructs().map( row => {
+            row.prefixedName = variables.prefix & row.name;
+            return row;
+        } );
+    }
+}
+transformer = new PrefixTransformer();
+result = queryExecute( "SELECT id, name FROM developers ORDER BY id", [], { transformer: transformer } );
+assert isArray( result ) : "testTransformerClassInstanceVariables array";
+assert result[1].prefixedName == "USER-Luis Majano" : "testTransformerClassInstanceVariables name";
+
+// testMultipleRegisteredTransformers
+result1 = queryExecute( "SELECT id FROM developers", [], { transformer: ( query, metadata ) => query.recordCount } );
+assert result1 == 4 : "testMultipleRegisteredTransformers count";
+result2 = queryExecute(
+    "SELECT id, name FROM developers ORDER BY id",
+    [],
+    { transformer: ( query, metadata ) => query.recordCount > 0 ? query.getRowAsStruct( 0 ) : null }
+);
+assert isStruct( result2 ) : "testMultipleRegisteredTransformers row";
+assert result2.id == 1 : "testMultipleRegisteredTransformers id";
+result3 = queryExecute( "SELECT id, name, role FROM developers", [], { transformer: ( query, metadata ) => query.getColumnList() } );
+assert result3 == "ID,NAME,ROLE" : "testMultipleRegisteredTransformers columns";

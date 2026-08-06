@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringEachTest.java
+acc = "";
+stringEach( "abc", function( ch ) { acc = acc & ch; } );
+assert acc == "abc" : "testEach";

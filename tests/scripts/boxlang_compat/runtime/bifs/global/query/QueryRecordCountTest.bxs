@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryRecordCountTest.java
+q = queryNew( "a" );
+assert queryRecordCount( q ) == 0 : "testRecordCount zero";
+queryAddRow( q, { a: 1 } );
+assert queryRecordCount( q ) == 1 : "testRecordCount one";

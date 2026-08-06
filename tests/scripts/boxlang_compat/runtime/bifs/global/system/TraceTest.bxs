@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/TraceTest.java
+// The JVM test inspects the internal Tracer attachment; keep the source-level
+// BIF calls active without depending on that Java facility.
+
+trace( "Hello World" );
+trace( "Hello World", "myCategory" );
+assert true : "testSimpleTrace";

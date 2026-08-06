@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/NotTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanCastABoolean
+assert ( !true ) == false : "testItCanCastABoolean true";
+assert ( !false ) == true : "testItCanCastABoolean false";
+
+// testItCanCastANumber
+assert ( !1 ) == false : "testItCanCastANumber 1";
+assert ( !( -1 ) ) == false : "testItCanCastANumber -1";
+assert ( !0 ) == true : "testItCanCastANumber 0";
+assert ( !123456.789 ) == false : "testItCanCastANumber 123456.789";
+
+// testItCanCastAString
+assert ( !"true" ) == false : "testItCanCastAString true";
+assert ( !"TRUE" ) == false : "testItCanCastAString TRUE";
+assert ( !"false" ) == true : "testItCanCastAString false";
+assert ( !"FALSE" ) == true : "testItCanCastAString FALSE";
+assert ( !"yes" ) == false : "testItCanCastAString yes";
+assert ( !"no" ) == true : "testItCanCastAString no";

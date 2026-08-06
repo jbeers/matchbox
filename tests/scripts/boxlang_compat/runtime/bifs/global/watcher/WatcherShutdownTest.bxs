@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherShutdownTest.java
+
+// testWatcherShutdown
+watcherShutdownAll( false );
+watcherNew( "watcherOne", [ "./src" ], ( event, watcherContext ) => {} );
+watcherNew( "watcherTwo", [ "./src" ], ( event, watcherContext ) => {} );
+removed = watcherShutdown( "watcherOne" );
+existsOne = watcherExists( "watcherOne" );
+existsTwo = watcherExists( "watcherTwo" );
+result = watcherList();
+assert removed : "testWatcherShutdown removed";
+assert existsOne == false : "testWatcherShutdown removed-from-registry";
+assert existsTwo : "testWatcherShutdown retained-other";
+assert arrayLen( result ) == 1 : "testWatcherShutdown list-size";

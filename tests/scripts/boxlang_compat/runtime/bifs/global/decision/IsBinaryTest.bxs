@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsBinaryTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+result = isBinary( toBinary( toBase64( "boxlang" ) ) );
+assert result : "testTrueConditions";
+
+// testFalseConditions
+aFloat = isBinary( 1.1 );
+anArray = isBinary( [ true, false ] );
+aString = isBinary( "randomstring" );
+aStruct = isBinary( {} );
+anInteger = isBinary( 0 );
+aTrue = isBinary( true );
+assert aFloat == false : "testFalseConditions float";
+assert anArray == false : "testFalseConditions array";
+assert aString == false : "testFalseConditions string";
+assert aStruct == false : "testFalseConditions struct";
+assert anInteger == false : "testFalseConditions integer";
+assert aTrue == false : "testFalseConditions true";

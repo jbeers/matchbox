@@ -1,0 +1,50 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ExecutorGetTest.java
+
+// testGetDefaultExecutorAndSubmitTask
+executor = executorGet();
+future = executor.submit( () => {
+    return "Task Done!";
+} );
+result = future.get();
+assert result == "Task Done!" : "testGetDefaultExecutorAndSubmitTask";
+
+// testGetDefaultExecutor
+result = executorGet();
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only
+// BoxExecutor class assertion has no source-level equivalent.
+assert result.name() == "io-tasks" : "testGetDefaultExecutor name";
+
+// testGetIoTasksExecutor
+result = executorGet( "io-tasks" );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only
+// BoxExecutor class assertion has no source-level equivalent.
+assert result.name() == "io-tasks" : "testGetIoTasksExecutor name";
+
+// testGetCpuTasksExecutor
+result = executorGet( "cpu-tasks" );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only
+// BoxExecutor class assertion has no source-level equivalent.
+assert result.name() == "cpu-tasks" : "testGetCpuTasksExecutor name";
+
+// testGetScheduledTasksExecutor
+result = executorGet( "scheduled-tasks" );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only
+// BoxExecutor class assertion has no source-level equivalent.
+assert result.name() == "scheduled-tasks" : "testGetScheduledTasksExecutor name";
+
+// testGetCustomExecutor
+executorNew( "test-get-custom", "fixed" );
+result = executorGet( "test-get-custom" );
+executorDelete( "test-get-custom" );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only
+// BoxExecutor class assertion has no source-level equivalent.
+assert result.name() == "test-get-custom" : "testGetCustomExecutor name";
+
+// testGetNonExistentExecutorThrows
+threw = false;
+try {
+    result = executorGet( "non-existent-executor" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testGetNonExistentExecutorThrows";

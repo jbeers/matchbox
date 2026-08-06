@@ -1,0 +1,63 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/zip/ExtractTest.java
+// ---------------------------------------------------------------------------
+
+// testExtractTar
+root = createTempDirectory();
+sourceDirectory = root & "/folder";
+directoryCreate( sourceDirectory );
+fileWrite( sourceDirectory & "/example.txt", "tar content" );
+source = root & "/archive.tar";
+compress( format="tar", source=sourceDirectory, destination=source );
+destination = root & "/destination";
+extract( source=source, destination=destination );
+assert fileRead( destination & "/folder/example.txt" ) == "tar content" : "testExtractTar";
+
+// testExtractTgz
+root = createTempDirectory();
+sourceDirectory = root & "/folder";
+directoryCreate( sourceDirectory );
+fileWrite( sourceDirectory & "/example.txt", "tgz content" );
+source = root & "/archive.tgz";
+compress( format="tgz", source=sourceDirectory, destination=source );
+destination = root & "/destination";
+extract( source=source, destination=destination );
+assert fileRead( destination & "/folder/example.txt" ) == "tgz content" : "testExtractTgz";
+
+// testExtractRequiresDetectableFormat
+root = createTempDirectory();
+source = root & "/archive.data";
+fileWrite( source, "not an archive" );
+destination = root & "/destination";
+threw = false;
+try {
+    extract( source=source, destination=destination );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testExtractRequiresDetectableFormat throws";
+
+// testExtractBzipAndBzip2Aliases
+root = createTempDirectory();
+content = root & "/content";
+fileWrite( content, "bzip content" );
+source = root & "/content.bz2";
+compress( format="bzip2", source=content, destination=source );
+for ( format in [ "bzip", "bzip2" ] ) {
+    destination = root & "/destination-" & format;
+    extract( format=format, source=source, destination=destination, overwrite=true );
+    assert fileRead( destination & "/content" ) == "bzip content" : "testExtractBzipAndBzip2Aliases-" & format;
+}
+
+// testExtractTbzAliases
+root = createTempDirectory();
+sourceDirectory = root & "/folder";
+directoryCreate( sourceDirectory );
+fileWrite( sourceDirectory & "/example.txt", "tbz content" );
+source = root & "/archive.tbz2";
+compress( format="tbz2", source=sourceDirectory, destination=source );
+for ( format in [ "tbz", "tbz2", "tar.bz" ] ) {
+    destination = root & "/destination-" & format;
+    extract( format=format, source=source, destination=destination, overwrite=true );
+    assert fileRead( destination & "/folder/example.txt" ) == "tbz content" : "testExtractTbzAliases-" & format;
+}

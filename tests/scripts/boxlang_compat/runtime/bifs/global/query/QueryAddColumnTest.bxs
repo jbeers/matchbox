@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryAddColumnTest.java
+q = queryNew( "a" );
+queryAddColumn( q, "b", [1,2] );
+assert queryColumnExists( q, "b" ) : "testAddColumn";
+assert queryColumnData( q, "b" )[1] == 1 : "testAddColumnData";

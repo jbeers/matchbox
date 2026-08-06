@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBoxVersionInfoTest.java
+
+result = getBoxVersionInfo();
+assert isStruct( result ) : "testPrint struct";
+assert structKeyExists( result, "version" ) : "testPrint version";
+assert structKeyExists( result, "buildDate" ) : "testPrint buildDate";
+assert structKeyExists( result, "codename" ) : "testPrint codename";
+assert structKeyExists( result, "boxlangId" ) : "testPrint boxlangId";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayPrependTest.java
+arr = [2,3];
+arrayPrepend( arr, 1 );
+assert arr[1] == 1 : "testPrepend value";
+assert arrayLen( arr ) == 3 : "testPrepend size";

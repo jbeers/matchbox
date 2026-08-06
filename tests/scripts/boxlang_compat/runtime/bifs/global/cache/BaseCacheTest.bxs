@@ -1,0 +1,8 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cache/BaseCacheTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test is a
+// Java/JUnit base fixture that constructs BoxRuntime, CacheService,
+// ScriptingRequestBoxContext, and VariablesScope objects and seeds the default
+// cache; it contains no source-level test method.
+// ---------------------------------------------------------------------------

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/RightTest.java
+assert right( "abcdef", 3 ) == "def" : "testRight";
+assert "abcdef".right( 3 ) == "def" : "testRightMember";

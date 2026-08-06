@@ -1,0 +1,49 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLGetNodeTypeTest.java
+// ---------------------------------------------------------------------------
+
+// testCanGetNodeType
+xml = xmlParse( '<?xml version="1.0"?>
+    <breakfast_menu>
+     <food>
+      <name>Eggs Benedict</name>
+      <price>$8.95</price>
+     </food>
+     <food>
+      <name>Pancakes</name>
+      <price>$7.95</price>
+     </food>
+     <food>
+      <name>French Toast</name>
+      <price>$6.95</price>
+     </food>
+    </breakfast_menu>' );
+result = xmlGetNodeType( xml );
+result2 = xmlGetNodeType( xml.xmlRoot );
+result3 = xmlGetNodeType( xml.breakfast_menu.food );
+assert result == "DOCUMENT_NODE" : "testCanGetNodeType document";
+assert result2 == "ELEMENT_NODE" : "testCanGetNodeType root";
+assert result3 == "ELEMENT_NODE" : "testCanGetNodeType child";
+
+// testCanGetNodeTypeMember
+xml = xmlParse( '<?xml version="1.0"?>
+    <breakfast_menu>
+     <food>
+      <name>Eggs Benedict</name>
+      <price>$8.95</price>
+     </food>
+     <food>
+      <name>Pancakes</name>
+      <price>$7.95</price>
+     </food>
+     <food>
+      <name>French Toast</name>
+      <price>$6.95</price>
+     </food>
+    </breakfast_menu>' );
+result = xml.getNodeType();
+result2 = xml.xmlRoot.getNodeType();
+result3 = xml.breakfast_menu.food.getNodeType();
+assert result == "DOCUMENT_NODE" : "testCanGetNodeTypeMember document";
+assert result2 == "ELEMENT_NODE" : "testCanGetNodeTypeMember root";
+assert result3 == "ELEMENT_NODE" : "testCanGetNodeTypeMember child";

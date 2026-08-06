@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListChangeDelimsTest.java
+list = "a,b,c";
+assert listChangeDelims( list, ":" ) == "a:b:c" : "testChangeDefaultDelimiter";
+list = "a:b:c";
+assert listChangeDelims( list, ":" ) == "a:b:c" : "testChangeCustomDelimiter colon";
+list = "a:b,c";
+assert listChangeDelims( list, ":" ) == "a:b:c" : "testChangeCustomDelimiter mixed";
+// testIncludeEmptyFields
+list = "a,b,,c";
+assert listChangeDelims( list, ":", ",", true ) == "a:b::c" : "testIncludeEmptyFields include";
+assert listChangeDelims( list, ":", ",", false ) == "a:b:c" : "testIncludeEmptyFields skip";

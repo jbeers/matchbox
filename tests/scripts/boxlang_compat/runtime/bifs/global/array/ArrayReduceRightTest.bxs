@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayReduceRightTest.java
+r = arrayReduceRight( ["a","b","c"], function( acc, item ) { return acc & item; }, "" );
+assert r == "cba" : "testReduceRight";

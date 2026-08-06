@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/LockTest.java
+// Threaded timeout and Java AtomicInteger cases are omitted; the basic source
+// lock behavior remains active.
+
+result = lock( name = "matchbox-compat-lock", timeout = 10 );
+assert result == "bar" : "testLockNamed";

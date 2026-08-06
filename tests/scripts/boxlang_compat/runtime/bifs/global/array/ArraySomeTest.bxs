@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySomeTest.java
+r = arraySome( [1,3,5], function( item ) { return item == 3; } );
+assert r : "testSome true";
+r = arraySome( [1,3,5], function( item ) { return item == 9; } );
+assert r == false : "testSome false";
+r = [1,2,3].some( function( item ) { return item == 2; } );
+assert r : "testSomeMember";
+r = arraySome( [1,2,3,4], function( item ) { return item == 3; }, true );
+assert r : "testSomeParallel";
+r = arraySome( [1,2,3,4], function( item ) { return item == 3; }, true, 2 );
+assert r : "testSomeParallelMaxThreads";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileReadTest.java
+p = getTempDirectory() & "/matchbox-read-test.txt";
+fileWrite( p, "hello" );
+assert fileRead( p ) == "hello" : "testRead";
+assert fileRead( p, "utf-8" ) == "hello" : "testReadCharset";

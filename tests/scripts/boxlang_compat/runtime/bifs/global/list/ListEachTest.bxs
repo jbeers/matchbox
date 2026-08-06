@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListEachTest.java
+// testUseProvidedUDF
+acc = "";
+listEach( "a,b,c", function( item ) {
+    acc = acc & item;
+} );
+assert acc == "abc" : "testUseProvidedUDF";

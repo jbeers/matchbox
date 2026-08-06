@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/TrimTest.java
+assert trim( "  Grant  " ) == "Grant" : "testTrim";
+assert "  Grant  ".trim() == "Grant" : "testTrimMember";

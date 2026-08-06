@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryNoneTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+r = queryNone( q, ( row ) => row.a == 9 );
+assert r : "testNone";

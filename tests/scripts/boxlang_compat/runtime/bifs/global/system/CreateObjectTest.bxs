@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/CreateObjectTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test creates
+// Java classes, custom classloaders, Box classes, and webservice clients.

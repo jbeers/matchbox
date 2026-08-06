@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetFileFromPathTest.java
+
+windowsResult = getFileFromPath( "C:\\path\\to\\file.txt" );
+assert windowsResult == "file.txt" : "testGetFileFromPathWindows";
+
+unixResult = getFileFromPath( "/path/to/file.txt" );
+assert unixResult == "file.txt" : "testGetFileFromPathUnix";

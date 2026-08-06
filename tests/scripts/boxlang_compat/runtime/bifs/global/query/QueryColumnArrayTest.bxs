@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryColumnArrayTest.java
+q = queryNew( "a,b" );
+r = queryColumnArray( q );
+assert r[1] == "a" : "testColumnArray 1";
+assert r[2] == "b" : "testColumnArray 2";

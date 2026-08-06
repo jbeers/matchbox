@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/AsciiTest.java
+assert ascii( "A" ) == 65 : "testAsciiConversion";
+threw = false;
+try {
+    ascii( "" );
+} catch ( any e ) {
+    threw = true;
+}
+assert threw : "testAsciiEmptyInput";
+assert "A".ascii() == 65 : "testAsciiConversionMemberSyntax";

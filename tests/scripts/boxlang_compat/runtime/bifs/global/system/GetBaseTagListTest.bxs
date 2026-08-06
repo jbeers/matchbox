@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBaseTagListTest.java
+// The JVM test supplies custom-tag fixtures; the BIF remains active here.
+
+result = getBaseTagList();
+assert isString( result ) : "testListsTags";

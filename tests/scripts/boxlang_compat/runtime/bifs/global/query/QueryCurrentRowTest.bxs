@@ -1,0 +1,2 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryCurrentRowTest.java
+// SKIPPED (JVM-only): uses the internal cursor via loop over query.

@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayAppendTest.java
+arr = [1,2,3];
+result = arrayAppend( arr, 4 );
+assert arrayLen( arr ) == 4 : "testAppend size";
+assert arr[4] == 4 : "testAppend value";
+arr = [1,2,3];
+result = arr.append( 4 );
+assert arr[4] == 4 : "testAppendMember";

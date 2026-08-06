@@ -1,0 +1,8 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ToBinaryTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+result = toBinary( "YXNkZg=========" );
+assert isBinary( result ) : "testBif";

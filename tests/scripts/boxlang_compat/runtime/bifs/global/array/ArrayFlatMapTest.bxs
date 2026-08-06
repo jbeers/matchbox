@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFlatMapTest.java
+r = arrayFlatMap( [1,2,3], function( item ) { return [item, item]; } );
+assert arrayLen( r ) == 6 : "testFlatMap size";
+assert r[1] == 1 : "testFlatMap 1";
+assert r[6] == 3 : "testFlatMap 6";

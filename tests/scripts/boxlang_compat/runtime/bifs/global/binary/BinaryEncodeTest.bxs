@@ -1,0 +1,37 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BinaryEncodeTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBif
+binaryData = toBinary( toBase64( "This is a string" ) );
+result = binaryEncode( binaryData, "hex" );
+assert result == "54686973206973206120737472696e67" : "testBif hex";
+result = binaryEncode( binaryData, "base64" );
+assert result == "VGhpcyBpcyBhIHN0cmluZw==" : "testBif base64";
+
+// testCycles (round trips: string <-> hex <-> base64 <-> binary)
+function stringToHex( stringValue ) {
+    binaryValue = toBinary( toBase64( stringValue ) );
+    return lcase( binaryEncode( binaryValue, "hex" ) );
+}
+function stringToBase64( stringValue ) {
+    binaryValue = toBinary( toBase64( stringValue ) );
+    return binaryEncode( binaryValue, "base64" );
+}
+function hexToString( hexValue ) {
+    binaryValue = binaryDecode( hexValue, "hex" );
+    return toString( binaryValue );
+}
+function base64ToString( base64Value ) {
+    binaryValue = binaryDecode( base64Value, "base64" );
+    return toString( binaryValue );
+}
+message = "This is a string";
+messageAsHex = stringToHex( message );
+messageAsBase64 = stringToBase64( message );
+assert hexToString( messageAsHex ) == message : "testCycles hex-roundtrip";
+assert base64ToString( messageAsBase64 ) == message : "testCycles base64-roundtrip";
+check1 = hexToBase64copy = base64ToString( stringToBase64( message ) );
+assert check1 == message : "testCycles check1";

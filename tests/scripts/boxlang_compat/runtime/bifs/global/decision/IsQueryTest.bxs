@@ -1,0 +1,17 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsQueryTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): testOnCreateObject
+// instantiates the internal Java Query class; the BoxLang query path runs below.
+
+// testOnQueryNew
+assert isQuery( queryNew( "id,name", "numeric,varchar" ) ) : "testOnQueryNew";
+
+// testFalseConditions
+aBool = isQuery( true );
+aStruct = isQuery( { columns: ["id", "name"] } );
+assert aBool == false : "testFalseConditions bool";
+assert aStruct == false : "testFalseConditions struct";

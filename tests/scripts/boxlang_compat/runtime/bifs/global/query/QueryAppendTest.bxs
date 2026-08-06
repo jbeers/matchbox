@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryAppendTest.java
+q1 = queryNew( "a", "integer" );
+q2 = queryNew( "a", "integer" );
+queryAddRow( q1, { a: 1 } );
+queryAddRow( q2, { a: 2 } );
+queryAppend( q1, q2 );
+assert queryRecordCount( q1 ) == 2 : "testAppend count";

@@ -1,0 +1,74 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DateCompareTest.java
+
+// testBif
+date1 = parseDateTime( "2024-01-19" );
+date2 = parseDateTime( "2024-01-22" );
+assert dateCompare( date1, date2 ) == -1 : "testBif";
+
+// testBifGreater1
+assert dateCompare( date2, date1 ) == 1 : "testBifGreater1";
+
+// testBifEqual
+assert dateCompare( date1, date1 ) == 0 : "testBifEqual";
+
+// testBIFCorrectZoneInfo
+setTimeZone( "America/Los_Angeles" );
+date1 = parseDateTime( "2025-12-25T00:00:00.001Z" );
+date2 = parseDateTime( "2025-12-25T00:00:00.999Z" );
+assert dateCompare( date2, date1, "s" ) == 0 : "testBIFCorrectZoneInfo";
+
+// testBifEqualSeconds
+date1 = parseDateTime( "2025-12-25T00:00:00Z" );
+date2 = dateAdd( "l", 999, date1 );
+assert dateCompare( date2, date1, "s" ) == 0 : "testBifEqualSeconds";
+
+// testBifWithStrings
+date1 = "2024-01-19";
+date2 = "2024-01-22";
+assert dateCompare( date1, date2 ) == -1 : "testBifWithStrings";
+
+// testBifWithDatepartSeconds
+date1 = parseDateTime( "2024-01-19T00:00:00Z" );
+date2 = dateAdd( "s", 2, date1 );
+assert dateCompare( date1, date2, "s" ) == -1 : "testBifWithDatepartSeconds";
+
+// testBifWithDatepartMinutes
+date1 = parseDateTime( "2024-01-19T00:00:00Z" );
+date2 = dateAdd( "n", 2, date1 );
+assert dateCompare( date1, date2, "n" ) == -1 : "testBifWithDatepartMinutes";
+
+// testBifWithDatepartDay
+date1 = "2024-01-19T10:00:00Z";
+date2 = "2024-01-20T02:00:00Z";
+assert dateCompare( date1, date2, "d" ) == -1 : "testBifWithDatepartDay";
+
+// testBifWithDatepart
+date1 = "2024-01-19";
+date2 = "2024-02-19";
+assert dateCompare( date1, date2, "m" ) == -1 : "testBifWithDatepart";
+
+// testBifWithDatepartYear
+assert dateCompare( date1, date2, "yyyy" ) == 0 : "testBifWithDatepartYear";
+
+// testDateCompareMember
+date1 = parseDateTime( "2024-01-19" );
+date2 = parseDateTime( "2024-01-22" );
+assert date1.compare( date2 ) == -1 : "testDateCompareMember";
+
+// testDateCompareToMember
+assert date2.compare( date1 ) == 1 : "testDateCompareToMember";
+
+// testCompareZeroTime
+assert dateCompare( "00:00:00", "00:00:00" ) == 0 : "testCompareZeroTime";
+
+// testCompareSimilar
+assert dateCompare( "2025-01-01", "2025-02-01", "d" ) == -1 : "testCompareSimilar day";
+assert dateCompare( "2024-02-01", "2025-02-01", "m" ) == -1 : "testCompareSimilar month lower";
+assert dateCompare( "2025-02-01", "2024-02-01", "m" ) == 1 : "testCompareSimilar month higher";
+assert dateCompare( "2025-01-01T00:00:01Z", "2025-01-01T00:10:00Z", "d" ) == 0 : "testCompareSimilar day equal";
+assert dateCompare( "2025-01-02T00:00:01Z", "2025-01-15T00:10:00Z", "m" ) == 0 : "testCompareSimilar month equal";
+assert dateCompare( "2025-01-01T00:00:00Z", "2025-01-15T00:00:00Z", "y" ) == 0 : "testCompareSimilar year equal y";
+assert dateCompare( "2025-01-01T00:00:00Z", "2025-01-15T00:00:00Z", "yyyy" ) == 0 : "testCompareSimilar year equal yyyy";
+assert dateCompare( "2025-01-01T03:00:00Z", "2025-01-01T04:00:00Z", "h" ) == -1 : "testCompareSimilar hour lower";
+assert dateCompare( "2025-01-01T04:00:00Z", "2025-01-01T04:00:00Z", "h" ) == 0 : "testCompareSimilar hour equal";
+assert dateCompare( "2025-01-01T05:00:00Z", "2025-01-01T04:00:00Z", "h" ) == 1 : "testCompareSimilar hour higher";

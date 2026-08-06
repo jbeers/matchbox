@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/FixTest.java
+// testItReturnsFixedInteger
+assert fix( 1.8 ) == 1 : "testItReturnsFixed 1.8";
+assert fix( -2.8 ) == -2 : "testItReturnsFixed -2.8";
+assert fix( 0 ) == 0 : "testItReturnsFixed zero";
+// testItReturnsFixedIntegerMember
+assert ( 1.8 ).fix() == 1 : "testItReturnsFixedMember 1.8";
+assert ( -2.8 ).fix() == -2 : "testItReturnsFixedMember -2.8";
+assert ( 0 ).fix() == 0 : "testItReturnsFixedMember zero";

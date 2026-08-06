@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListInsertAtTest.java
+nums = "1,2,3";
+result = listInsertAt( nums, 2, "6" );
+assert result == "1,6,2,3" : "testInsertAt";
+nums = "1,2,3";
+result = listInsertAt( nums, 2, 6 );
+assert result == "1,6,2,3" : "testInsertAt int";
+nums = "1,2,3";
+result = listInsertAt( nums, 2, "6", ",|:-" );
+assert result == "1,6,2,3" : "testInsertAt delim";

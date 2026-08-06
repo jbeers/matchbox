@@ -1,0 +1,58 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsCustomFunctionTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+closure = isCustomFunction( function() {} );
+arrowClosure = isCustomFunction( () => {} );
+lambda = isCustomFunction( () -> {} );
+myFunc = function() {};
+udf = isCustomFunction( myFunc );
+assert closure : "testTrueConditions closure";
+assert arrowClosure : "testTrueConditions arrow-closure";
+assert lambda : "testTrueConditions lambda";
+assert udf : "testTrueConditions udf";
+
+// testFalseConditions
+anInteger = isCustomFunction( 123 );
+aString = isCustomFunction( "abc" );
+assert anInteger == false : "testFalseConditions integer";
+assert aString == false : "testFalseConditions string";
+
+// testTypeParameter
+function myUDF() {}
+isLambdaAUDFType = isCustomFunction( () -> {}, "udf" );
+isLambdaAClosureType = isCustomFunction( () -> {}, "closure" );
+isLambdaALambdaType = isCustomFunction( () -> {}, "lambda" );
+isUDFaLambdaType = isCustomFunction( myUDF, "lambda" );
+isUDFaClosureType = isCustomFunction( myUDF, "closure" );
+isUDFaUDFType = isCustomFunction( myUDF, "udf" );
+isClosureaLambdaType = isCustomFunction( function() {}, "lambda" );
+isClosureaUDFType = isCustomFunction( function() {}, "udf" );
+isClosureaClosureType = isCustomFunction( function() {}, "closure" );
+isArrowClosureaLambdaType = isCustomFunction( () => {}, "Lambda" );
+isArrowClosureaUDFType = isCustomFunction( () => {}, "UDF" );
+isArrowClosureaClosureType = isCustomFunction( () => {}, "Closure" );
+assert isLambdaAUDFType == false : "testTypeParameter lambda-as-udf";
+assert isLambdaAClosureType == false : "testTypeParameter lambda-as-closure";
+assert isLambdaALambdaType : "testTypeParameter lambda-as-lambda";
+assert isUDFaLambdaType == false : "testTypeParameter udf-as-lambda";
+assert isUDFaClosureType == false : "testTypeParameter udf-as-closure";
+assert isUDFaUDFType : "testTypeParameter udf-as-udf";
+assert isClosureaLambdaType == false : "testTypeParameter closure-as-lambda";
+assert isClosureaUDFType == false : "testTypeParameter closure-as-udf";
+assert isClosureaClosureType : "testTypeParameter closure-as-closure";
+assert isArrowClosureaLambdaType == false : "testTypeParameter arrow-as-lambda";
+assert isArrowClosureaUDFType == false : "testTypeParameter arrow-as-udf";
+assert isArrowClosureaClosureType : "testTypeParameter arrow-as-closure";
+
+// testTypeParameterValidation
+threw = false;
+try {
+    result = isCustomFunction( () => {}, "brad" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testTypeParameterValidation";

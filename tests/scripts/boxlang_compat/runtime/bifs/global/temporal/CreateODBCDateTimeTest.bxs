@@ -1,0 +1,31 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/CreateODBCDateTimeTest.java
+
+date = parseDateTime( "2024-01-14T00:00:01.0001Z" );
+
+// testCreateODBCDateTime
+result = CreateODBCDateTime( date );
+assert result == "{ts '2024-01-14 00:00:01'}" : "testCreateODBCDateTime";
+
+// testMemberToODBCDateTime
+result = date.toODBCDateTime();
+assert result == "{ts '2024-01-14 00:00:01'}" : "testMemberToODBCDateTime";
+
+date = parseDateTime( "2024-01-14" );
+
+// testCreateODBCDate
+result = CreateODBCDate( date );
+assert result == "{d '2024-01-14'}" : "testCreateODBCDate";
+
+// testMemberToODBCDate
+result = date.toODBCDate();
+assert result == "{d '2024-01-14'}" : "testMemberToODBCDate";
+
+date = parseDateTime( "23:59:59" );
+
+// testCreateODBCTime
+result = CreateODBCTime( date );
+assert result == "{t '23:59:59'}" : "testCreateODBCTime";
+
+// testMemberToODBCTime
+result = date.toODBCTime();
+assert result == "{t '23:59:59'}" : "testMemberToODBCTime";

@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListRestTest.java
+list = "a,b,c";
+assert listRest( list ) == "b,c" : "testRest default";
+list = "a|b|c";
+assert listRest( list, "|" ) == "b,c" : "testRest pipe";
+list = "a?b?c";
+assert listRest( list, "?" ) == "b,c" : "testRest question";

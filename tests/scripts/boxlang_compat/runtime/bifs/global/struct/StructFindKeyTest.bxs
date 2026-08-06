@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructFindKeyTest.java
+myStruct = { animals: { pig: "total" } };
+r = structFindKey( myStruct, "pig" );
+assert isArray( r ) : "testFindKey array";
+assert r[1].value == "total" : "testFindKey value";
+assert structKeyExists( r[1], "owner" ) : "testFindKey owner";
+assert structKeyExists( r[1], "path" ) : "testFindKey path";
+myStruct = { cow: { total: 12 }, pig: { total: 5 }, cat: { total: 3 } };
+r = structFindKey( myStruct, "total", "all" );
+assert arrayLen( r ) == 3 : "testFindKey all";

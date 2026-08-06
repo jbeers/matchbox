@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderPrependTest.java
+// testPrependHeadless
+sb = sb{"World"};
+stringBuilderPrepend( sb, "Hello " );
+result = sb.toString();
+assert result == "Hello World" : "testPrependHeadless";
+
+// testPrependMember
+sb = sb{"World"};
+sb.prepend( "Hello " );
+result = sb.toString();
+assert result == "Hello World" : "testPrependMember";

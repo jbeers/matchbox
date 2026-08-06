@@ -1,0 +1,45 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/encryption/GeneratePBKDFKeyTest.java
+// ---------------------------------------------------------------------------
+
+// testKeyGeneration
+result = generatePBKDFKey( "PBKDF2WithHmacSHA1", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testKeyGeneration SHA1 type";
+assert result == "Y0MCpCe3zb0CNJvyXNUWEQ==" : "testKeyGeneration SHA1 value";
+
+result = generatePBKDFKey( "PBKDF2WithHmacSHA224", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testKeyGeneration SHA224 type";
+assert result == "i1y4f7+cLVzDDFhXjn7q1A==" : "testKeyGeneration SHA224 value";
+
+result = generatePBKDFKey( "PBKDF2WithHmacSHA256", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testKeyGeneration SHA256 type";
+assert result == "jtq50MHsmbc7LpoS/rBH7g==" : "testKeyGeneration SHA256 value";
+
+result = generatePBKDFKey( "PBKDF2WithHmacSHA384", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testKeyGeneration SHA384 type";
+assert result == "IWSkTDmAm6UM1uG2MMRowA==" : "testKeyGeneration SHA384 value";
+
+result = generatePBKDFKey( "PBKDF2WithHmacSHA512", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testKeyGeneration SHA512 type";
+assert result == "asB+flulk/oXFTEVHZ+nkQ==" : "testKeyGeneration SHA512 value";
+
+// testAltAlgorithms
+result = generatePBKDFKey( "PBKDF2WithSHA224", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testAltAlgorithms SHA224 type";
+assert result == "i1y4f7+cLVzDDFhXjn7q1A==" : "testAltAlgorithms SHA224 value";
+
+result = generatePBKDFKey( "PBKDF2WithSHA224", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testAltAlgorithms SHA224 repeat type";
+assert result == "i1y4f7+cLVzDDFhXjn7q1A==" : "testAltAlgorithms SHA224 repeat value";
+
+result = generatePBKDFKey( "PBKDF2WithSHA256", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testAltAlgorithms SHA256 type";
+assert result == "jtq50MHsmbc7LpoS/rBH7g==" : "testAltAlgorithms SHA256 value";
+
+result = generatePBKDFKey( "PBKDF2WithSHA384", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testAltAlgorithms SHA384 type";
+assert result == "IWSkTDmAm6UM1uG2MMRowA==" : "testAltAlgorithms SHA384 value";
+
+result = generatePBKDFKey( "PBKDF2WithSHA512", "secret", "salty", 5000, 128 );
+assert isString( result ) : "testAltAlgorithms SHA512 type";
+assert result == "asB+flulk/oXFTEVHZ+nkQ==" : "testAltAlgorithms SHA512 value";

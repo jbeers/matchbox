@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/GetLocaleTest.java
+
+// testBif
+setLocale( "US" );
+result = getLocale();
+assert result == "English (US)" : "testBif";
+
+// testBifNoAlias
+setLocale( "ar_TR" );
+result = getLocale();
+assert result == "Arabic (Türkiye)" : "testBifNoAlias";

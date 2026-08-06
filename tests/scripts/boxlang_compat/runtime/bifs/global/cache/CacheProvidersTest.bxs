@@ -1,0 +1,9 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cache/CacheProvidersTest.java
+// ---------------------------------------------------------------------------
+
+// canGetCacheProviders
+result = cacheProviders();
+assert isArray( result ) : "canGetCacheProviders result-type";
+assert result != null : "canGetCacheProviders result";
+assert arrayLen( result ) >= 0 : "canGetCacheProviders size";

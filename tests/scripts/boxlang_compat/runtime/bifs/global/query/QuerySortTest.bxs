@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QuerySortTest.java
+q = queryNew( "a", "integer" );
+queryAddRow( q, { a: 3 } );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+querySort( q, "a", "asc", "numeric" );
+assert queryGetCell( q, "a", 1 ) == 1 : "testSort 1";
+assert queryGetCell( q, "a", 3 ) == 3 : "testSort 3";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cli/CLIReadTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test replaces
+// java.lang.System.in with java.io.ByteArrayInputStream to inject two
+// deterministic input lines; the MatchBox compatibility runner has no
+// source-level stdin replacement mechanism.

@@ -1,0 +1,23 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryCopyTest.java
+base = createTempDirectory();
+source = base & "/start";
+destination = base & "/end";
+directoryCreate( source & "/nested/further", true );
+fileWrite( source & "/test.txt", "copy me" );
+fileWrite( source & "/nested/further/test.md", "copy markdown" );
+
+directoryCopy( source, destination );
+assert directoryExists( destination ) : "testShallowDirectoryCopy destination";
+assert fileExists( destination & "/test.txt" ) : "testShallowDirectoryCopy file";
+assert directoryExists( destination & "/nested" ) == false : "testShallowDirectoryCopy no-nested";
+directoryDelete( destination, true );
+
+directoryCopy( source, destination, true );
+assert fileExists( destination & "/test.txt" ) : "testRecursiveDirectoryCopy file";
+assert fileExists( destination & "/nested/further/test.md" ) : "testRecursiveDirectoryCopy nested-file";
+directoryDelete( destination, true );
+
+directoryCopy( source, destination, true, "*.md" );
+assert fileExists( destination & "/nested/further/test.md" ) : "testFilteredDirectoryCopy markdown";
+assert fileExists( destination & "/test.txt" ) == false : "testFilteredDirectoryCopy text-filtered";
+directoryDelete( base, true );

@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/CharTest.java
+assert char( 65 ) == "A" : "testCharConversion";
+assert char( 100000 ) == "" : "testCharInvalidCode";
+threw = false;
+try {
+    char( -1 );
+} catch ( any e ) {
+    threw = true;
+}
+assert threw : "testCharNegativeCode";
+assert char( 65 ) == "A" : "testCharConversion";
+assert char( 100000 ) == "" : "testCharInvalidCode";

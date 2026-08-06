@@ -1,0 +1,24 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/LessThanEqualTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanCompareStrings
+assert ( "Brad" <= "Brad" ) : "testItCanCompareStrings Brad-Brad";
+assert ( "Brad" <= "BRAD" ) : "testItCanCompareStrings Brad-BRAD";
+assert ( "A" <= "B" ) : "testItCanCompareStrings A-B";
+
+// testItCanCompareNumbers
+assert ( 1 <= 1 ) : "testItCanCompareNumbers 1-1";
+assert ( 1 <= 2 ) : "testItCanCompareNumbers 1-2";
+assert ( 1.5 <= 1.5 ) : "testItCanCompareNumbers 1.5-1.5";
+assert ( 1.5 <= 1.7 ) : "testItCanCompareNumbers 1.5-1.7";
+
+// testItCanCompareStringsAsNumbers
+assert ( "1" <= "1" ) : "testItCanCompareStringsAsNumbers 1-1";
+assert ( "1" <= "2" ) : "testItCanCompareStringsAsNumbers 1-2";
+assert ( "1.5" <= "1.5" ) : "testItCanCompareStringsAsNumbers 1.5-1.5";
+assert ( "1.5" <= "1.7" ) : "testItCanCompareStringsAsNumbers 1.5-1.7";
+assert ( "1.5" <= "1.500" ) : "testItCanCompareStringsAsNumbers 1.5-1.500";
+assert ( "1.5000" <= "1.7" ) : "testItCanCompareStringsAsNumbers 1.5000-1.7";

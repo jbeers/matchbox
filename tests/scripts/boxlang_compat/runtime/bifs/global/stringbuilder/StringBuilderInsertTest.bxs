@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderInsertTest.java
+// testInsertMember
+sb = sb{"HelloWorld"};
+sb.insert( 6, " " );
+result = sb.toString();
+assert result == "Hello World" : "testInsertMember";
+
+// testInsertHeadless
+sb = sb{"Hello World"};
+stringBuilderInsert( sb, 7, "Beautiful " );
+result = sb.toString();
+assert result == "Hello Beautiful World" : "testInsertHeadless";

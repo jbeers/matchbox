@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructGetMetadataTest.java
+r = structGetMetadata( { foo: "bar" } );
+assert isStruct( r ) : "testStructGetMetadata struct";
+assert structKeyExists( r, "unmodifiable" ) : "testStructGetMetadata unmodifiable";
+assert structKeyExists( r, "casesensitive" ) : "testStructGetMetadata casesensitive";
+assert structKeyExists( r, "soft" ) : "testStructGetMetadata soft";
+assert structKeyExists( r, "ordered" ) : "testStructGetMetadata ordered";
+assert structKeyExists( r, "type" ) : "testStructGetMetadata type";
+r = { foo: "bar" }.getMetadata();
+assert isStruct( r ) : "testStructGetMetadata member";

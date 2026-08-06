@@ -1,0 +1,24 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/NowTest.java
+
+// testTrueConditions
+result = now();
+assert isDateObject( result ) : "testTrueConditions DateTime result";
+assert dateTimeFormat( result, "yyyy" ) >= 2026 : "testTrueConditions current year";
+
+// testTimezone
+result = now( "UTC" );
+assert isDateObject( result ) : "testTimezone DateTime result";
+assert dateTimeFormat( result, "XXX", "UTC" ) == "Z" : "testTimezone zone";
+
+// testAssignedTimezone
+setTimezone( "America/Los_Angeles" );
+result = now();
+assert isDateObject( result ) : "testAssignedTimezone DateTime result";
+assert dateTimeFormat( result, "XXX" ) == "-07:00" || dateTimeFormat( result, "XXX" ) == "-08:00" : "testAssignedTimezone zone";
+
+// testNowWillConvertToTimezone
+setTimezone( "America/Los_Angeles" );
+localTime = now();
+result = now( "UTC" );
+assert isDateObject( localTime ) : "testNowWillConvertToTimezone local DateTime";
+assert dateTimeFormat( localTime, "XXX" ) != dateTimeFormat( result, "XXX" ) : "testNowWillConvertToTimezone zone";

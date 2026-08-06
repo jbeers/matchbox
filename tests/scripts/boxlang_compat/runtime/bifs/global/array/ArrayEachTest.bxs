@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayEachTest.java
+acc = "";
+arrayEach( ["a","b","c"], function( item ) { acc = acc & item; } );
+assert acc == "abc" : "testEach";
+indexes = [];
+arrayEach( ["a","b","c"], function( item, index ) { indexes[index] = item; }, true, 2 );
+assert arrayLen( indexes ) == 3 : "testEach parallel size";
+assert indexes[1] == "a" : "testEach parallel ordered";
+indexes = [];
+arrayEach( array=["a","b"], callback=function( item, index ) { indexes[index] = item; }, parallel=true, virtual=true );
+assert arrayLen( indexes ) == 2 : "testEach parallel virtual";

@@ -1,0 +1,15 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFindFirstTest.java
+data = [1,2,3,4,5];
+r = arrayFindFirst( data, ( n ) => n > 2 );
+assert r == 3 : "testFindFirst";
+r = arrayFindFirst( data, ( n ) => n > 4, 99 );
+assert r == 5 : "testFindFirstDefaultUnused";
+r = arrayFindFirst( data, ( n ) => n > 5, 99 );
+assert r == 99 : "testFindFirstDefault";
+threw = false;
+try {
+    arrayFindFirst( data, ( n ) => n > 8 );
+} catch ( any e ) {
+    threw = true;
+}
+assert threw : "testFindFirstNoMatchError";

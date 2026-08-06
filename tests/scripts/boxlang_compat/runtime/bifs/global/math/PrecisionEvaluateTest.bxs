@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/PrecisionEvaluateTest.java
+assert precisionEvaluate( "3 * 5" ) == 15 : "testPrecision 3*5";
+assert precisionEvaluate( "9 MOD 2" ) == 1 : "testPrecision 9mod2";
+assert precisionEvaluate( "((1 + 2) * 3) - 4 / (2 ^ 2)" ) == 8 : "testPrecision expr";
+assert precisionEvaluate( "2 * (3 + (4 / 2))" ) == 10 : "testPrecision nested";

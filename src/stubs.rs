@@ -19,12 +19,24 @@ static STUBS: &[(&str, &[u8])] = &[
         include_bytes!("../stubs/runner_stub_wasm32-unknown-unknown.wasm"),
     ),
     (
-        "host",
-        include_bytes!("../stubs/runner_stub_aarch64-apple-darwin"),
+        "xtensa-esp32-espidf",
+                include_bytes!("../stubs/runner_stub_esp32.elf"),
     ),
     (
-        "aarch64-apple-darwin",
-        include_bytes!("../stubs/runner_stub_aarch64-apple-darwin"),
+        "xtensa-esp32s3-espidf",
+                include_bytes!("../stubs/runner_stub_esp32s3.elf"),
+    ),
+    (
+        "riscv32imc-esp-espidf",
+                include_bytes!("../stubs/runner_stub_esp32c3.elf"),
+    ),
+    (
+        "host",
+        include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
+    ),
+    (
+        "x86_64-unknown-linux-gnu",
+        include_bytes!("../stubs/runner_stub_x86_64-unknown-linux-gnu"),
     ),
 ];
 

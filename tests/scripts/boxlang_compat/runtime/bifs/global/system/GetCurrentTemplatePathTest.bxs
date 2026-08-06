@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetCurrentTemplatePathTest.java
+// Include and Java CFC fixtures are omitted; the direct source-level behavior
+// remains active.
+
+result = getCurrentTemplatePath();
+assert isString( result ) : "testCurrentTemplateInclude";

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetClassMetadataTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test loads
+// BoxLang/Java class files, annotations, interfaces, and class metadata paths.

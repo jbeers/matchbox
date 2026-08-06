@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryCreateTest.java
+p = getTempDirectory() & "/matchbox-createdir-test";
+directoryCreate( p );
+assert directoryExists( p ) : "testCreate";
+directoryDelete( p );

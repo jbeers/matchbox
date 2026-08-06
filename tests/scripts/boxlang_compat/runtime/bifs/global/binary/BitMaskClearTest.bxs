@@ -1,0 +1,43 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BitMaskClearTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBitwiseMaskClearWithPositiveIntegers
+result = bitMaskClear( 15, 1, 3 );
+assert result == 1 : "testBitwiseMaskClearWithPositiveIntegers";
+
+// testBitwiseMaskClearWithNegativeIntegers
+result = bitMaskClear( -5, 1, 2 );
+assert result == -7 : "testBitwiseMaskClearWithNegativeIntegers";
+
+// testBitwiseMaskClearWithZero
+result = bitMaskClear( 0, 2, 4 );
+assert result == 0 : "testBitwiseMaskClearWithZero";
+
+// testBitwiseMaskClearWithLargeIntegers
+result = bitMaskClear( 123456789, 4, 10 );
+assert result == 123453445 : "testBitwiseMaskClearWithLargeIntegers";
+
+// testBitwiseMaskClearWithLongRangeValues
+result = bitMaskClear( 2190225219, 4, 10 );
+assert result == 2190213123 : "testBitwiseMaskClearWithLongRangeValues";
+
+// testBitwiseMaskClearWithInvalidLength
+threw = false;
+try {
+    result = bitMaskClear( 5, 2, 32 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBitwiseMaskClearWithInvalidLength";
+
+// testBitwiseMaskClearWithInvalidStart
+threw = false;
+try {
+    result = bitMaskClear( 5, 32, 3 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBitwiseMaskClearWithInvalidStart";

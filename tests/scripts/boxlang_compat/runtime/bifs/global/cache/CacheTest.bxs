@@ -1,0 +1,29 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/cache/CacheTest.java
+// ---------------------------------------------------------------------------
+
+// canGetDefaultCache
+result = cache();
+assert result != null : "canGetDefaultCache result";
+assert result.getName().getName() == "default" : "canGetDefaultCache name";
+
+// canGetNamedCache
+result = cache( "bxSessions" );
+assert result != null : "canGetNamedCache result";
+assert result.getName().getName() == "bxSessions" : "canGetNamedCache name";
+
+// canGetPerAppCache
+// The JVM source configures the application cache with this tag-island block;
+// MatchBox does not parse tag islands in script files yet.
+// bx:application name="unit-test-sm"
+// caches = {
+//     "default": {
+//         provider: "BoxCache",
+//         properties: {
+//             maxObjects: 10
+//         }
+//     }
+// };
+result = cache( "default" );
+assert result != null : "canGetPerAppCache result";
+assert result.getName().getName() == "unit-test-sm:default" : "canGetPerAppCache name";

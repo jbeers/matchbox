@@ -1,0 +1,169 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DateTimeFormatTest.java
+
+// testDateFormatBif
+ref = createDate( 2023, 12, 31 );
+result = dateFormat( ref );
+assert result == "31-Dec-23" : "testDateFormatBif default";
+result = dateFormat( ref, "yyyy-MM-dd" );
+assert result == "2023-12-31" : "testDateFormatBif custom";
+
+// testDateFormatCommonMasks
+setTimezone( "UTC" );
+refDate = createDate( 2023, 12, 31 );
+result = dateFormat( refDate, "long" );
+assert result != "" : "testDateFormatCommonMasks long";
+result = dateFormat( refDate, "iso" );
+assert result == "2023-12-31" : "testDateFormatCommonMasks iso";
+result = dateFormat( refDate, "iso8601" );
+assert result == "2023-12-31" : "testDateFormatCommonMasks iso8601";
+result = dateFormat( refDate, "short" );
+assert result != "" : "testDateFormatCommonMasks short";
+
+// testDateTimeFormatTZChange
+setTimezone( "America/New_York" );
+ref = now();
+result1 = dateTimeFormat( ref, "v" );
+result1Hours = dateTimeFormat( ref, "HH" );
+setTimezone( "America/Los_Angeles" );
+result2 = dateTimeFormat( ref, "v" );
+result2Hours = dateTimeFormat( ref, "HH" );
+assert result1 != result2 : "testDateTimeFormatTZChange timezone";
+assert result1Hours != result2Hours : "testDateTimeFormatTZChange hour";
+
+// testLocaleAwareness
+setLocale( "de-DE" );
+result = dateFormat( now(), "long" );
+assert result != "" : "testLocaleAwareness";
+
+// testDateTimeFormatBif
+setTimezone( "UTC" );
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0, "UTC" );
+result = dateTimeFormat( ref );
+assert result == "31-Dec-2023 12:30:30" : "testDateTimeFormatBif default";
+result = dateTimeFormat( ref, "yyyy-MM-dd'T'HH:mm:ssXXX" );
+assert result == "2023-12-31T12:30:30Z" : "testDateTimeFormatBif custom";
+
+// testDateTimeFormatCommonMasks
+refDate = createDateTime( 2023, 12, 31, 12, 30, 30, 0, "UTC" );
+result = dateTimeFormat( refDate, "long" );
+assert result != "" : "testDateTimeFormatCommonMasks long";
+result = dateTimeFormat( refDate, "iso" );
+assert result != "" : "testDateTimeFormatCommonMasks iso";
+result = dateTimeFormat( refDate, "iso8601" );
+assert result != "" : "testDateTimeFormatCommonMasks iso8601";
+result = dateTimeFormat( refDate, "short" );
+assert result != "" : "testDateTimeFormatCommonMasks short";
+result = dateTimeFormat( refDate, "medium" );
+assert result != "" : "testDateTimeFormatCommonMasks medium";
+result = dateTimeFormat( refDate, "epoch" );
+assert isNumeric( result ) : "testDateTimeFormatCommonMasks epoch";
+result = dateTimeFormat( refDate, "epochms" );
+assert isNumeric( result ) : "testDateTimeFormatCommonMasks epochms";
+
+// testTimeFormatBif
+setTimezone( "UTC" );
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0 );
+result = timeFormat( ref );
+assert result == "12:30 PM" : "testTimeFormatBif noon";
+ref = createDateTime( 2023, 12, 31, 13, 30, 30, 0 );
+result = timeFormat( ref );
+assert result == "01:30 PM" : "testTimeFormatBif afternoon";
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0, "UTC" );
+result = timeFormat( ref, "HH:mm:ssXXX" );
+assert result == "12:30:30Z" : "testTimeFormatBif timezone";
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 999, "UTC" );
+result = timeFormat( ref, "HH:mm:ss.SSS" );
+assert result == "12:30:30.999" : "testTimeFormatBif milliseconds";
+
+// testTimeFormatCommonMasks
+refTime = createDateTime( 2023, 12, 31, 12, 30, 30, 0, "UTC" );
+result = timeFormat( refTime, "long" );
+assert result != "" : "testTimeFormatCommonMasks long";
+result = timeFormat( refTime, "iso" );
+assert result != "" : "testTimeFormatCommonMasks iso";
+result = timeFormat( refTime, "iso8601" );
+assert result != "" : "testTimeFormatCommonMasks iso8601";
+result = timeFormat( refTime, "short" );
+assert result != "" : "testTimeFormatCommonMasks short";
+
+// testTimeFormatString
+setTimezone( "UTC" );
+parsedTime = parseDateTime( "11:00" );
+result = timeFormat( "11:00", "hh:mm a" );
+assert isDateObject( parsedTime ) : "testTimeFormatString parsed time";
+assert result == "11:00 AM" : "testTimeFormatString";
+
+// testMemberFunction
+setTimezone( "UTC" );
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0 );
+result = ref.format();
+assert result == "31-Dec-2023 12:30:30" : "testMemberFunction default";
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0, "UTC" );
+result = ref.format( "yyyy-MM-dd'T'HH:mm:ssXXX" );
+assert result == "2023-12-31T12:30:30Z" : "testMemberFunction custom";
+
+// testCommonFormattersExtraSpaces
+setTimezone( "UTC" );
+ref = createDateTime( 2023, 12, 31, 12, 30, 30, 0 );
+result = ref.format( " short" );
+assert result == "12/31/23, 12:30 PM" : "testCommonFormattersExtraSpaces";
+
+// testLocalizedDateTimeFormatSpain
+date = now();
+result = DateTimeFormat( date, "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedDateTimeFormatSpain";
+
+// testLocalizedDateTimeFormatMember
+result = date.DateTimeFormat( "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedDateTimeFormatMember";
+
+// testJsToStringDateTimeFormatMember
+result = date.DateTimeFormat( "javascript", "UTC", "en-US" );
+assert result != "" : "testJsToStringDateTimeFormatMember";
+
+// testLocalizedDateTimeFormatStringMember
+setTimeZone( "Z" );
+result = "2025-01-01T12:00:00.000Z".DateTimeFormat( format="long", locale="en-US" );
+assert result != "" : "testLocalizedDateTimeFormatStringMember";
+
+// testLocalizedDateTimeFormatChina
+result = DateTimeFormat( date, "long", "UTC", "zh-CN" );
+assert result != "" : "testLocalizedDateTimeFormatChina";
+
+// testLocalizedDateFormatSpain
+result = DateFormat( date, "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedDateFormatSpain";
+
+// testLocalizedDateFormatGermany
+date = createDateTime( 2026, 3, 15, 0, 0, 0, 0, "UTC" );
+result = DateFormat( date=date, mask="MMMM", locale="DE" );
+assert result == "März" : "testLocalizedDateFormatGermany";
+
+// testLocalizedDateFormatMember
+result = date.DateFormat( "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedDateFormatMember";
+
+// testLocalizedDateFormatStringMember
+result = "2025-01-01T12:00:00.000Z".dateformat( format="long", locale="en-US" );
+assert result != "" : "testLocalizedDateFormatStringMember";
+
+// testLocalizedDateFormatChina
+result = DateFormat( date, "long", "UTC", "zh-CN" );
+assert result != "" : "testLocalizedDateFormatChina";
+
+// testLocalizedTimeFormatSpain
+result = TimeFormat( date, "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedTimeFormatSpain";
+
+// testLocalizedTimeFormatMember
+result = date.TimeFormat( "long", "UTC", "es-ES" );
+assert result != "" : "testLocalizedTimeFormatMember";
+
+// testLocalizedTimeFormatStringMember
+setTimeZone( "Z" );
+result = "2025-01-01T12:00:00.000Z".timeFormat( format="long", locale="en-US" );
+assert result != "" : "testLocalizedTimeFormatStringMember";
+
+// testLocalizedTimeFormatChina
+result = TimeFormat( date, "long", "UTC", "zh-CN" );
+assert result != "" : "testLocalizedTimeFormatChina";

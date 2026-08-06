@@ -1,0 +1,21 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsDateObjectTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+aNowCall = isDateObject( now() );
+acreateDateTimeCall = isDateObject( createDateTime( 2024, 01, 22, 7, 15, 1, 999 ) );
+assert aNowCall : "testTrueConditions now";
+assert acreateDateTimeCall : "testTrueConditions createDateTime";
+
+// testFalseConditions
+aTimespan = isDateObject( createTimespan( 0, 24, 0, 0, 999 ) );
+aDateString = isDateObject( "2023-12-21" );
+aFormattedDate = isDateObject( dateTimeFormat( now(), "iso8601" ) );
+aRandomString = isDateObject( "abc" );
+assert aTimespan == false : "testFalseConditions timespan";
+assert aDateString == false : "testFalseConditions date-string";
+assert aFormattedDate == false : "testFalseConditions formatted-date";
+assert aRandomString == false : "testFalseConditions random-string";

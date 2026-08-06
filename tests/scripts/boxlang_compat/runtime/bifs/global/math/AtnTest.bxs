@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/AtnTest.java
+// testItReturnsAtn
+assert abs( atn( 1 ) - 0.7853981633974483 ) < 0.0000001 : "testItReturnsAtn one";
+assert abs( atn( 0.5 ) - 0.4636476090008061 ) < 0.0000001 : "testItReturnsAtn half";
+// testItReturnsAtnMember
+assert abs( ( 1 ).atn() - 0.7853981633974483 ) < 0.0000001 : "testItReturnsAtnMember one";
+assert abs( ( 0.5 ).atn() - 0.4636476090008061 ) < 0.0000001 : "testItReturnsAtnMember half";

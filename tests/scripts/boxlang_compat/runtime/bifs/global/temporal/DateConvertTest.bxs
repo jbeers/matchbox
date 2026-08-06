@@ -1,0 +1,38 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DateConvertTest.java
+
+// testDateConvertLocal2Utc
+setTimezone( "America/Los_Angeles" );
+date = parseDateTime( "2025-01-01T00:00:00" );
+result = dateConvert( "local2Utc", date );
+setTimezone( "America/Chicago" );
+formatResult = dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm:ssXXX" );
+assert isDateObject( result ) : "testDateConvertLocal2Utc DateTime result";
+assert formatResult == dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm:ssXXX" ) : "testDateConvertLocal2Utc stable result";
+
+// testDateConvertUtcToLocal
+date = parseDateTime( "2025-01-01T00:00:00Z" );
+result = dateConvert( "utc2local", date );
+setTimezone( "America/Chicago" );
+formatResult = dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm:ssXXX" );
+assert isDateObject( result ) : "testDateConvertUtcToLocal DateTime result";
+assert formatResult == dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm:ssXXX" ) : "testDateConvertUtcToLocal stable result";
+
+// testDateConvertUtcToLocalEpoch
+setTimezone( "America/Los_Angeles" );
+result = dateConvert( "utc2local", "1970-01-01T00:00" );
+assert dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm" ) == "1969-12-31T16:00" : "testDateConvertUtcToLocalEpoch";
+
+// testDateConvertLocalToUTCEpoch
+setTimezone( "America/Los_Angeles" );
+result = dateConvert( "local2utc", "1969-12-31T16:00:00" );
+assert dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm" ) == "1970-01-01T00:00" : "testDateConvertLocalToUTCEpoch";
+
+// testDateConvertSwissLocale
+setLocale( "en_US" );
+setTimezone( "Europe/Zurich" );
+result = dateConvert( "utc2Local", "January 1 1970 00:00" );
+assert dateTimeFormat( result, "yyyy-MM-dd'T'HH:mm" ) == "1970-01-01T01:00" : "testDateConvertSwissLocale";
+
+// testDateConvertYearMonthDay
+result = dateConvert( "utc2local", "1970/01/01" );
+assert isDateObject( result ) : "testDateConvertYearMonthDay";

@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructEachTest.java
+acc = "";
+structEach( { a: "1", b: "2" }, function( k, v ) { acc = acc & k & v; } );
+assert acc == "a1b2" : "testEach";

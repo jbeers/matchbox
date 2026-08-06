@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructNoneTest.java
+r = structNone( { a: 1, b: 3 }, ( k, v ) => v == 9 );
+assert r : "testNone";
+r = structNone( { a: 1, b: 3 }, ( k, v ) => v == 3 );
+assert r == false : "testNoneFalse";
+r = structNone( { a: 1, b: 3 }, ( k, v ) => v == 9, true );
+assert r : "testNoneParallel";
+r = structNone( { a: 1, b: 3 }, ( k, v ) => v == 9, true, 2 );
+assert r : "testNoneParallelMaxThreads";
+r = structNone( { a: 1, b: 3 }, ( k, v ) => v == 9, true, true );
+assert r : "testNoneParallelVirtual";

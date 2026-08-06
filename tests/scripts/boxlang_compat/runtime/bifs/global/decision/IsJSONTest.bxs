@@ -1,0 +1,49 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsJSONTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+anEmptyStruct = isJSON( '{}' );
+anEmptyArray = isJSON( '[]' );
+anArrayWithMixedValues = isJSON( '["a","b",123]' );
+aPopulatedStruct = isJSON( '{ "a" : 123, "b" : 456 }' );
+anInteger = isJSON( '123' );
+aQuotedInteger = isJSON( '"456"' );
+assert anEmptyStruct : "testTrueConditions empty-struct";
+assert anEmptyArray : "testTrueConditions empty-array";
+assert anArrayWithMixedValues : "testTrueConditions mixed-array";
+assert aPopulatedStruct : "testTrueConditions populated-struct";
+assert anInteger : "testTrueConditions integer";
+assert aQuotedInteger : "testTrueConditions quoted-integer";
+
+// testFalseConditions
+anEmptyString = isJSON( '' );
+anUnquotedStringValue = isJSON( 'gibberish' );
+aStructWithUnquotedKeys = isJSON( '[ { a : "" } ]' );
+anArrayWithTrailingComma = isJSON( '["a","b",123,]' );
+anArrayWithAFloat = isJSON( '[123456789,.11]' );
+numberAndTextMixed = isJSON( '1234 Main St.' );
+assert anEmptyString == false : "testFalseConditions empty-string";
+assert anUnquotedStringValue == false : "testFalseConditions unquoted-string";
+assert aStructWithUnquotedKeys == false : "testFalseConditions unquoted-keys";
+assert anArrayWithTrailingComma == false : "testFalseConditions trailing-comma";
+assert anArrayWithAFloat == false : "testFalseConditions float";
+assert numberAndTextMixed == false : "testFalseConditions mixed";
+
+// testIsJSONNoQuoteKeys
+result = isJSON( '{ a : 1, b : 2, c : 3 }' );
+assert result == false : "testIsJSONNoQuoteKeys";
+
+// testIsJSONSingleQuoteKeys
+result = isJSON( '{ "a" : 1, "b" : 2, "c" : 3 }' );
+assert result : "testIsJSONSingleQuoteKeys-if-no-quote-keys-considered";
+
+// testIsJSONTrailingCommas
+result = isJSON( '{ "foo" : "bar", }' );
+assert result == false : "testIsJSONTrailingCommas";
+
+// testIsJSONLeadingZero
+result = isJSON( '{ "foo" : 01 }' );
+assert result == false : "testIsJSONLeadingZero";

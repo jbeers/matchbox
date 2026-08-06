@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFirstTest.java
+assert arrayFirst( ["a","b"] ) == "a" : "testFirst";
+assert ["a","b"].first() == "a" : "testFirstMember";
+assert arrayFirst( [], "default" ) == "default" : "testFirstDefault";
+assert [].first( "default" ) == "default" : "testFirstMemberDefault";

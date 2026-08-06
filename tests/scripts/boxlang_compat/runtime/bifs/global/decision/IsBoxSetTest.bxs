@@ -1,0 +1,7 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsBoxSetTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test drives
+// the internal isBifSet Java API directly with a Set type MatchBox does not
+// have yet. No BoxLang source is evaluated.
+// ---------------------------------------------------------------------------

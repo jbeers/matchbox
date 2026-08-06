@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileInfoTest.java
+p = createTempFile();
+fileWrite( p, "file info test" );
+result = fileInfo( p );
+assert isStruct( result ) : "testFileInfo struct";
+assert structKeyExists( result, "size" ) : "testFileInfo size";
+assert structKeyExists( result, "type" ) : "testFileInfo type";
+result2 = getFileInfo( p );
+assert isStruct( result2 ) : "testGetFileInfo struct";
+fileDelete( p );

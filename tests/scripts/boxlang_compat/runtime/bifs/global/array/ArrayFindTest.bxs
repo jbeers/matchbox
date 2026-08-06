@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFindTest.java
+data = ["YES","NO","Y","N"];
+assert arrayFind( data, "99" ) == 0 : "testFind missing";
+assert arrayFind( data, "YES" ) == 1 : "testFind YES";
+assert arrayFind( data, "yes" ) == 0 : "testFind case";
+assert arrayFind( data, "NO" ) == 2 : "testFind NO";

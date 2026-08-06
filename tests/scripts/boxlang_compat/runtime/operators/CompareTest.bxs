@@ -1,0 +1,68 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/CompareTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// The JVM test asserts the signed int returned by Compare.invoke (0, -1, 1).
+// That ordering is observable in BoxLang through the <, > and == operators,
+// which is how each assertion is transcribed below.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanCompareDates, testItCanCompareDurations and
+// testItCanCompareSQLTime construct java.time / DateTime values that are not
+// yet expressible in MatchBox.
+
+// testItCanCompareStringsCaseInsensitive
+assert ( "Brad" == "Brad" ) : "testItCanCompareStringsCaseInsensitive eq";
+assert ( "Brad" == "BRAD" ) : "testItCanCompareStringsCaseInsensitive ci-eq";
+assert ( "A" < "B" ) : "testItCanCompareStringsCaseInsensitive A-B";
+assert ( "A" < "b" ) : "testItCanCompareStringsCaseInsensitive A-b";
+assert ( "B" > "A" ) : "testItCanCompareStringsCaseInsensitive B-A";
+assert ( "B" > "a" ) : "testItCanCompareStringsCaseInsensitive B-a";
+assert ( "A" == "a" ) : "testItCanCompareStringsCaseInsensitive A-a";
+
+// testItCanCompareStringsCaseSensitive
+// NOTE: these rely on case-sensitive ordering; MatchBox string comparison is
+// case-insensitive today, so these are expected to fail until that is added.
+assert ( "Brad" > "BRAD" ) : "testItCanCompareStringsCaseSensitive brad-BRAD";
+assert ( "BRAD" < "Brad" ) : "testItCanCompareStringsCaseSensitive BRAD-brad";
+assert ( "A" == "A" ) : "testItCanCompareStringsCaseSensitive A-A";
+assert ( "A" < "a" ) : "testItCanCompareStringsCaseSensitive A-a";
+assert ( "a" > "A" ) : "testItCanCompareStringsCaseSensitive a-A";
+
+// testItCanCompareNumbers
+assert ( 1 == 1 ) : "testItCanCompareNumbers 1-1";
+assert ( 1 < 2 ) : "testItCanCompareNumbers 1-2";
+assert ( 2 > 1 ) : "testItCanCompareNumbers 2-1";
+assert ( 1.5 == 1.5 ) : "testItCanCompareNumbers 1.5-1.5";
+assert ( 1.5 < 1.7 ) : "testItCanCompareNumbers 1.5-1.7";
+assert ( 2.8 > 0.6 ) : "testItCanCompareNumbers 2.8-0.6";
+
+// testItCanCompareStringsAsNumbers
+assert ( "1" == "1" ) : "testItCanCompareStringsAsNumbers 1-1";
+assert ( "1" < "2" ) : "testItCanCompareStringsAsNumbers 1-2";
+assert ( "2" > "1" ) : "testItCanCompareStringsAsNumbers 2-1";
+assert ( "1.5" == "1.5" ) : "testItCanCompareStringsAsNumbers 1.5-1.5";
+assert ( "1.5" < "1.7" ) : "testItCanCompareStringsAsNumbers 1.5-1.7";
+assert ( "2.8" > "0.6" ) : "testItCanCompareStringsAsNumbers 2.8-0.6";
+assert ( "1.5" == "1.500" ) : "testItCanCompareStringsAsNumbers 1.5-1.500";
+assert ( "1.5000" < "1.7" ) : "testItCanCompareStringsAsNumbers 1.5000-1.7";
+assert ( "2.8" > "00000.600000" ) : "testItCanCompareStringsAsNumbers 2.8-00000.6";
+
+// testItCanCompareNulls
+assert ( null == null ) : "testItCanCompareNulls null-null";
+assert ( "brad" != null ) : "testItCanCompareNulls brad-null";
+assert ( null != "brad" ) : "testItCanCompareNulls null-brad";
+
+// testItCanCompareNullToEmptyString
+// Compare(null, "") is 0 and Compare(null, "test") is -1 in the JVM. BoxLang
+// treats null and "" as distinct; transcribed as the JVM-observable ordering.
+assert ( null != "" ) : "testItCanCompareNullToEmptyString null-empty";
+assert ( "" != null ) : "testItCanCompareNullToEmptyString empty-null";
+assert ( null != "test" ) : "testItCanCompareNullToEmptyString null-test";
+assert ( "test" != null ) : "testItCanCompareNullToEmptyString test-null";
+
+// testItWillNotComparePositiveNumbersAndBooleansAsEqual
+// JVM: Compare(true, 99) > 0 and Compare(true, 1) > 0.
+assert ( true > 99 ) : "testItWillNotComparePositiveNumbersAndBooleansAsEqual true-99";
+assert ( true > 1 ) : "testItWillNotComparePositiveNumbersAndBooleansAsEqual true-1";

@@ -1,0 +1,24 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderNewTest.java
+// testStringBuilderNewEmpty
+result = stringBuilderNew();
+assert isStringBuilder( result ) : "testStringBuilderNewEmpty type";
+assert result.toString() == "" : "testStringBuilderNewEmpty value";
+
+// testStringBuilderNewWithValue
+result = stringBuilderNew( "hello" );
+assert isStringBuilder( result ) : "testStringBuilderNewWithValue type";
+assert result.toString() == "hello" : "testStringBuilderNewWithValue value";
+
+// testStringBuilderNewWithCapacityOnly
+result = stringBuilderNew( capacity = 64 );
+assert isStringBuilder( result ) : "testStringBuilderNewWithCapacityOnly type";
+assert result.toString() == "" : "testStringBuilderNewWithCapacityOnly value";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): getBuffer().capacity()
+// inspects the internal Java StringBuilder backing buffer.
+
+// testStringBuilderNewWithValueAndCapacity
+result = stringBuilderNew( "hello", 64 );
+assert isStringBuilder( result ) : "testStringBuilderNewWithValueAndCapacity type";
+assert result.toString() == "hello" : "testStringBuilderNewWithValueAndCapacity value";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): getBuffer().capacity()
+// inspects the internal Java StringBuilder backing buffer.

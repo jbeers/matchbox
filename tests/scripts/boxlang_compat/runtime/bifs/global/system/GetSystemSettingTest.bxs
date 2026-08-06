@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetSystemSettingTest.java
+// Environment/property provider overrides in the JVM test require Java system
+// state; the deterministic default-value behavior remains active.
+
+result = getSystemSetting( "matchbox.missing.system.setting", "fallback" );
+assert result == "fallback" : "testGetSystemSettingWithDefault";
+
+result = getSystemSetting( "matchbox.missing.system.setting", [ 1, 2, 3 ] );
+assert isArray( result ) : "testDefaultComplexValue array";
+assert arrayLen( result ) == 3 : "testDefaultComplexValue length";

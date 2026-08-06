@@ -1,0 +1,30 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ThreadJoinTest.java
+
+// testCanJOinAllThreads
+threadNew( runnable = () => {
+    sleep( 2000 );
+}, name = "myThread" );
+threadNew( runnable = () => {
+    sleep( 2000 );
+}, name = "myThread2" );
+threadJoin();
+result = bxthread.myThread;
+result2 = bxthread.myThread2;
+assert result.status == "COMPLETED" : "testCanJOinAllThreads first";
+assert result2.status == "COMPLETED" : "testCanJOinAllThreads second";
+
+// testCanJoinThreadNoTimeout
+threadNew( runnable = () => {
+    sleep( 2000 );
+}, name = "myThreadNoTimeout" );
+threadJoin( "myThreadNoTimeout" );
+result = bxthread.myThreadNoTimeout;
+assert result.status == "COMPLETED" : "testCanJoinThreadNoTimeout";
+
+// testCanJoinThreadZeroTimeout
+threadNew( runnable = () => {
+    sleep( 2000 );
+}, name = "myThreadZeroTimeout" );
+threadJoin( "myThreadZeroTimeout", 0 );
+result = bxthread.myThreadZeroTimeout;
+assert result.status == "COMPLETED" : "testCanJoinThreadZeroTimeout";

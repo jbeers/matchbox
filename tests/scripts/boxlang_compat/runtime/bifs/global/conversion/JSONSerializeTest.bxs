@@ -1,0 +1,80 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/JSONSerializeTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testCanSerializeNull
+result = jsonSerialize( null );
+assert result == "null" : "testCanSerializeNull";
+
+// testCanSerializeString
+result = jsonSerialize( "Hello World" );
+assert result == '"Hello World"' : "testCanSerializeString";
+
+// testCanSerializeNumber
+result = jsonSerialize( 42 );
+assert result == "42" : "testCanSerializeNumber";
+
+// testCanSerializeBoolean
+result = jsonSerialize( false );
+assert result == "false" : "testCanSerializeBoolean";
+
+// testCanSerializeArray
+result = jsonSerialize( [1, "brad", true, [], null] );
+assert result == '[1,"brad",true,[],null]' : "testCanSerializeArray";
+
+// testCanSerializeDateTimeObject
+setTimezone( "UTC" );
+result = jsonSerialize( createDate( 2024, 1, 1 ) );
+assert result == '"2024-01-01T00:00:00Z"' : "testCanSerializeDateTimeObject";
+
+// testCanSerializeStruct
+result = jsonSerialize( {
+    one: "wood",
+    two: null,
+    three: 42,
+    four: [1,2,3],
+    five: {},
+    six: true,
+    date: createDate( 2024, 1, 1 )
+} );
+assert result contains '"one"' : "testCanSerializeStruct one";
+assert result contains '"date":"2024-01-01T00:00:00Z"' : "testCanSerializeStruct date";
+
+// testCanSerializeQueryModes
+query = queryNew( "col1,col2", "numeric,varchar", [[1,"brad"],[2,"wood"]] );
+result = jsonSerialize( query, "struct" );
+assert result contains '"col1":1' : "testCanSerializeQueryStruct";
+result = jsonSerialize( query, "row" );
+assert result contains '"columns"' : "testCanSerializeQueryRow";
+result = jsonSerialize( query, "column" );
+assert result contains '"rowCount":2' : "testCanSerializeQueryColumn";
+
+// testCanSerializeBoxLangFunction
+function foo() { return true; }
+result = jsonSerialize( { f: () => {}, another: foo } );
+assert len( result ) > 0 : "testCanSerializeBoxLangFunction";
+
+// testCanHandleRecursion
+foo = {};
+bar = { foo: foo };
+foo.bar = bar;
+result = jsonSerialize( foo );
+assert len( result ) > 0 : "testCanHandleRecursion";
+
+// testCanSerializeStringMember
+result = "Hello World".toJSON();
+assert result == '"Hello World"' : "testCanSerializeStringMember";
+
+// testCanSerializeNumberMember
+result = ( 42 ).toJSON();
+assert result == "42" : "testCanSerializeNumberMember";
+
+// testCanSerializeBooleanMember
+result = false.toJSON();
+assert result == "false" : "testCanSerializeBooleanMember";
+
+// testCanSerializeArrayMember
+result = [1, "brad", true, [], null].toJSON();
+assert result == '[1,"brad",true,[],null]' : "testCanSerializeArrayMember";

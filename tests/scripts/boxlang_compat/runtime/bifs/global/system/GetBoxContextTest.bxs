@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBoxContextTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test compares
+// the returned internal IBoxContext object by identity.

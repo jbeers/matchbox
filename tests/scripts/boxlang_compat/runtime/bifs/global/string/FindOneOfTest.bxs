@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/FindOneOfTest.java
+assert findOneOf( "aeiou", "BoxLang is great" ) == 2 : "testFindOneOfSet";
+assert findOneOf( "aeiou", "BoxLang is great", -1 ) == 2 : "testFindOneOfNegativeStart";
+assert findOneOf( "yz", "BoxLang is great" ) == 0 : "testFindOneOfMissing";

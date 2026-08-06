@@ -1,0 +1,19 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLFormatTest.java
+// ---------------------------------------------------------------------------
+
+// testBif
+stringXML = '<root foo="bar" />';
+result = xmlFormat( stringXML );
+assert result == "&lt;root foo=&quot;bar&quot; /&gt;" : "testBif escaped";
+stringXML = '<root foo="bar" illegal="' & chr( 0 ) & chr( 12 ) & '" />';
+result = xmlFormat( stringXML, true );
+assert result == "&lt;root foo=&quot;bar&quot; illegal=&quot;&quot; /&gt;" : "testBif illegal-chars";
+
+// testMemberFunction
+stringXML = '<root foo="bar" />';
+result = stringXML.xmlFormat();
+assert result == "&lt;root foo=&quot;bar&quot; /&gt;" : "testMemberFunction escaped";
+stringXML = '<root foo="bar" illegal="' & chr( 0 ) & chr( 12 ) & '" />';
+result = stringXML.xmlFormat( true );
+assert result == "&lt;root foo=&quot;bar&quot; illegal=&quot;&quot; /&gt;" : "testMemberFunction illegal-chars";

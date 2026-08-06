@@ -1,0 +1,19 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/IsThreadInterruptedTest.java
+
+// testNotInterrupted
+threadNew( runnable = () => {
+    sleep( 1000 );
+}, name = "testThreadNotInterrupted" );
+result = isThreadInterrupted( "testThreadNotInterrupted" );
+assert result == false : "testNotInterrupted";
+threadJoin( "testThreadNotInterrupted" );
+
+// testInterrupted
+threadNew( runnable = () => {
+    assert isThreadInterrupted() == false : "testInterrupted initial state";
+    sleep( 1000 );
+}, name = "testThreadInterrupted" );
+threadInterrupt( "testThreadInterrupted" );
+result = isThreadInterrupted( "testThreadInterrupted" );
+assert result : "testInterrupted";
+threadJoin( "testThreadInterrupted" );

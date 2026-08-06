@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructInsertTest.java
+myStruct = {};
+structInsert( myStruct, "foo", "bar" );
+assert myStruct.foo == "bar" : "testInsert";
+structInsert( myStruct, "foo", "baz", true );
+assert myStruct.foo == "baz" : "testInsertOverwrite";
+threw = false;
+try {
+    structInsert( { foo: "bar" }, "foo", "baz" );
+} catch ( any e ) {
+    threw = true;
+}
+assert threw : "testInsertOverwriteFalseError";

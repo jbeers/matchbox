@@ -1,0 +1,17 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetFunctionCalledNameTest.java
+
+result = getFunctionCalledName();
+assert result == "" : "testWithNoContext";
+
+function test2() {
+    return getFunctionCalledName();
+}
+result = test2();
+assert result == "test2" : "testWithFunctionContext";
+
+function test() {
+    return getFunctionCalledName();
+}
+anotherTest = test;
+result = anotherTest();
+assert result == "anotherTest" : "testWithFunctionContextAndNewReference";

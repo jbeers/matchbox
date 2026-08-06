@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayAvgTest.java
+assert arrayAvg( [1,2,3] ) == 2 : "testAvg";
+assert [1,2,3].avg() == 2 : "testAvgMember";

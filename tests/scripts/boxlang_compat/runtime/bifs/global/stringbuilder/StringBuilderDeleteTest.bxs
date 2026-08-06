@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderDeleteTest.java
+// testDeleteHeadless
+sb = sb{"Hello World"};
+stringBuilderDelete( sb, 6, 11 );
+result = sb.toString();
+assert result == "Hello" : "testDeleteHeadless";
+
+// testDeleteMember
+sb = sb{"Hello World"};
+sb.delete( 6, 11 );
+result = sb.toString();
+assert result == "Hello" : "testDeleteMember";

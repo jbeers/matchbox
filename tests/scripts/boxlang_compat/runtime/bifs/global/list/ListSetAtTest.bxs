@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListSetAtTest.java
+nums = "1,2,3";
+result = listSetAt( nums, 2, "6" );
+assert result == "1,6,3" : "testSetAt";
+nums = "1,2,3";
+result = listSetAt( nums, 2, 6 );
+assert result == "1,6,3" : "testSetAt int";

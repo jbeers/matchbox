@@ -1,0 +1,15 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderContainsTest.java
+// testContainsHeadless
+sb = sb{"Hello BoxLang"};
+result = stringBuilderContains( sb, "Box" );
+assert result == true : "testContainsHeadless";
+
+// testContainsMember
+sb = sb{"Hello BoxLang"};
+result = sb.contains( "box" );
+assert result == false : "testContainsMember";
+
+// testContainsNoCaseMember
+sb = sb{"Hello BoxLang"};
+result = sb.containsNoCase( "box" );
+assert result == true : "testContainsNoCaseMember";

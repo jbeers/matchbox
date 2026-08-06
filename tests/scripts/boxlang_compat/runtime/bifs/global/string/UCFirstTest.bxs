@@ -1,0 +1,2 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/UCFirstTest.java
+assert ucFirst( "brad wood" ) == "Brad wood" : "testUcFirst";

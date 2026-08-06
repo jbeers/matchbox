@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayResizeTest.java
+arr = [1,2,3];
+arrayResize( arr, 5 );
+assert arrayLen( arr ) == 5 : "testResize size";

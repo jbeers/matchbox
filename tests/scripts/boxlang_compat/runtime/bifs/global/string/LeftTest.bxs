@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/LeftTest.java
+assert left( "abcdef", 3 ) == "abc" : "testLeft";
+assert "abcdef".left( 3 ) == "abc" : "testLeftMember";

@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayToListTest.java
+assert arrayToList( ["a","b","c"] ) == "a,b,c" : "testToList";
+assert arrayToList( ["a","b"], "|" ) == "a|b" : "testToList delim";
+assert ["a","b","c"].toList() == "a,b,c" : "testToListMember";

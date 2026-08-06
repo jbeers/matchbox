@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayFindAllTest.java
+data = [1,2,3,2,1];
+r = arrayFindAll( data, 2 );
+assert r[1] == 2 : "testFindAll first";
+assert r[2] == 4 : "testFindAll second";
+r = arrayFindAll( data, function( item ) { return item == 2; } );
+assert arrayLen( r ) == 2 : "testFindAll closure size";
+assert r[1] == 2 : "testFindAll closure first";
+assert r[2] == 4 : "testFindAll closure second";

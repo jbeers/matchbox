@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListCompactTest.java
+list = ",,,a,b,c,d,,,";
+result = listCompact( list );
+assert result == "a,b,c,d" : "testBif";
+result = listCompact( "||a|b||c|d||", "|" );
+assert result == "a|b||c|d" : "testWihDelims";
+result = listCompact( "-and--and-a-and-b-and-c-and-d-and--and-", "-and-", true, true );
+assert result == "a-and-b-and-c-and-d" : "testWihDelimsWhole";

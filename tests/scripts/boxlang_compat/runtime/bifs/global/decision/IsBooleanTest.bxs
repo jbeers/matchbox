@@ -1,0 +1,35 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsBooleanTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+trueValue = isBoolean( true );
+falseValue = isBoolean( false );
+stringTrue = isBoolean( "true" );
+stringFalse = isBoolean( "false" );
+yes = isBoolean( "yes" );
+no = isBoolean( "no" );
+float = isBoolean( 1.1 );
+zero = isBoolean( 0 );
+twentythree = isBoolean( 23 );
+nullValue = isBoolean( null );
+assert trueValue : "testTrueConditions true";
+assert falseValue : "testTrueConditions false";
+assert stringTrue : "testTrueConditions str-true";
+assert stringFalse : "testTrueConditions str-false";
+assert yes : "testTrueConditions yes";
+assert no : "testTrueConditions no";
+assert float : "testTrueConditions float";
+assert zero : "testTrueConditions zero";
+assert twentythree : "testTrueConditions twenty-three";
+assert nullValue == false : "testTrueConditions null";
+
+// testFalseConditions
+array = isBoolean( [ true, false ] );
+string = isBoolean( "randomstring" );
+struct = isBoolean( {} );
+assert array == false : "testFalseConditions array";
+assert string == false : "testFalseConditions string";
+assert struct == false : "testFalseConditions struct";

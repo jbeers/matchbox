@@ -1,0 +1,31 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ExecutorDeleteTest.java
+
+// testDeleteExecutor
+executorNew( "test-delete", "cached" );
+result = executorHas( "test-delete" );
+executorDelete( "test-delete" );
+result2 = executorHas( "test-delete" );
+assert result : "testDeleteExecutor exists";
+assert result2 == false : "testDeleteExecutor deleted";
+
+// testDeleteRunningExecutor
+executor = executorNew( "test-delete-running", "cached" );
+executor.submit( () => {
+    sleep( 100 );
+    return 42;
+} );
+result = executorDelete( "test-delete-running" );
+result2 = executorHas( "test-delete-running" );
+assert result : "testDeleteRunningExecutor deleted";
+assert result2 == false : "testDeleteRunningExecutor absent";
+
+// testDeleteNonExistentExecutor
+result = executorDelete( "non-existent-executor" );
+assert result : "testDeleteNonExistentExecutor";
+
+// testDeleteAndRecreateExecutor
+executorNew( "test-recreate", "fixed" );
+executorDelete( "test-recreate" );
+executorNew( "test-recreate", "cached" );
+result = executorHas( "test-recreate" );
+assert result : "testDeleteAndRecreateExecutor";

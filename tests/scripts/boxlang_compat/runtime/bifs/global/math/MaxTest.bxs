@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/MaxTest.java
+assert max( 1, 2 ) == 2 : "testMax 1-2";
+assert max( -1, -2 ) == -1 : "testMax -1--2";
+assert max( -2, 2 ) == 2 : "testMax -2-2";
+assert max( 1, 2.3 ) == 2.3 : "testMax 1-2.3";

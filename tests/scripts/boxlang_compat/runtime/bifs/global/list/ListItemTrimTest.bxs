@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListItemTrimTest.java
+list = " a , b , c ";
+result = listItemTrim( list );
+assert result == "a,b,c" : "testItemTrim default";
+list = " a : b : c ";
+result = listItemTrim( list, ":" );
+assert result == "a:b:c" : "testItemTrim colon";

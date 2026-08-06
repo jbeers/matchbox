@@ -1,0 +1,33 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/BitwiseOperatorsTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: the `b& b| b^ b<< b>> b>>>` spellings are supported by MatchBox; the
+// `b~` complement operator is not parsed, so this file fails (red).
+// ---------------------------------------------------------------------------
+
+// testBitwiseComplement
+assert ( b~ 6 ) == -7 : "testBitwiseComplement";
+
+// testBitwiseComplementVariable
+number2 = 6;
+assert ( b~ number2 ) == -7 : "testBitwiseComplementVariable";
+
+// testBitwiseAnd
+assert ( 6 b& 5 ) == 4 : "testBitwiseAnd";
+
+// testBitwiseOr
+assert ( 6 b| 5 ) == 7 : "testBitwiseOr";
+
+// testBitwiseXor
+assert ( 6 b^ 5 ) == 3 : "testBitwiseXor";
+
+// testBitwiseSignedLeftShift
+assert ( -12 b<< 2 ) == -48 : "testBitwiseSignedLeftShift";
+
+// testBitwiseSignedRightShift
+assert ( -12 b>> 2 ) == -3 : "testBitwiseSignedRightShift";
+
+// testBitwiseUnsignedRightShift
+assert ( -12 b>>> 2 ) == 1073741821 : "testBitwiseUnsignedRightShift";

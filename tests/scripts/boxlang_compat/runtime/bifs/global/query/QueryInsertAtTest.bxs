@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryInsertAtTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 3 } );
+queryInsertAt( q, 2, { a: 2 } );
+assert queryGetCell( q, "a", 2 ) == 2 : "testInsertAt value";
+assert queryRecordCount( q ) == 3 : "testInsertAt count";

@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryDeleteRowTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+queryDeleteRow( q, 1 );
+assert queryRecordCount( q ) == 1 : "testDeleteRow count";
+assert queryGetCell( q, "a", 1 ) == 2 : "testDeleteRow value";

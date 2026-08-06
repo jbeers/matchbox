@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryColumnListTest.java
+q = queryNew( "a,b,c" );
+assert queryColumnList( q ) == "a,b,c" : "testColumnList";

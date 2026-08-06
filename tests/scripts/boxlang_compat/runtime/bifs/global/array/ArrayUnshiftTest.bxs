@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayUnshiftTest.java
+a = ["b"];
+arrayUnshift( a, "a" );
+assert a[1] == "a" : "testUnshift value";
+assert arrayLen( a ) == 2 : "testUnshift size";

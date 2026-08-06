@@ -1,0 +1,19 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLNewTest.java
+// ---------------------------------------------------------------------------
+
+// testBif
+result = xmlNew();
+assert isXML( result ) : "testBif result-type";
+assert find( '<?xml version="1.0" encoding="UTF-8" standalone="no"?>', toString( result ) ) > 0 : "testBif declaration";
+assert result.size() == 0 : "testBif size";
+
+// testUsability
+rootNode = xmlNew();
+newNode = xmlElemNew( rootNode, "foo" );
+newNode.xmlAttributes[ "nil" ] = "true";
+arrayAppend( rootNode.xmlChildren, newNode );
+result = structKeyExists( rootNode, "foo" );
+result2 = structKeyExists( rootNode.foo.xmlAttributes, "nil" ) && ( rootNode.foo.xmlAttributes.nil == "true" );
+assert result : "testUsability root-child";
+assert result2 : "testUsability attribute";

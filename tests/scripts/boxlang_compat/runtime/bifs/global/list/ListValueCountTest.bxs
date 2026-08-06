@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListValueCountTest.java
+list = "1,2,3,2";
+assert listValueCount( list, "2" ) == 2 : "testValueCount 2";
+assert listValueCount( list, "9" ) == 0 : "testValueCount missing";
+assert listValueCountNoCase( "A,B,a", "a" ) == 2 : "testValueCountNoCase";

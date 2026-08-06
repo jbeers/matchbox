@@ -1,0 +1,8 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/types/XMLTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only / internal BoxLang behavior, hard
+// requirement): the JVM test builds an XML DOM in Java and drives the XML type API; MatchBox has no XML type yet. No BoxLang source is evaluated, so there is nothing
+// to transfer as a black-box script. Revisit when the underlying type lands
+// in MatchBox and its behavior is observable from BoxLang source.
+// ---------------------------------------------------------------------------

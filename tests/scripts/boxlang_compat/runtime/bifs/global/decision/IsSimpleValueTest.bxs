@@ -1,0 +1,32 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsSimpleValueTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the omitted cases
+// construct Java Key, HashMap, and String objects.
+
+// testTrueConditions
+aBool = isSimpleValue( true );
+aString = isSimpleValue( "Michael" );
+anInt = isSimpleValue( 12345 );
+aFloat = isSimpleValue( 3.45 );
+aDate = isSimpleValue( value = now() );
+aUUID = isSimpleValue( value = createUUID() );
+assert aBool : "testTrueConditions bool";
+assert aString : "testTrueConditions string";
+assert anInt : "testTrueConditions int";
+assert aFloat : "testTrueConditions float";
+assert aDate : "testTrueConditions date";
+assert aUUID : "testTrueConditions uuid";
+
+// testFalseConditions
+aStruct = isSimpleValue( {} );
+anArray = isSimpleValue( [] );
+aQuery = isSimpleValue( queryNew( "id" ) );
+aNull = isSimpleValue( value = nullValue() );
+assert aStruct == false : "testFalseConditions struct";
+assert anArray == false : "testFalseConditions array";
+assert aQuery == false : "testFalseConditions query";
+assert aNull == false : "testFalseConditions null";

@@ -1,0 +1,43 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsDateTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+aDateStringWithDashes = isDate( "2023-12-21" );
+aDateStringWithPeriods = isDate( "2024.01.01" );
+earlyDate = isDate( "1100-12-21" );
+leapDay = isDate( "2024-02-29" );
+anISO8601String = isDate( "2023-12-21T14:22:32Z" );
+assert aDateStringWithDashes : "testTrueConditions dashes";
+assert aDateStringWithPeriods : "testTrueConditions periods";
+assert earlyDate : "testTrueConditions early";
+assert leapDay : "testTrueConditions leap-day";
+assert anISO8601String : "testTrueConditions iso8601";
+
+// testDateFunctionCalls
+aNowCall = isDate( now() );
+aCreateDateTimeCall = isDateObject( createDateTime( 2024, 01, 22, 7, 15, 1, 999 ) );
+assert aNowCall : "testDateFunctionCalls now";
+assert aCreateDateTimeCall : "testDateFunctionCalls createDateTime";
+
+// testFalseConditions
+aString = isDate( "abc" );
+aNumericString = isDate( "2023" );
+anInteger = isDate( 2024 );
+aFloat = isDate( 2024.01 );
+gibberishAfterValidDate = isDate( "2023-12-21xyz" );
+aTimespan = isDate( createTimespan( 0, 24, 0, 0 ) );
+assert aString == false : "testFalseConditions string";
+assert aNumericString == false : "testFalseConditions numeric-string";
+assert anInteger == false : "testFalseConditions integer";
+assert aFloat == false : "testFalseConditions float";
+assert gibberishAfterValidDate == false : "testFalseConditions gibberish";
+assert aTimespan == false : "testFalseConditions timespan";
+
+// testIsDateEmptyOrNull
+result = isDate( "" );
+result2 = isDate( nullValue() );
+assert result == false : "testIsDateEmptyOrNull empty";
+assert result2 == false : "testIsDateEmptyOrNull null";

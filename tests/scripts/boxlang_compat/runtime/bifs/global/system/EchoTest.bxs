@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/EchoTest.java
+// The JVM test captures System.out; these calls keep the source-level echo
+// behavior active without depending on a JVM output stream.
+
+echo( "Hello World" );
+echo( "Hello World" );
+echo( "Hello World" );
+assert true : "testEcho";

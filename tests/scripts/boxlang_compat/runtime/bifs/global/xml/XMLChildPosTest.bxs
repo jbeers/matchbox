@@ -1,0 +1,41 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLChildPosTest.java
+// ---------------------------------------------------------------------------
+
+// testCanFileAChild
+xml = xmlParse( '<employee>
+    <!-- A list of employees -->
+    <name EmpType="Regular">
+    <first>Almanzo</first>
+    <last>Wilder</last>
+    <Status>Medical Absence</Status>
+    <Status>Extended Leave</Status>
+    </name>
+    <name EmpType="Contract">
+    <first>Laura</first>
+    <last>Ingalls</last>
+    </name>
+    </employee>' );
+result = xmlChildPos( xml.employee.name[1], "Status", 2 );
+result2 = xmlChildPos( xml.employee.name[1], "Status", 20 );
+assert result == 4 : "testCanFileAChild result";
+assert result2 == -1 : "testCanFileAChild missing";
+
+// testCanFileAChildMember
+xml = xmlParse( '<employee>
+    <!-- A list of employees -->
+    <name EmpType="Regular">
+    <first>Almanzo</first>
+    <last>Wilder</last>
+    <Status>Medical Absence</Status>
+    <Status>Extended Leave</Status>
+    </name>
+    <name EmpType="Contract">
+    <first>Laura</first>
+    <last>Ingalls</last>
+    </name>
+    </employee>' );
+result = xml.employee.name[1].childPos( "Status", 2 );
+result2 = xml.employee.name[1].childPos( "Status", 20 );
+assert result == 4 : "testCanFileAChildMember result";
+assert result2 == -1 : "testCanFileAChildMember missing";

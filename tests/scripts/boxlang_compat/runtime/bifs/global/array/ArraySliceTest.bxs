@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySliceTest.java
+r = arraySlice( [1,2,3,4,5], 2, 3 );
+assert arrayLen( r ) == 2 : "testSlice size";
+assert r[1] == 2 : "testSlice 1";
+assert r[2] == 3 : "testSlice 2";

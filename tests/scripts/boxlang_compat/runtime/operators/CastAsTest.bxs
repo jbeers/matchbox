@@ -1,0 +1,14 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/CastAsTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement):
+// Every @Test method asserts the runtime Java class of the cast result via
+// `.getClass().getName()` (e.g. java.lang.Float, java.math.BigDecimal, char,
+// byte[], Class<?> instances). Casting is Java reflection/type-identity
+// verification on CastAs.invoke() and cannot be observed that way from BoxLang
+// source. When MatchBox gains cast support, transcribe as value-level checks:
+//
+//   assert ( cast( "", "null" ) == null ) : "testItCanCastToNull";
+//   assert ( cast( "5", "integer" ) == 5 ) : "testItCanCastToInt";
+//   assert ( cast( "2D16E20C-91FA-4B3C-9233-C6398852077A", "GUID" ) == "2D16E20C-91FA-4B3C-9233-C6398852077A" ) : "testItCanCastToGUID";
+//

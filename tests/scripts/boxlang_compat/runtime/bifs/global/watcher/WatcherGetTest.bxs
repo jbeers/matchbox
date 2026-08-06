@@ -1,0 +1,16 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherGetTest.java
+
+// testWatcherGet
+watcherShutdownAll( false );
+created = watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+result = watcherGet( "myWatcher" );
+assert result == created : "testWatcherGet";
+
+// testWatcherGetThrowsForMissingWatcher
+watcherShutdownAll( false );
+try {
+    result = watcherGet( "does-not-exist" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testWatcherGetThrowsForMissingWatcher";

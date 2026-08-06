@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayLastTest.java
+assert arrayLast( ["a","b"] ) == "b" : "testLast";
+assert ["a","b"].last() == "b" : "testLastMember";
+assert arrayLast( [], "default" ) == "default" : "testLastDefault";
+assert [].last( "default" ) == "default" : "testLastMemberDefault";

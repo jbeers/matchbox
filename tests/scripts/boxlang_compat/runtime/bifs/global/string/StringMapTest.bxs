@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringMapTest.java
+r = stringMap( "abc", ( ch ) => ucase( ch ) );
+assert r == "ABC" : "testMap";

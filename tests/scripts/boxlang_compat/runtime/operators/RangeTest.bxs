@@ -1,0 +1,45 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/RangeTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only / internal type behavior): the bulk of
+// RangeTest exercises the internal Java Range API (IRangeable, SteppableInt,
+// contains/step/desc/asString/isBounded/equality/inner-range containment,
+// DateTime ranges and Java streams). Only the language-observable range
+// behavior is transcribed below.
+//
+// Also skipped today (not yet expressible in MatchBox):
+//   - descending iteration (5..1) - only arrays/structs are iterable
+//   - numeric-string ranges ("1".."5") - range bounds must be numbers
+//   - char ranges ("a".."e") - range bounds must be numbers
+
+// testAscendingIntRange
+r = 1..5;
+count = 0;
+sum = 0;
+for ( v in r ) {
+    count = count + 1;
+    sum = sum + v;
+}
+assert count == 5 : "testAscendingIntRange count";
+assert sum == 15 : "testAscendingIntRange values";
+
+// testSingleElementRange
+r = 5..5;
+count = 0;
+for ( v in r ) {
+    count = count + 1;
+}
+assert count == 1 : "testSingleElementRange count";
+
+// testIntRangeContains
+r = 1..10;
+hasFive = false;
+for ( v in r ) {
+    if ( v == 5 ) {
+        hasFive = true;
+    }
+}
+assert hasFive : "testIntRangeContains 5";

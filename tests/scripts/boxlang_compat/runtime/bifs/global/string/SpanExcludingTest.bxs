@@ -1,0 +1,2 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/SpanExcludingTest.java
+assert spanExcluding( "abcXYZ", "XYZ" ) == "abc" : "testSpanExcluding";

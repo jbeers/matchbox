@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherExistsTest.java
+
+// testWatcherExistsTrue
+watcherShutdownAll( false );
+watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+result = watcherExists( "myWatcher" );
+assert result : "testWatcherExistsTrue";
+
+// testWatcherExistsFalse
+watcherShutdownAll( false );
+result = watcherExists( "does-not-exist" );
+assert result == false : "testWatcherExistsFalse";

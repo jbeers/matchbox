@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringEveryTest.java
+r = stringEvery( "abc", ( ch ) => ch == "a" );
+assert r == false : "testEveryFalse";
+r = stringEvery( "abc", ( ch ) => ch != "z" );
+assert r : "testEveryTrue";

@@ -1,0 +1,43 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/casters/StringCasterTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no `cast` BIF yet, so this file fails (red) until it
+// lands. Transcribed via `cast( value, "string" )`.
+// ---------------------------------------------------------------------------
+
+// testItCanCastAString
+assert ( cast( "Brad", "string" ) == "Brad" ) : "testItCanCastAString";
+
+// testItCanNotCastANull
+threw = false;
+try {
+    x = cast( null, "string" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanNotCastANull";
+
+// testItCanCastABoolean
+assert ( cast( true, "string" ) == "true" ) : "testItCanCastABoolean";
+
+// testItCanCastAnInt
+assert ( cast( 0, "string" ) == "0" ) : "testItCanCastAnInt 0";
+assert ( cast( 5, "string" ) == "5" ) : "testItCanCastAnInt 5";
+assert ( cast( -5, "string" ) == "-5" ) : "testItCanCastAnInt -5";
+assert ( cast( 9999999, "string" ) == "9999999" ) : "testItCanCastAnInt 9999999";
+assert ( cast( -9999999, "string" ) == "-9999999" ) : "testItCanCastAnInt -9999999";
+
+// testItCanCastADouble
+assert ( cast( 5.0, "string" ) == "5" ) : "testItCanCastADouble 5.0";
+assert ( cast( 5.1, "string" ) == "5.1" ) : "testItCanCastADouble 5.1";
+assert ( cast( 5.2, "string" ) == "5.2" ) : "testItCanCastADouble 5.2";
+assert ( cast( 5.3, "string" ) == "5.3" ) : "testItCanCastADouble 5.3";
+assert ( cast( 5.4, "string" ) == "5.4" ) : "testItCanCastADouble 5.4";
+assert ( cast( 5.5, "string" ) == "5.5" ) : "testItCanCastADouble 5.5";
+assert ( cast( 5.6, "string" ) == "5.6" ) : "testItCanCastADouble 5.6";
+assert ( cast( 5.7, "string" ) == "5.7" ) : "testItCanCastADouble 5.7";
+assert ( cast( 5.8, "string" ) == "5.8" ) : "testItCanCastADouble 5.8";
+assert ( cast( 5.9, "string" ) == "5.9" ) : "testItCanCastADouble 5.9";
+assert ( cast( 1.2345678901234567, "string" ) == "1.2345678901234567" ) : "testItCanCastADouble precise";

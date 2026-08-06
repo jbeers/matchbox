@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayInsertAtTest.java
+arr = ["a","b","c"];
+arrayInsertAt( arr, 2, "z" );
+assert arrayLen( arr ) == 4 : "testInsertAt size";
+assert arr[2] == "z" : "testInsertAt value";
+assert arr[3] == "b" : "testInsertAt shifted";

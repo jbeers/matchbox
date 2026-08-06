@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/ContractPathTest.java
+expandedPath = expandPath( "/brad" );
+result = contractPath( expandedPath );
+assert result == "/brad" : "testContractPath absolute";
+result = contractPath( expandPath( "." ) );
+assert result == "." : "testContractPath current-directory";

@@ -1,0 +1,34 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/SetLocaleTest.java
+
+// testBif
+result = setLocale( "en-US" );
+assert result == "English (United States)" : "testBif result";
+assert getLocale() == "English (US)" : "testBif current-locale";
+
+// testBifCommon
+result = setLocale( "United States" );
+assert result == "English (United States)" : "testBifCommon result";
+assert getLocale() == "English (US)" : "testBifCommon current-locale";
+
+// testBifAlias
+result = setLocale( "english (us)" );
+assert result == "English (United States)" : "testBifAlias result";
+assert getLocale() == "English (US)" : "testBifAlias current-locale";
+
+// testBifError
+threw = false;
+try {
+    setLocale( "blah-Blah" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBifError";
+
+// testBifClear
+setLocale( "es_SV" );
+result = getLocale();
+clearLocale();
+result2 = getLocale();
+assert result != null : "testBifClear set-locale";
+assert result2 != null : "testBifClear default-locale";
+assert result != result2 : "testBifClear changed-locale";

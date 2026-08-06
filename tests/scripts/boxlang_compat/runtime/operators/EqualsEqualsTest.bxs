@@ -1,0 +1,27 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/EqualsEqualsTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanCompareTimespans uses java.time.Duration and
+// testItCanCompareSQLTime constructs java.sql types.
+
+// testItCanCompareStrings
+assert ( "Brad" == "Brad" ) : "testItCanCompareStrings Brad-Brad";
+assert ( "Brad" == "BRAD" ) : "testItCanCompareStrings Brad-BRAD";
+
+// testItCanCompareNumbers
+assert ( 1 == 1 ) : "testItCanCompareNumbers 1-1";
+assert ( 1.5 == 1.5 ) : "testItCanCompareNumbers 1.5-1.5";
+
+// testItCanCompareStringsAsNumbers
+assert ( "1" == "1" ) : "testItCanCompareStringsAsNumbers 1-1";
+assert ( "1.5" == "1.5" ) : "testItCanCompareStringsAsNumbers 1.5-1.5";
+// JVM compares numeric strings numerically, so 1.5 == 1.500.
+assert ( "1.5" == "1.500" ) : "testItCanCompareStringsAsNumbers 1.5-1.500";
+
+// testItCanCompareNulls
+assert ( null == null ) : "testItCanCompareNulls null-null";
+assert ( "brad" == null ) == false : "testItCanCompareNulls brad-null";
+assert ( null == "brad" ) == false : "testItCanCompareNulls null-brad";

@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderReverseTest.java
+// testReverseHeadless
+sb = sb{"abc"};
+stringBuilderReverse( sb );
+result = sb.toString();
+assert result == "cba" : "testReverseHeadless";
+
+// testReverseMember
+sb = sb{"abc"};
+sb.reverse();
+result = sb.toString();
+assert result == "cba" : "testReverseMember";

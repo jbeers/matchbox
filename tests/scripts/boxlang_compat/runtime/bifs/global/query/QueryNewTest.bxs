@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryNewTest.java
+q = queryNew( "a,b", "integer,varchar" );
+assert isQuery( q ) : "testNew";
+assert queryRecordCount( q ) == 0 : "testNew empty";

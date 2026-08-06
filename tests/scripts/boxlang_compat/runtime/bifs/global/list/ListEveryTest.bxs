@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListEveryTest.java
+r = listEvery( "2,4,6", function( item ) { return item % 2 == 0; } );
+assert r : "testUseProvidedUDF all-even";
+r = listEvery( "2,3,4", function( item ) { return item % 2 == 0; } );
+assert r == false : "testReturnEarlyOnFalse";

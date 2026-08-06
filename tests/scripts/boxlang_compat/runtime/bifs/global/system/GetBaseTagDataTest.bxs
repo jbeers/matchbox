@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBaseTagDataTest.java
+// The custom-tag fixture and Java IStruct assertions are not available here;
+// retain the source-level BIF call as a behavior-gap test.
+
+result = getBaseTagData( "missingTag" );
+assert isNull( result ) : "testGetTagData missing-tag";

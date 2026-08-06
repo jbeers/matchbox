@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/FormatBaseNTest.java
+// testItReturnsFormatBaseN
+assert formatBaseN( 10, 2 ) == "1010" : "testItReturnsFormatBaseN 10b2";
+assert formatBaseN( 1024, 16 ) == "400" : "testItReturnsFormatBaseN 1024b16";
+assert formatBaseN( 10.75, 2 ) == "1010" : "testItReturnsFormatBaseN 10.75b2";
+// testItThrowsExceptionForBadRadix
+threw = false;
+try { x = formatBaseN( 10, 1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrowsExceptionForBadRadix";

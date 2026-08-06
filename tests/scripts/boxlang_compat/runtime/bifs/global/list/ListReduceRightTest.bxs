@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListReduceRightTest.java
+result = listReduceRight( "a,b,c", function( acc, item ) { return acc & item; }, "" );
+assert result == "cba" : "testReduceRight";
+result = listReduceRight( "1|2|3|4|5", function( acc, item ) { return acc + item; }, 0, "|" );
+assert result == 15 : "testReduceRightDelimiter";
+result = listReduceRight( "1,2,3,4,5", ( acc, item ) => acc + item, 0 );
+assert result == 15 : "testReduceRightArrow";

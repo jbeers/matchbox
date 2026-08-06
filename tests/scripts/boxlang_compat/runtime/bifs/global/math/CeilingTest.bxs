@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/CeilingTest.java
+// testItReturnsCeilingValue
+assert ceiling( 1.1 ) == 2 : "testItReturnsCeilingValue 1.1";
+assert ceiling( 0.5 ) == 1 : "testItReturnsCeilingValue 0.5";
+// testItReturnsCeilingValueUsingMemberFunction
+assert ( 1.1 ).ceiling() == 2 : "testItReturnsCeilingMember 1.1";
+assert ( 0.5 ).ceiling() == 1 : "testItReturnsCeilingMember 0.5";

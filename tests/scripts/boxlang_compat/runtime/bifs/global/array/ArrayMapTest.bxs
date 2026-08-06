@@ -1,0 +1,19 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayMapTest.java
+r = arrayMap( [1,2,3], function( item ) { return item * 2; } );
+assert r[1] == 2 : "testMap 1";
+assert r[2] == 4 : "testMap 2";
+assert r[3] == 6 : "testMap 3";
+
+// testParallelMapping
+r = arrayMap( ["red","blue","green"], function( item, i ) { return i; }, true );
+assert r[1] == 1 : "testParallelMapping 1";
+assert r[3] == 3 : "testParallelMapping 3";
+
+// testParallelMappingWithMaxThreads
+r = arrayMap( ["red","blue","green","yellow"], function( item, i ) { return i; }, true, 2 );
+assert r[4] == 4 : "testParallelMappingWithMaxThreads";
+
+// testParallelMappingWithVirtualThreads
+r = arrayMap( array=["red","blue"], callback=function( item, i ) { return i; }, parallel=true, virtual=true );
+assert r[1] == 1 : "testParallelMappingWithVirtualThreads 1";
+assert r[2] == 2 : "testParallelMappingWithVirtualThreads 2";

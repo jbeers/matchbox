@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderClearTest.java
+// testClearHeadless
+sb = sb{"Hello"};
+stringBuilderClear( sb );
+result = sb.toString();
+assert result == "" : "testClearHeadless";
+
+// testClearMember
+sb = sb{"Hello"};
+sb.clear();
+result = sb.toString();
+assert result == "" : "testClearMember";

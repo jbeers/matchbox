@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileDeleteTest.java
+p = getTempDirectory() & "/matchbox-del-test.txt";
+fileWrite( p, "x" );
+fileDelete( p );
+assert fileExists( p ) == false : "testDelete";

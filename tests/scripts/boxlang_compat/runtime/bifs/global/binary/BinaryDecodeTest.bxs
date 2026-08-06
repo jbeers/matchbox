@@ -1,0 +1,21 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/binary/BinaryDecodeTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// The JVM asserts the decoded value is a byte[]; observed here by decoding
+// back to the source string with toString().
+// ---------------------------------------------------------------------------
+
+// testBif
+binaryString = "54686973206973206120737472696e67";
+result = binaryDecode( binaryString, "hex" );
+assert toString( result ) == "This is a string" : "testBif hex";
+binaryString = "VGhpcyBpcyBhIHN0cmluZw==";
+result = binaryDecode( binaryString, "base64" );
+assert toString( result ) == "This is a string" : "testBif base64";
+
+// testBinaryDecodeJWT
+base64String = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9====";
+result = binaryDecode( base64String, "base64" );
+assert isBinary( result ) : "testBinaryDecodeJWT";

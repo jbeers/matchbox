@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetTempDirectoryTest.java
+
+result = getTempDirectory();
+assert len( result ) > 0 : "testGetTempDirectory non-empty";
+assert directoryExists( result ) : "testGetTempDirectory directory";
+lastCharacter = right( result, 1 );
+assert lastCharacter == "/" || lastCharacter == "\\" : "testGetTempDirectory trailing-separator";

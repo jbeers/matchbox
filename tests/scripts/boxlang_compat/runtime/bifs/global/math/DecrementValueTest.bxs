@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/DecrementValueTest.java
+// testItDecrementsIntegerPart
+assert decrementValue( 1.8 ) == 0.8 : "testItDecrements 1.8";
+assert decrementValue( -2.8 ) == -3.8 : "testItDecrements -2.8";
+assert decrementValue( 0 ) == -1 : "testItDecrements zero";
+// testItDecrementsIntegerPartMemberFunction
+assert ( 1.8 ).decrementValue() == 0.8 : "testItDecrementsMember 1.8";
+assert ( -2.8 ).decrementValue() == -3.8 : "testItDecrementsMember -2.8";
+assert ( 0 ).decrementValue() == -1 : "testItDecrementsMember zero";

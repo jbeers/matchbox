@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/InputBaseNTest.java
+// testItCanConvertStringsToBaseN
+assert inputBaseN( "1010", 2 ) == 10 : "testItCanConvert 1010b2";
+assert inputBaseN( "3FF", 16 ) == 1023 : "testItCanConvert 3FFb16";
+assert inputBaseN( "125", 10 ) == 125 : "testItCanConvert 125b10";
+// testItCanThrowAnErrorIfTheRadixIsLessThan2AndGreaterThan36
+threw = false;
+try { x = inputBaseN( "1010", 1 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrows radix-1";
+threw = false;
+try { x = inputBaseN( "1010", 37 ); } catch ( e ) { threw = true; }
+assert threw : "testItThrows radix-37";

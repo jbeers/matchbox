@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryPrependTest.java
+q1 = queryNew( "a" );
+q2 = queryNew( "a" );
+queryAddRow( q1, { a: 1 } );
+queryAddRow( q2, { a: 2 } );
+queryPrepend( q1, q2 );
+assert queryRecordCount( q1 ) == 2 : "testPrepend count";
+assert queryGetCell( q1, "a", 1 ) == 2 : "testPrepend first";

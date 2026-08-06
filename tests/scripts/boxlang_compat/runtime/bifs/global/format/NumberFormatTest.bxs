@@ -1,0 +1,80 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/format/NumberFormatTest.java
+
+// testDefault
+assert numberFormat( 12345 ) == "12,345" : "testDefault";
+
+// testBif
+assert numberFormat( 12345, "9.99" ) == "12345.00" : "testBif 9.99";
+assert numberFormat( 12345, "_.__" ) == "12345" : "testBif underscore-mask";
+assert numberFormat( 12345, "9.999" ) == "12345.000" : "testBif 9.999";
+assert numberFormat( round( 110.647747663711, 1 ), "_,.0" ) == "110.6" : "testBif rounded";
+assert numberFormat( 123456789, "_$,9.99" ) == "$123,456,789.00" : "testBif currency-grouped";
+assert numberFormat( 432342, "$,.00" ) == "$432,342.00" : "testBif currency";
+assert numberFormat( 1.2, "9999.0" ) == "1.2" : "testBif one-point-two";
+assert numberFormat( 0.2, "9999.0" ) == "0.2" : "testBif zero-point-two";
+
+// testBifCommonFormat
+assert numberFormat( -12345, "()" ) == "(12345)" : "testBifCommonFormat negative-parentheses";
+assert numberFormat( 12345, "()" ) == "12345" : "testBifCommonFormat positive-parentheses";
+assert numberFormat( 12345, "_,9" ) == "12345.000000000" : "testBifCommonFormat optional-decimals";
+assert numberFormat( 12345, "+" ) == "+12345" : "testBifCommonFormat positive-sign";
+assert numberFormat( -12345, "+" ) == "-12345" : "testBifCommonFormat negative-sign";
+assert numberFormat( 12345, "-" ) == " 12345" : "testBifCommonFormat positive-space";
+assert numberFormat( -12345, "-" ) == "-12345" : "testBifCommonFormat negative-space";
+assert numberFormat( 12345, "$" ) == "$12,345.00" : "testBifCommonFormat dollar";
+assert numberFormat( 12345, "ls$" ) == "$12,345.00" : "testBifCommonFormat local-dollar";
+
+// testBifJustify
+assert numberFormat( 1, "L000" ) == "001" : "testBifJustify left";
+assert numberFormat( 1, "C000" ) == "1" : "testBifJustify center";
+
+// testBifError
+threw = false;
+try {
+    result = numberFormat( "Blah", "0.00" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testBifError";
+
+// testLocaleBif
+assert numberFormat( 12345, "0.00", "German (Austrian)" ) == "12345,00" : "testLocaleBif decimal";
+assert numberFormat( 12345, "_.__", "German (Austrian)" ) == "12345" : "testLocaleBif underscore-mask";
+assert numberFormat( 12345, "9.999", "German (Austrian)" ) == "12345,000" : "testLocaleBif three-decimals";
+assert numberFormat( 12345, "_,__0.00", "German (Austrian)" ) == "12.345,00" : "testLocaleBif grouped";
+
+// testLocaleBifCommonFormat
+assert numberFormat( 12345, "ls$", "German (Austrian)" ) == char( 8364 ) & char( 160 ) & "12.345,00" : "testLocaleBifCommonFormat";
+
+// testLocaleBifError
+threw = false;
+try {
+    result = LSnumberFormat( "Blah", "0.00" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testLocaleBifError";
+
+// testLocaleDefault
+assert LSnumberFormat( 12345 ) == "12,345" : "testLocaleDefault";
+
+// testLeadingZeros
+assert LSnumberFormat( 1 ) == "1" : "testLeadingZeros";
+
+// testEmptyStringAsZero
+assert numberFormat( "" ) == "0" : "testEmptyStringAsZero";
+
+// testEmptyStringAsZerod
+assert numberFormat( 0, "_.00" ) == "0.00" : "testEmptyStringAsZerod";
+
+// testRearrangeIncorrectMaskOrders
+assert numberFormat( 1.99, "_$,.99" ) == "$1.99" : "testRearrangeIncorrectMaskOrders";
+
+// testTrimExtraneousOptionals
+assert numberFormat( 2, "999,999,999" ) == "2" : "testTrimExtraneousOptionals";
+
+// testFixIncorrectThousandsSeparators
+assert numberFormat( 1234, ",9" ) == "1,234" : "testFixIncorrectThousandsSeparators";
+
+// testFixMalformedPattern
+assert numberFormat( 1234, ",.99" ) == "1,234.00" : "testFixMalformedPattern";

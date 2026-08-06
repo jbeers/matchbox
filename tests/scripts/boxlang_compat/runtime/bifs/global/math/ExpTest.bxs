@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/ExpTest.java
+// testItReturnsExponent
+assert abs( exp( 1 ) - 2.718281828459045 ) < 0.0000001 : "testItReturnsExponent one";
+assert abs( exp( 0.5 ) - 1.6487212707001282 ) < 0.0000001 : "testItReturnsExponent half";
+// testItReturnsExponentUsingMemberFunction
+assert abs( ( 1 ).exp() - 2.718281828459045 ) < 0.0000001 : "testItReturnsExponentMember one";
+assert abs( ( 0.5 ).exp() - 1.6487212707001282 ) < 0.0000001 : "testItReturnsExponentMember half";

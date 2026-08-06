@@ -1,0 +1,7 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stream/ToBXStructTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test calls
+// `.stream().toBXStruct()`, requiring Java Stream interop MatchBox does not
+// provide.
+// ---------------------------------------------------------------------------

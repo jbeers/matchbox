@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/GetDirectoryFromPathTest.java
+r = getDirectoryFromPath( "/foo/bar/file.txt" );
+assert r == "/foo/bar/" : "testGetDirectoryFromPath";

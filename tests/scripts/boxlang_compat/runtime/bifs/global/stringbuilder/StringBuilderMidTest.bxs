@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderMidTest.java
+// testMidHeadless
+sb = sb{"The quick brown fox"};
+result = stringBuilderMid( sb, 5, 5 );
+assert result == "quick" : "testMidHeadless";
+
+// testMidMemberCountOptional
+sb = sb{"abcdef"};
+result = sb.mid( 4 );
+assert result == "def" : "testMidMemberCountOptional";

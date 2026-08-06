@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/XORTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanXORBooleans
+assert ( true xor false ) : "testItCanXORBooleans t-f";
+assert ( false xor true ) : "testItCanXORBooleans f-t";
+assert ( false xor false ) == false : "testItCanXORBooleans f-f";
+assert ( true xor true ) == false : "testItCanXORBooleans t-t";
+
+// testItCanXORNumbers
+assert ( 1 xor 0 ) : "testItCanXORNumbers 1-0";
+assert ( 0 xor 1 ) : "testItCanXORNumbers 0-1";
+assert ( 0 xor 0 ) == false : "testItCanXORNumbers 0-0";
+assert ( 1 xor 1 ) == false : "testItCanXORNumbers 1-1";
+
+// testItCanXORStrings
+assert ( "true" xor "false" ) : "testItCanXORStrings t-f";
+assert ( "false" xor "true" ) : "testItCanXORStrings f-t";
+assert ( "false" xor "false" ) == false : "testItCanXORStrings f-f";
+assert ( "true" xor "true" ) == false : "testItCanXORStrings t-t";

@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/ContainsTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanFindStringInString
+assert ( "BradWood" contains "Wood" ) : "testItCanFindStringInString Wood";
+assert ( "BradWood" contains "wOOD" ) : "testItCanFindStringInString wOOD-ci";
+assert ( "Luis" contains "Wood" ) == false : "testItCanFindStringInString notfound";
+
+// testItCanFindNumberInString
+assert ( "Brad is 43 years old." contains 43 ) : "testItCanFindNumberInString 43";
+assert ( "Brad is 43 years old." contains 82 ) == false : "testItCanFindNumberInString 82";
+
+// testItCanFindCharInString
+// JVM uses char literals ('F', 'f'); transcribed as single-char strings.
+assert ( "ABCDEFG" contains "F" ) : "testItCanFindCharInString F";
+assert ( "ABCDEFG" contains "f" ) : "testItCanFindCharInString f-ci";
+
+// testItCanFindNumberInNumber
+assert ( 12345 contains 3 ) : "testItCanFindNumberInNumber 3";
+assert ( 12345 contains 9 ) == false : "testItCanFindNumberInNumber 9";

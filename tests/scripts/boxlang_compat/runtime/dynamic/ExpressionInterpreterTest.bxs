@@ -1,0 +1,9 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/ExpressionInterpreterTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only / internal BoxLang behavior, hard
+// requirement): the JVM test exercises the internal Java ExpressionInterpreterTest API directly
+// (monadic Attempt, ExpressionInterpreter, functional-interface interop, the
+// Referencer resolver). No BoxLang source is evaluated, so there is nothing
+// to transfer as a black-box script.
+// ---------------------------------------------------------------------------

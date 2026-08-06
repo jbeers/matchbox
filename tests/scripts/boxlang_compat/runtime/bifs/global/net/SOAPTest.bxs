@@ -1,0 +1,67 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/net/SOAPTest.java
+
+// The JVM fixture is the local calculator WSDL used by SOAPTest.setUpAll().
+calculatorWsdlUrl = "file://" & expandPath( "../BoxLang/src/test/resources/wsdl/calculator.wsdl" );
+
+// testSoapClientCreation
+result = soap( calculatorWsdlUrl );
+assert result != null : "testSoapClientCreation non-null";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// inspects the Java BoxSoapClient class name through reflection.
+
+// testSoapClientCaching
+client1 = soap( calculatorWsdlUrl );
+client2 = soap( calculatorWsdlUrl );
+assert client1 != null : "testSoapClientCaching client1";
+assert client2 != null : "testSoapClientCaching client2";
+assert client1 == client2 : "testSoapClientCaching same-instance";
+
+// testSoapOperationInvocation
+ws = soap( calculatorWsdlUrl );
+operations = ws.getOperations();
+hasOperations = arrayLen( operations ) > 0;
+assert hasOperations : "testSoapOperationInvocation operations";
+
+// testFluentConfiguration
+ws = soap( calculatorWsdlUrl );
+result = ws;
+assert result != null : "testFluentConfiguration non-null";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// inspects the Java BoxSoapClient class name through reflection.
+
+// testFluentClientOperationInvocation
+ws = soap( calculatorWsdlUrl );
+operations = ws.getOperations();
+println( operations );
+hasOperations = !isNull( operations );
+assert hasOperations : "testFluentClientOperationInvocation operations";
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test
+// requires a live public WSDL service and network access.
+// testLiveWSDLService
+
+// testClientStatistics
+ws = soap( calculatorWsdlUrl );
+stats = ws.getStatistics();
+hasStats = structKeyExists( stats, "totalInvocations" );
+assert hasStats : "testClientStatistics statistics";
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test
+// invokes a live public WSDL service over the network.
+// testMethodInvocation
+
+// testInvalidWSDL
+invalidWsdlUrl = "file://" & expandPath( "../BoxLang/src/test/resources/wsdl/does-not-exist.wsdl" );
+try {
+    ws = soap( invalidWsdlUrl );
+    hasError = false;
+} catch ( e ) {
+    hasError = true;
+    errorMessage = e.message;
+}
+assert hasError : "testInvalidWSDL throws";
+assert errorMessage contains "WSDL" : "testInvalidWSDL message";
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test
+// creates one client from a live public WSDL service and needs network access.
+// testMultipleWSDLClients

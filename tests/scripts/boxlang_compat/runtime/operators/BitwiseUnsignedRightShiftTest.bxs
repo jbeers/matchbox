@@ -1,0 +1,13 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/BitwiseUnsignedRightShiftTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: `b>>>` parses but does not implement unsigned right-shift for
+// negative operands (returns 0 instead of the unsigned value), so this file
+// fails (red).
+// ---------------------------------------------------------------------------
+
+// testNumbers
+assert ( 12 b>>> 2 ) == 3 : "testNumbers 12-2";
+assert ( -12 b>>> 2 ) == 1073741821 : "testNumbers -12-2";

@@ -1,0 +1,51 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLElemNewTest.java
+// ---------------------------------------------------------------------------
+
+// testBif
+myXML = xmlNew();
+result = xmlElemNew( myXML, "root" );
+myXML.xmlRoot = result;
+myXML.xmlRoot.xmlChildren.append( xmlElemNew( myXML, "myChild" ) )
+    .append( xmlElemNew( myXML, "myChild" ) )
+    .prepend( xmlElemNew( myXML, "mySecondChild" ) );
+assert isXML( result ) : "testBif result-type";
+assert myXML.xmlRoot.xmlName == "root" : "testBif root-name";
+assert myXML.xmlRoot.xmlChildren.len() == 3 : "testBif child-count";
+
+// testBifNamespace
+myXML = xmlNew();
+result = xmlElemNew( myXML, "Envelope", "http://schemas.xmlsoap.org/soap/envelope/" );
+myXML.xmlRoot = result;
+assert isXML( result ) : "testBifNamespace result-type";
+assert myXML.xmlRoot.xmlName == "Envelope" : "testBifNamespace root-name";
+assert myXML.xmlRoot.xmlAttributes.xmlns == "http://schemas.xmlsoap.org/soap/envelope/" : "testBifNamespace namespace";
+
+// testNodeAppend
+xmlObj = xmlParse( '<Ortus></Ortus>' );
+newNode = xmlElemNew( xmlObj.xmlRoot, "BoxLang" );
+xmlObj.xmlRoot.xmlChildren.append( newNode );
+result = xmlObj.xmlRoot.BoxLang.xmlName;
+childCount = xmlObj.xmlRoot.xmlChildren.len();
+assert isString( result ) : "testNodeAppend result-type";
+assert result == "BoxLang" : "testNodeAppend result";
+assert childCount == 1 : "testNodeAppend child-count";
+
+// testNodeReturn
+xmlObj = xmlParse( '<Ortus></Ortus>' );
+newNode = xmlElemNew( xmlObj.xmlRoot, "BoxLang" );
+result = newNode.xmlName;
+assert isString( result ) : "testNodeReturn result-type";
+assert result == "BoxLang" : "testNodeReturn result";
+
+// testNameSpaceTwo
+envelope = xmlParse( '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Header/><soapenv:Body/></soapenv:Envelope>' );
+soapBody = envelope.xmlRoot[ "soapenv:Body" ];
+result = xmlElemNew(
+    soapBody,
+    "http://services.rccl.com/Interfaces/GroupList",
+    "getGroupList"
+);
+assert isXML( result ) : "testNameSpaceTwo result-type";
+
+// testTyping is @Disabled in the JVM test and has no active expectation.

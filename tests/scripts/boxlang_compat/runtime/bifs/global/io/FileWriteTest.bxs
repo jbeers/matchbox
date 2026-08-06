@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileWriteTest.java
+p = getTempDirectory() & "/matchbox-write-test.txt";
+fileWrite( p, "hello" );
+assert fileRead( p ) == "hello" : "testWrite";

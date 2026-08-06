@@ -1,0 +1,87 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/AsyncAllTest.java
+
+// testAsyncAllWithMultipleFutures
+f1 = futureNew( () => {
+    sleep( 1000 );
+    return "Result from f1";
+} );
+f2 = futureNew( () => {
+    sleep( 500 );
+    return "Result from f2";
+} );
+result = asyncAll( [f1, f2] );
+array = result.get();
+assert arrayLen( array ) == 2 : "testAsyncAllWithMultipleFutures size";
+assert array[ 1 ] == "Result from f1" : "testAsyncAllWithMultipleFutures 1";
+assert array[ 2 ] == "Result from f2" : "testAsyncAllWithMultipleFutures 2";
+
+// testAsyncAllWithClosures
+result = asyncAll( [
+    () => {
+        sleep( 1000 );
+        return "Closure Result 1";
+    },
+    () => {
+        sleep( 500 );
+        return "Closure Result 2";
+    }
+] );
+array = result.get();
+assert arrayLen( array ) == 2 : "testAsyncAllWithClosures size";
+assert array[ 1 ] == "Closure Result 1" : "testAsyncAllWithClosures 1";
+assert array[ 2 ] == "Closure Result 2" : "testAsyncAllWithClosures 2";
+
+// testAsyncAllWithLambdas
+result = asyncAll( [
+    () -> {
+        sleep( 1000 );
+        return "Lambda Result 1";
+    },
+    () -> {
+        sleep( 500 );
+        return "Lambda Result 2";
+    }
+] );
+array = result.get();
+assert arrayLen( array ) == 2 : "testAsyncAllWithLambdas size";
+assert array[ 1 ] == "Lambda Result 1" : "testAsyncAllWithLambdas 1";
+assert array[ 2 ] == "Lambda Result 2" : "testAsyncAllWithLambdas 2";
+
+// testAsyncAllWithClosuresAndScopes
+request.value = 2;
+application.value = 2;
+multiply = ( a, b ) => {
+    return a * b;
+};
+result = asyncAll( [
+    () => {
+        var test = multiply( 1, request.value );
+        sleep( 1000 );
+        return "Lambda Result #test#";
+    },
+    () => {
+        var test = multiply( 1, application.value );
+        sleep( 500 );
+        return "Lambda Result #test#";
+    }
+] );
+array = result.get();
+assert arrayLen( array ) == 2 : "testAsyncAllWithClosuresAndScopes size";
+assert array[ 1 ] == "Lambda Result 2" : "testAsyncAllWithClosuresAndScopes 1";
+assert array[ 2 ] == "Lambda Result 2" : "testAsyncAllWithClosuresAndScopes 2";
+
+// testAsyncAllWithLambdasAndCustomExecutor
+result = asyncAll( [
+    () -> {
+        sleep( 1000 );
+        return "Lambda Result 1";
+    },
+    () -> {
+        sleep( 500 );
+        return "Lambda Result 2";
+    }
+], "io-tasks" );
+array = result.get();
+assert arrayLen( array ) == 2 : "testAsyncAllWithLambdasAndCustomExecutor size";
+assert array[ 1 ] == "Lambda Result 1" : "testAsyncAllWithLambdasAndCustomExecutor 1";
+assert array[ 2 ] == "Lambda Result 2" : "testAsyncAllWithLambdasAndCustomExecutor 2";

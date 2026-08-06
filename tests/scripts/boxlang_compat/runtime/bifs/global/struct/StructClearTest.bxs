@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructClearTest.java
+foods = { apple: 1, banana: 2 };
+structClear( foods );
+assert structCount( foods ) == 0 : "testClear";

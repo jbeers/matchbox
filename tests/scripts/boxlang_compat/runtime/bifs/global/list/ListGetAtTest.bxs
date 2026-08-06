@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListGetAtTest.java
+list = "a,b,c";
+assert listGetAt( list, 1 ) == "a" : "testGet 1";
+assert listGetAt( list, 2 ) == "b" : "testGet 2";
+assert listGetAt( list, 3 ) == "c" : "testGet 3";
+threw = false;
+try {
+    listGetAt( "1,2", 3 );
+} catch ( any e ) {
+    threw = true;
+}
+assert threw : "testGet invalid-index";

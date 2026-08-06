@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructEqualsTest.java
+s1 = { a: 1, b: { c: 2 } };
+s2 = { a: 1, b: { c: 2 } };
+assert StructEquals( s1, s2 ) : "testEquals";
+s3 = { a: 1, b: { c: 9 } };
+assert StructEquals( s1, s3 ) == false : "testEqualsDiff";

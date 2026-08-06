@@ -1,0 +1,17 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/NegateTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanNegateNumber
+x = 5;
+y = -5;
+assert ( -x ) == -5 : "testItCanNegateNumber 5";
+assert ( -y ) == 5 : "testItCanNegateNumber -5";
+
+// testItCanNegateString
+s = "5";
+t = "-5";
+assert ( -s ) == -5 : "testItCanNegateString 5";
+assert ( -t ) == 5 : "testItCanNegateString -5";

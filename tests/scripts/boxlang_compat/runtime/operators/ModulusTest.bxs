@@ -1,0 +1,29 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/ModulusTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanModulusNumbers
+assert ( 9 % 3 ) == 0 : "testItCanModulusNumbers 9-3";
+assert ( 3 % 1.5 ) == 0 : "testItCanModulusNumbers 3-1.5";
+assert ( 3 % 2 ) == 1 : "testItCanModulusNumbers 3-2";
+assert ( 9 % 5 ) == 4 : "testItCanModulusNumbers 9-5";
+
+// testItCanModulusStrings
+assert ( "9" % "3" ) == 0 : "testItCanModulusStrings 9-3";
+assert ( "3" % "1.5" ) == 0 : "testItCanModulusStrings 3-1.5";
+
+// testItCanNotModulusByZero
+threw = false;
+try {
+    x = 9 % 0;
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanNotModulusByZero";
+
+// testItCanCompountModulus
+i = 6;
+i %= 2;
+assert i == 0 : "testItCanCompountModulus";

@@ -1,0 +1,31 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsArrayTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+isEmptyArray = isArray( [] );
+isSingleDimensionArray = isArray( [ 1, 2, "3", "abc" ] );
+isTwoDimensionArray = isArray( [ [ 1, 2, "3" ], [ "abc" ] ] );
+assert isEmptyArray : "testTrueConditions empty-array";
+assert isSingleDimensionArray : "testTrueConditions single-dim";
+assert isTwoDimensionArray : "testTrueConditions two-dim";
+
+// testFalseConditions
+aString = isArray( "a string" );
+aStruct = isArray( { name: "brad" } );
+anOrderedStruct = isArray( {} );
+anInteger = isArray( 123 );
+assert aString == false : "testFalseConditions string";
+assert aStruct == false : "testFalseConditions struct";
+assert anOrderedStruct == false : "testFalseConditions ordered-struct";
+assert anInteger == false : "testFalseConditions integer";
+
+// testDimensionArgument (disabled in the JVM, transcribed for parity)
+isSingleDimensionArray = isArray( [], 1 );
+isTwoDimensionArray = isArray( arrayNew( 2 ), 2 );
+isThreeDimensionArray = isArray( [ 1, 2 ], 3 );
+assert isSingleDimensionArray : "testDimensionArgument single";
+assert isTwoDimensionArray : "testDimensionArgument two";
+assert isThreeDimensionArray == false : "testDimensionArgument three";

@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/GetBaseTemplatePathTest.java
+// Mapping/template fixtures are unavailable; retain the direct BIF behavior
+// check so an unsupported implementation stays red.
+
+result = getBaseTemplatePath();
+assert isString( result ) : "testBaseTemplate";

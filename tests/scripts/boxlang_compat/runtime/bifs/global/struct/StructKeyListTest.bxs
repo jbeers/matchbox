@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructKeyListTest.java
+r = structKeyList( { a: 1, b: 2 } );
+assert r == "a,b" : "testKeyList";
+assert structKeyList( { a: 1 }, "|" ) == "a" : "testKeyListDelim";

@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/BoxAnnounceTest.java
+
+result = boxAnnounce( "invalid" );
+assert result == true : "testItCanAnnounceNonExistentEvent";
+
+result = boxAnnounce( "invalid", { foo: "bar" } );
+assert result == true : "testItCanAnnounceNonExistentEventWithData";
+
+result = boxAnnounce( state = "onServerScopeCreation", data = { foo: "bar" } );
+assert result == true : "testItCanAnnounceEventWithDataAndNamedParams";

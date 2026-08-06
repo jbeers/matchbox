@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/RemoveCharsTest.java
+assert removeChars( "Hello World", 6, 6 ) == "Hello" : "testRemoveChars";
+assert "Hello World".removeChars( 6, 6 ) == "Hello" : "testRemoveCharsMember";

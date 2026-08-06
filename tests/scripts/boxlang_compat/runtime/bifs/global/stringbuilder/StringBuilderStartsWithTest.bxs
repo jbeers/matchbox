@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderStartsWithTest.java
+// testStartsWithHeadless
+sb = sb{"Hello BoxLang"};
+result = stringBuilderStartsWith( sb, "Hello" );
+assert result == true : "testStartsWithHeadless";
+
+// testStartsWithMember
+sb = sb{"Hello BoxLang"};
+result = sb.startsWith( "hello" );
+assert result == false : "testStartsWithMember";

@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySumTest.java
+assert arraySum( [1,2,3] ) == 6 : "testSum";
+assert [1,2,3].sum() == 6 : "testSumMember";

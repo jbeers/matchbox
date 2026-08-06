@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/CreateDateTest.java
+
+// testBif
+result = createDate( 2023, 12, 31 );
+assert isDateObject( result ) : "testBif DateTime result";
+assert dateTimeFormat( result, "yyyy" ) == "2023" : "testBif year";
+assert dateTimeFormat( result, "M" ) == "12" : "testBif month";
+assert dateTimeFormat( result, "d" ) == "31" : "testBif day";
+assert dateTimeFormat( result, "H" ) == "0" : "testBif hour";
+assert dateTimeFormat( result, "m" ) == "0" : "testBif minute";
+assert dateTimeFormat( result, "s" ) == "0" : "testBif second";
+assert dateTimeFormat( result, "n" ) == "0" : "testBif nanosecond";

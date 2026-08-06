@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListSortTest.java
+result = listSort( "c,a,b" );
+assert result == "a,b,c" : "testSort default";
+result = listSort( "b,d,c,a", "text", "desc" );
+assert result == "d,c,b,a" : "testTextDesc";
+result = listSort( "b,d,C,a", "textnocase", "asc" );
+assert result == "a,b,C,d" : "testTextNoCaseASC";
+result = listSort( "2,4.3,3,-1", "numeric", "desc" );
+assert result == "4.3,3,2,-1" : "testNumericDesc";
+result = listSort( "2,4.3,3,-1", function( a, b ) { return a < b ? -1 : 1; } );
+assert result == "-1,2,3,4.3" : "testSortFunction";
+result = listSort( "b-and-d-and-c-and-a", "text", "asc", "-and-", true, true );
+assert result == "a-and-b-and-c-and-d" : "testSortMultiCharacterDelimiter";

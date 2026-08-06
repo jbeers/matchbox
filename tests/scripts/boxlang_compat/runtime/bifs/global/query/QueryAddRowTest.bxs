@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryAddRowTest.java
+q = queryNew( "a,b" );
+queryAddRow( q, { a: 1, b: 2 } );
+assert queryRecordCount( q ) == 1 : "testAddRow count";
+assert queryGetCell( q, "a", 1 ) == 1 : "testAddRow a";

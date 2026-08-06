@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/AbsTest.java
+// SKIPPED (JVM-only): testDuration uses java.time.Duration.
+// testItReturnsAbs
+assert abs( 0 ) == 0 : "testItReturnsAbs zero";
+assert abs( 1 ) == 1 : "testItReturnsAbs one";
+// testItReturnsAbsNeg
+assert abs( -1 ) == 1 : "testItReturnsAbsNeg";
+// testItReturnsAbsMember
+assert ( 0 ).abs() == 0 : "testItReturnsAbsMember zero";
+assert ( 1 ).abs() == 1 : "testItReturnsAbsMember one";
+// testItReturnsAbsMemberNeg
+assert ( -1 ).abs() == 1 : "testItReturnsAbsMemberNeg";

@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListDeleteAtTest.java
+// testCanDeleteAt
+arr = "a,b,c";
+result = listDeleteAt( arr, 2 );
+assert result == "a,c" : "testCanDeleteAt";
+// testCanDeleteAtMember
+result = "a,b,c".listDeleteAt( 2 );
+assert result == "a,c" : "testCanDeleteAtMember";

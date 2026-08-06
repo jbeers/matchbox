@@ -1,0 +1,29 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/format/DecimalFormatTest.java
+
+// testDecimalFormat
+assert decimalFormat( 12345.67 ) == "12,345.67" : "testDecimalFormat";
+
+// testDecimalMemberFunction
+myDecimal = 12345.67;
+assert myDecimal.decimalFormat() == "12,345.67" : "testDecimalMemberFunction";
+
+// testDecimalFormatPlaces
+assert decimalFormat( 12345 ) == "12,345.00" : "testDecimalFormatPlaces";
+
+// testDecimalFormatTruncation
+assert decimalFormat( 12345.987654312 ) == "12,345.99" : "testDecimalFormatTruncation";
+
+// testDecimalFormatLength
+assert decimalFormat( 12345.987654312, 4 ) == "12,345.9877" : "testDecimalFormatLength";
+
+// testDecimalFormatError
+threw = false;
+try {
+    result = decimalFormat( "One, one french fry! Bwah! Ha! Ha!" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testDecimalFormatError";
+
+// testDecimalFormatEmptyString
+assert decimalFormat( "" ) == "0.00" : "testDecimalFormatEmptyString";

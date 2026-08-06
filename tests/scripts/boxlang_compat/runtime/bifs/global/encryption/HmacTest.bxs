@@ -1,0 +1,49 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/encryption/HmacTest.java
+// ---------------------------------------------------------------------------
+
+// testHmacString
+result = hmac( "Hmac me baby!", "foo" );
+assert isString( result ) : "testHmacString type";
+assert len( result ) == 32 : "testHmacString length";
+assert result == "48bfb8004f92d6c9e9eac9728c5d919c" : "testHmacString value";
+
+// testHmacMember
+result = "Hmac me baby!".hmac( "foo" );
+assert isString( result ) : "testHmacMember type";
+assert len( result ) == 32 : "testHmacMember length";
+
+// testHmacStruct
+result = hmac( { "action": "Hmac me baby!" }, "foo" );
+assert isString( result ) : "testHmacStruct type";
+assert len( result ) == 32 : "testHmacStruct length";
+
+// testHmacArray
+result = hmac( [ "Hmac me baby!" ], "foo" );
+assert isString( result ) : "testHmacArray type";
+assert len( result ) == 32 : "testHmacArray length";
+
+// testHmacWithEncoding
+result = hmac( "Hmac me baby!", "foo", "HmacMD5", "utf-16" );
+assert isString( result ) : "testHmacWithEncoding type";
+assert len( result ) == 32 : "testHmacWithEncoding length";
+
+// testHmacWithAlgorithm
+result = hmac( "Hmac me baby!", "foo", "HmacSHA256" );
+assert isString( result ) : "testHmacWithAlgorithm type";
+assert len( result ) == 64 : "testHmacWithAlgorithm length";
+
+// testHmacWithBinaryKey
+secretKey = "D2tM2Q1gY300pUfutYJvqOcfVa/PpkEPuzYFQoi3ZM0=";
+result = lcase( hmac( "foo", toBinary( secretKey ), "HMACSHA256", "UTF-8" ) );
+assert isString( result ) : "testHmacWithBinaryKey type";
+assert result == "3483aeb10dab06f29b8037366fdf819b5c0c09a99213cae50a3474d4edbbd400" : "testHmacWithBinaryKey value";
+
+// testHmacAlgorithmError
+threw = false;
+try {
+    result = hmac( "Hash me baby!", "blah", "not an algorithm" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testHmacAlgorithmError";

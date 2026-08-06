@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/BoxAnnounceAsyncTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertions
+// require java.util.concurrent.CompletableFuture and interceptor service state.

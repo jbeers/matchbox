@@ -1,0 +1,103 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/PreserveSingleQuotesTest.java
+// The JVM test exercises both BoxTemplate tags and BoxScript. The tag cases
+// are represented by their equivalent source-level query calls here because
+// the compatibility runner executes .bxs script files.
+
+host = getSystemSetting( "MATCHBOX_TEST_DB_HOST", "localhost" );
+datasourceRegister( "default", {
+    driver: "postgresql",
+    host: host,
+    port: 5432,
+    database: "matchbox_test",
+    username: "matchbox",
+    password: "matchbox_test",
+    maxConnections: 2
+} );
+queryExecute( "DROP TABLE IF EXISTS developers" );
+queryExecute( "CREATE TABLE developers ( id INTEGER, name VARCHAR(155), role VARCHAR(155), createdAt TIMESTAMP )" );
+queryExecute( "INSERT INTO developers ( id, name, role, createdAt ) VALUES ( 9001, 'Bob O''Reily', 'QA', CURRENT_TIMESTAMP )" );
+
+// testNormalTags
+result = queryExecute( "SELECT * FROM developers WHERE name = 'Bob O''Reily'" );
+assert result.recordCount == 1 : "testNormalTags count";
+assert result.name[1] == "Bob O'Reily" : "testNormalTags name";
+
+// testEntireSQLInterpolatedTags
+sql = "SELECT * FROM developers WHERE name = 'Bob O''Reily'";
+result = queryExecute( preserveSingleQuotes( sql ) );
+assert result.recordCount == 1 : "testEntireSQLInterpolatedTags count";
+assert result.name[1] == "Bob O'Reily" : "testEntireSQLInterpolatedTags name";
+
+// testNameSQLInterpolatedTags
+name = "Bob O'Reily";
+result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+assert result.recordCount == 1 : "testNameSQLInterpolatedTags count";
+assert result.name[1] == "Bob O'Reily" : "testNameSQLInterpolatedTags name";
+
+// testNameSQLInterpolatedTagsTwoQuotes
+name = "Billy 'The Fish' Bob";
+result = queryExecute( "SELECT '" & name & "' as name FROM developers WHERE name = 'Bob O''Reily'" );
+assert result.recordCount == 1 : "testNameSQLInterpolatedTagsTwoQuotes count";
+assert result.name[1] == "Billy 'The Fish' Bob" : "testNameSQLInterpolatedTagsTwoQuotes name";
+
+// testNormalScript
+result = queryExecute( "SELECT * FROM developers WHERE name = 'Bob O''Reily'" );
+assert result.recordCount == 1 : "testNormalScript count";
+assert result.name[1] == "Bob O'Reily" : "testNormalScript name";
+
+// testEntireSQLInterpolatedScript
+sql = "SELECT * FROM developers WHERE name = 'Bob O''Reily'";
+result = queryExecute( preserveSingleQuotes( sql ) );
+assert result.recordCount == 1 : "testEntireSQLInterpolatedScript count";
+assert result.name[1] == "Bob O'Reily" : "testEntireSQLInterpolatedScript name";
+
+// testNameSQLInterpolatedScript
+name = "Bob O'Reily";
+result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+assert result.recordCount == 1 : "testNameSQLInterpolatedScript count";
+assert result.name[1] == "Bob O'Reily" : "testNameSQLInterpolatedScript name";
+
+// testNameSQLConcatScript
+name = "Bob O'Reily";
+result = queryExecute( "SELECT * FROM developers WHERE name = '" & name & "'" );
+assert result.recordCount == 1 : "testNameSQLConcatScript count";
+assert result.name[1] == "Bob O'Reily" : "testNameSQLConcatScript name";
+
+// testListQualifyWithSingleQuoteQualifier
+qry = queryNew( "name", "varchar", [["Brad"], ["Luis"], ["O'Neil"]] );
+names = "Brad,O'Neil";
+result = queryExecute(
+    "SELECT * FROM qry WHERE name in ( " & listQualify( names, "'" ) & " )",
+    [],
+    { dbtype: "query" }
+);
+assert result.recordCount == 2 : "testListQualifyWithSingleQuoteQualifier count";
+assert result.name[1] == "Brad" : "testListQualifyWithSingleQuoteQualifier first";
+assert result.name[2] == "O'Neil" : "testListQualifyWithSingleQuoteQualifier second";
+
+// testListQualifyWithNonSingleQuoteQualifier
+qry = queryNew( "name", "varchar", [["*Brad*,*O'Neil*"]] );
+names = "Brad,O'Neil";
+result = queryExecute(
+    "SELECT * FROM qry WHERE name in ( '*" & names & "*' )",
+    [],
+    { dbtype: "query" }
+);
+assert result.recordCount == 1 : "testListQualifyWithNonSingleQuoteQualifier count";
+assert result.name[1] == "*Brad*,*O'Neil*" : "testListQualifyWithNonSingleQuoteQualifier name";
+
+// testODBCDateBIFs
+qry = queryNew( "date", "date", [[now()]] );
+result = queryExecute(
+    "SELECT * FROM qry WHERE date <= " & createODBCDateTime( now() ) &
+        " AND date <= " & createODBCDate( now() ) &
+        " AND date <= " & createODBCTime( now() ),
+    [],
+    { dbtype: "query" }
+);
+
+// testODBCDateValue
+theDate = now().toString();
+qry = queryNew( "date", "date", [[theDate]] );
+result = queryExecute( "SELECT * FROM qry WHERE date = " & theDate, [], { dbtype: "query" } );
+assert result.recordCount == 1 : "testODBCDateValue count";

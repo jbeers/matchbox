@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderLeftTest.java
+// testLeftHeadless
+sb = sb{"The quick brown fox"};
+result = stringBuilderLeft( sb, 9 );
+assert result == "The quick" : "testLeftHeadless";
+
+// testLeftMemberNegative
+sb = sb{"abcdef"};
+result = sb.left( -2 );
+assert result == "abcd" : "testLeftMemberNegative";

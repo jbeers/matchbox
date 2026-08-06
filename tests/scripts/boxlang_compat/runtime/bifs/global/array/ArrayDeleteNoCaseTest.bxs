@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayDeleteNoCaseTest.java
+arr = ["a","b","c"];
+arrayDeleteNoCase( arr, "B" );
+assert arrayLen( arr ) == 2 : "testDeleteNoCase size";
+assert arr[2] == "c" : "testDeleteNoCase value";

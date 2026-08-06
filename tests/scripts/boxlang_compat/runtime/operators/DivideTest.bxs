@@ -1,0 +1,30 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/DivideTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanDivideNumberToDate operates on a DateTime.
+
+// testItCanDivideNumbers
+assert ( 9 / 3 ) == 3 : "testItCanDivideNumbers 9-3";
+assert ( 3 / 1.5 ) == 2 : "testItCanDivideNumbers 3-1.5";
+assert ( 3 / 2 ) == 1.5 : "testItCanDivideNumbers 3-2";
+
+// testItCanDivideStrings
+assert ( "9" / "3" ) == 3 : "testItCanDivideStrings 9-3";
+assert ( "3" / "1.5" ) == 2 : "testItCanDivideStrings 3-1.5";
+
+// testItCanNotDivideByZero
+threw = false;
+try {
+    x = 5 / 0;
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testItCanNotDivideByZero";
+
+// testItCanCompoundDivide
+i = 4;
+i /= 2;
+assert i == 2 : "testItCanCompoundDivide";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/RandTest.java
+r = rand();
+assert r >= 0 && r < 1 : "testRand range";
+r = rand();
+assert r >= 0 && r < 1 : "testRand again";

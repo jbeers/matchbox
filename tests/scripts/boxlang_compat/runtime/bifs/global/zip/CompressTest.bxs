@@ -1,0 +1,86 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/zip/CompressTest.java
+// ---------------------------------------------------------------------------
+
+// testCompressSimple
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "compress simple content" );
+destination = root & "/chuck_norris_test.zip";
+compress( source=source, destination=destination, recurse=false );
+extracted = root & "/simple-extracted";
+extract( source=destination, destination=extracted );
+entries = directoryList( extracted, false );
+assert arrayLen( entries ) == 1 : "testCompressSimple entry-count";
+assert fileExists( extracted & "/chuck_norris.jpg" ) : "testCompressSimple entry-name";
+assert directoryExists( extracted & "/resources" ) == false : "testCompressSimple no-resources-entry";
+
+// testCompressDir
+root = createTempDirectory();
+source = root & "/resources";
+directoryCreate( source );
+fileWrite( source & "/one.txt", "one" );
+fileWrite( source & "/two.txt", "two" );
+fileWrite( source & "/three.txt", "three" );
+fileWrite( source & "/four.txt", "four" );
+destination = root & "/test_directory_zip.zip";
+compress( source=source, destination=destination, includeBaseFolder=false, recurse=false );
+extracted = root & "/directory-extracted";
+extract( source=destination, destination=extracted );
+entries = directoryList( extracted, true );
+assert arrayLen( entries ) > 3 : "testCompressDir entry-count";
+assert fileExists( extracted & "/one.txt" ) : "testCompressDir one";
+assert fileExists( extracted & "/two.txt" ) : "testCompressDir two";
+assert fileExists( extracted & "/three.txt" ) : "testCompressDir three";
+assert fileExists( extracted & "/four.txt" ) : "testCompressDir four";
+assert directoryExists( extracted & "/resources" ) == false : "testCompressDir no-base-folder";
+
+// testCompressTar
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "tar content" );
+destination = root & "/test.tar";
+compress( format="tar", source=source, destination=destination );
+assert fileExists( destination ) : "testCompressTar archive";
+extracted = root & "/tar-extracted";
+extract( format="tar", source=destination, destination=extracted );
+assert fileRead( extracted & "/chuck_norris.jpg" ) == "tar content" : "testCompressTar entry-name";
+
+// testCompressTgz
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "tgz content" );
+destination = root & "/test.tgz";
+compress( format="tgz", source=source, destination=destination );
+assert fileExists( destination ) : "testCompressTgz archive";
+
+// testCompressDetectsFormatFromDestination
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "detected tar content" );
+destination = root & "/detected.tar";
+compress( source=source, destination=destination );
+assert fileExists( destination ) : "testCompressDetectsFormatFromDestination archive";
+
+// testCompressBzip
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "bzip content" );
+destination = root & "/test.bz2";
+compress( format="bzip2", source=source, destination=destination );
+extracted = root & "/bzip-extracted";
+extract( format="bzip2", source=destination, destination=extracted, overwrite=true );
+assert fileRead( extracted & "/test" ) == "bzip content" : "testCompressBzip content";
+
+// testCompressTbzAndTarBzAliases
+root = createTempDirectory();
+source = root & "/chuck_norris.jpg";
+fileWrite( source, "tbz content" );
+for ( format in [ "tbz", "tbz2", "tar.bz" ] ) {
+    destination = root & "/test-" & format & ( format == "tbz2" ? ".tbz2" : ".tbz" );
+    archive = compress( format=format, source=source, destination=destination );
+    assert fileExists( archive ) : "testCompressTbzAndTarBzAliases archive-" & format;
+    extracted = root & "/tbz-extracted-" & format;
+    extract( format=format, source=archive, destination=extracted, overwrite=true );
+    assert fileRead( extracted & "/chuck_norris.jpg" ) == "tbz content" : "testCompressTbzAndTarBzAliases entry-" & format;
+}

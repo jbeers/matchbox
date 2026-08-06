@@ -1,0 +1,39 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/AsyncAllApplyTest.java
+
+// testAsyncApplyWithBasicsArray
+a = [1, 2, 3];
+result = asyncAllApply( a, ( item ) => item * 2 );
+assert result != null : "testAsyncApplyWithBasicsArray result";
+assert result[ 1 ] == 2 : "testAsyncApplyWithBasicsArray 1";
+assert result[ 2 ] == 4 : "testAsyncApplyWithBasicsArray 2";
+assert result[ 3 ] == 6 : "testAsyncApplyWithBasicsArray 3";
+
+// testAsyncApplyWithTimeout
+threw = false;
+try {
+    a = [1, 2, 3];
+    result = asyncAllApply(
+        items = a,
+        mapper = ( item ) => {
+            sleep( 1000 );
+            return item * 2;
+        },
+        timeout = 500,
+        timeUnit = "MILLISECONDS"
+    );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testAsyncApplyWithTimeout";
+
+// testAsyncApplyWithBasicsStruct
+a = { "one": 1, "two": 2, "three": 3 };
+result = asyncAllApply( a, item => {
+    println( "Processing item: " & item.toString() );
+    item.value = item.value * 2;
+    return item;
+} );
+assert result != null : "testAsyncApplyWithBasicsStruct result";
+assert result[ "one" ] == 2 : "testAsyncApplyWithBasicsStruct one";
+assert result[ "two" ] == 4 : "testAsyncApplyWithBasicsStruct two";
+assert result[ "three" ] == 6 : "testAsyncApplyWithBasicsStruct three";

@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ListReduceTest.java
+nums = "1,2,3,4";
+r = listReduce( nums, ( acc, num ) => acc + num, 0 );
+assert r == 10 : "testReduce";

@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileCopyTest.java
+src = getTempDirectory() & "/matchbox-copy-src.txt";
+dst = getTempDirectory() & "/matchbox-copy-dst.txt";
+fileWrite( src, "hello" );
+fileCopy( src, dst );
+assert fileRead( dst ) == "hello" : "testCopy";

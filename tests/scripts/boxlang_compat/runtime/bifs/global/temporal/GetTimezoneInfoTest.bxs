@@ -1,0 +1,51 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/GetTimezoneInfoTest.java
+
+// testBif
+result = getTimezoneInfo();
+assert structKeyExists( result, "DSTOffset" ) : "testBif DSTOffset key";
+assert structKeyExists( result, "id" ) : "testBif id key";
+assert structKeyExists( result, "isDSTon" ) : "testBif isDSTon key";
+assert structKeyExists( result, "name" ) : "testBif name key";
+assert structKeyExists( result, "nameDST" ) : "testBif nameDST key";
+assert structKeyExists( result, "offset" ) : "testBif offset key";
+assert structKeyExists( result, "shortName" ) : "testBif shortName key";
+assert structKeyExists( result, "shortNameDST" ) : "testBif shortNameDST key";
+assert structKeyExists( result, "timezone" ) : "testBif timezone key";
+assert structKeyExists( result, "utcHourOffset" ) : "testBif utcHourOffset key";
+assert structKeyExists( result, "utcMinuteOffset" ) : "testBif utcMinuteOffset key";
+assert structKeyExists( result, "utcTotalOffset" ) : "testBif utcTotalOffset key";
+assert isNumeric( result.DSTOffset ) : "testBif DSTOffset type";
+assert isNumeric( result.offset ) : "testBif offset type";
+assert isNumeric( result.utcHourOffset ) : "testBif utcHourOffset type";
+assert isNumeric( result.utcMinuteOffset ) : "testBif utcMinuteOffset type";
+assert isNumeric( result.utcTotalOffset ) : "testBif utcTotalOffset type";
+assert result.utcTotalOffset == abs( result.offset ) : "testBif total offset";
+
+// testBifWithTimezone
+result = getTimezoneInfo( "UTC" );
+assert result.offset == 0 : "testBifWithTimezone offset";
+assert result.utcTotalOffset == 0 : "testBifWithTimezone total offset";
+assert result.shortName == "UTC" : "testBifWithTimezone short name";
+assert result.isDSTon == false : "testBifWithTimezone DST";
+
+// testBifValues
+result = getTimezoneInfo( "US/Hawaii" );
+assert result.isDSTon == false : "testBifValues DST";
+assert result.DSTOffset == 0 : "testBifValues DST offset";
+assert result.id == "US/Hawaii" : "testBifValues id";
+assert result.name == "Hawaii-Aleutian Standard Time" : "testBifValues name";
+assert result.nameDST == "Hawaii-Aleutian Daylight Time" : "testBifValues DST name";
+assert result.shortName == "HST" : "testBifValues short name";
+assert result.shortNameDST == "HDT" : "testBifValues DST short name";
+assert result.timezone == "US/Hawaii" : "testBifValues timezone";
+assert result.utcHourOffset == -10 : "testBifValues hour offset";
+assert result.utcMinuteOffset == 0 : "testBifValues minute offset";
+assert result.offset == -36000 : "testBifValues offset";
+assert result.utcTotalOffset == 36000 : "testBifValues total offset";
+
+// testBifWithTimezoneAndLocale
+result = getTimezoneInfo( "UTC", "es-SV" );
+assert result.offset == 0 : "testBifWithTimezoneAndLocale offset";
+assert result.utcTotalOffset == abs( result.offset ) : "testBifWithTimezoneAndLocale total offset";
+assert result.shortName == "UTC" : "testBifWithTimezoneAndLocale short name";
+assert result.isDSTon == false : "testBifWithTimezoneAndLocale DST";

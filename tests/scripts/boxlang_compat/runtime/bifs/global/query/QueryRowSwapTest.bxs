@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryRowSwapTest.java
+q = queryNew( "a" );
+queryAddRow( q, { a: 1 } );
+queryAddRow( q, { a: 2 } );
+queryRowSwap( q, 1, 2 );
+assert queryGetCell( q, "a", 1 ) == 2 : "testRowSwap 1";
+assert queryGetCell( q, "a", 2 ) == 1 : "testRowSwap 2";

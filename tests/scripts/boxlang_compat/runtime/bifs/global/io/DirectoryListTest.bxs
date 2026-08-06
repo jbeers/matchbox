@@ -1,0 +1,30 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/DirectoryListTest.java
+base = createTempDirectory();
+directoryCreate( base & "/nested", true );
+fileWrite( base & "/root.txt", "root" );
+fileWrite( base & "/nested/nested.txt", "nested" );
+
+r = directoryList( base, false, "path" );
+assert isArray( r ) : "testDirectoryListBif array";
+assert arrayLen( r ) == 2 : "testDirectoryListBif count";
+
+r = directoryList( base, true, "path" );
+assert isArray( r ) : "testRecursiveDirectoryListBif array";
+assert arrayLen( r ) == 3 : "testRecursiveDirectoryListBif count";
+
+r = directoryList( base, false, "name" );
+assert isArray( r ) : "testNamesDirectoryListBif array";
+assert arrayLen( r ) == 2 : "testNamesDirectoryListBif count";
+
+q = directoryList( base, false, "query" );
+assert isQuery( q ) : "testQueryDirectoryListBif query";
+
+r = directoryList( base, true, "name", "*.txt" );
+assert isArray( r ) : "testFilterDirectoryListBif array";
+assert arrayLen( r ) == 2 : "testFilterDirectoryListBif count";
+
+r = directoryList( base, true, "path", "*", "name desc", "file" );
+assert isArray( r ) : "testSortAndTypeDirectoryListBif array";
+assert arrayLen( r ) == 2 : "testSortAndTypeDirectoryListBif count";
+
+directoryDelete( base, true );

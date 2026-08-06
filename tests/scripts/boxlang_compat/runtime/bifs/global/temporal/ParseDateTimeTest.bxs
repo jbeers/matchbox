@@ -1,0 +1,156 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/ParseDateTimeTest.java
+
+function assertParsed( value, year, month, day, hour, minute, second, nanosecond, label ) {
+    assert isDateObject( value ) : label & " DateTime result";
+    assert dateTimeFormat( value, "yyyy" ) == year : label & " year";
+    assert dateTimeFormat( value, "M" ) == month : label & " month";
+    assert dateTimeFormat( value, "d" ) == day : label & " day";
+    assert dateTimeFormat( value, "H" ) == hour : label & " hour";
+    assert dateTimeFormat( value, "m" ) == minute : label & " minute";
+    assert dateTimeFormat( value, "s" ) == second : label & " second";
+    assert dateTimeFormat( value, "n" ) == nanosecond : label & " nanosecond";
+}
+
+// testParseDateTimeFullISO
+setTimezone( "UTC" );
+result = parseDateTime( "2024-01-14T00:00:01.0001Z" );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 100000, "testParseDateTimeFullISO" );
+
+// testParseDateTimeNoOffset
+result = parseDateTime( "2024-01-14T00:00:01.0001" );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 100000, "testParseDateTimeNoOffset" );
+
+// testParseDateTimeNoOffsetNoT
+result = parseDateTime( "2024-01-14 00:00:01.1" );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 100000000, "testParseDateTimeNoOffsetNoT" );
+
+// testParseDateTimeNoTime
+result = parseDateTime( "2024-01-14" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateTimeNoTime" );
+
+// testParseDateTimeDateDot
+result = parseDateTime( "2024.01.14" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateTimeDateDot" );
+
+// testParseDateSlashes
+result = parseDateTime( "01/14/2024" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateSlashes" );
+
+// testParseDateTimeFormat
+format = "yyyy-MM-dd'T'HH:mm:ss.SSSSX";
+result = parseDateTime( "2024-01-14T00:00:01.0001Z", format );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 100000, "testParseDateTimeFormat" );
+
+// testParseDateTimeTimezone
+format = "yyyy-MM-dd HH:mm:ss";
+result = parseDateTime( "2024-01-14 00:00:01", format, "America/Los_Angeles" );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 0, "testParseDateTimeTimezone" );
+zone = dateTimeFormat( result, "z" );
+assert find( "P", zone ) == 1 : "testParseDateTimeTimezone zone prefix";
+assert find( "T", zone ) == 3 : "testParseDateTimeTimezone zone suffix";
+
+// testParseDateTimeFullISOLocale
+result = ParseDateTime( date="2024-01-14T00:00:01.0001Z", locale="en-US" );
+assertParsed( result, 2024, 1, 14, 0, 0, 1, 100000, "testParseDateTimeFullISOLocale" );
+
+// testParseISOWithoutColonsInOffset
+result = ParseDateTime( date="2025-04-05T21:14:02+0000", locale="en-US" );
+result2 = parseDateTime( "2025-02-27T13:00:00-05:00" );
+assertParsed( result, 2025, 4, 5, 21, 14, 2, 0, "testParseISOWithoutColonsInOffset" );
+assert isDateObject( result2 ) : "testParseISOWithoutColonsInOffset alternate result";
+
+// testParseDateTimeRussian
+result = ParseDateTime( date="14.01.2024", locale="ru_RU" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateTimeRussian" );
+
+// testParseDateTimeAustralian
+setLocale( "en_AU" );
+result = ParseDateTime( date="11/01/2024" );
+assertParsed( result, 2024, 1, 11, 0, 0, 0, 0, "testParseDateTimeAustralian en_AU" );
+setLocale( "en_US" );
+result = ParseDateTime( date="11/01/2024" );
+assertParsed( result, 2024, 11, 1, 0, 0, 0, 0, "testParseDateTimeAustralian en_US" );
+
+// testParseDateTimeSpain
+result = ParseDateTime( date="14 de enero de 2024", locale="es-ES" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateTimeSpain" );
+
+// testParseDateTimeChinese
+result = ParseDateTime( date="2024年1月14日", locale="zh-CN" );
+assertParsed( result, 2024, 1, 14, 0, 0, 0, 0, "testParseDateTimeChinese" );
+
+// testParseDateTimeEuropeanISO
+setLocale( "de-CH" );
+result = ParseDateTime( date="1.4.2011", locale="de-CH" );
+result2 = ParseDateTime( date="01.04.2011", locale="de-CH" );
+assertParsed( result, 2011, 4, 1, 0, 0, 0, 0, "testParseDateTimeEuropeanISO short" );
+assertParsed( result2, 2011, 4, 1, 0, 0, 0, 0, "testParseDateTimeEuropeanISO padded" );
+
+// testParseJSStringDate
+result = ParseDateTime( "Wed Sep 18 2024 09:20:47 GMT-0700 (Pacific Daylight Time)" );
+assert isDateObject( result ) : "testParseJSStringDate DateTime result";
+assertParsed( result, 2024, 9, 18, 9, 20, 47, 0, "testParseJSStringDate" );
+
+// testParseJSAltStringDate
+result = ParseDateTime( "Wed Sep 18 2024 09:20:47 GMT-0700 (PDT)" );
+assert isDateObject( result ) : "testParseJSAltStringDate DateTime result";
+assertParsed( result, 2024, 9, 18, 9, 20, 47, 0, "testParseJSAltStringDate" );
+
+// testParseLuisFormat
+result = ParseDateTime( "2021-01-01 12:00:00 pm" );
+assertParsed( result, 2021, 1, 1, 12, 0, 0, 0, "testParseLuisFormat" );
+
+// testParseYetAnotherLowerCaseMeridian
+result = ParseDateTime( "Nov-05-2025 8:43am" );
+assertParsed( result, 2025, 11, 5, 8, 43, 0, 0, "testParseYetAnotherLowerCaseMeridian" );
+
+// testParseLongAndShortDateTime
+result = ParseDateTime( "January 1 1970 00:00" );
+assertParsed( result, 1970, 1, 1, 0, 0, 0, 0, "testParseLongAndShortDateTime" );
+
+// testWithLowerCasePMAndSlashDate
+result = ParseDateTime( "7/20/2025 1:00 pm" );
+assertParsed( result, 2025, 7, 20, 13, 0, 0, 0, "testWithLowerCasePMAndSlashDate" );
+
+// testVarious
+parseDateTime( "July, 19 2015" );
+parseDateTime( "Jul, 19 2015" );
+parseDateTime( "July 19 2015" );
+parseDateTime( "Jul 19 2015" );
+parseDateTime( "Tue Apr 02 21:01:00 CET 2024" );
+parseDateTime( "Tue, Apr 02, 21:01:00 CET 2024" );
+parseDateTime( "02 Apr 2024 21:01:00" );
+parseDateTime( "02 Apr 2024 21:01" );
+parseDateTime( "Tue, 02 Apr 2024 21:01:00 CEST" );
+parseDateTime( "Tue 02 Apr 2024 21:01:00 CEST" );
+parseDateTime( "Tuesday 02 Apr 2024 21:01:00 CEST" );
+
+// testHTTPTimestringFormat
+result = ParseDateTime( "Tue, 23 Dec 2025 21:24:20 UTC" );
+assert isDateObject( result ) : "testHTTPTimestringFormat";
+
+// testMMYYYYPattern
+result = ParseDateTime( "12/2025" );
+assertParsed( result, 2025, 12, 1, 0, 0, 0, 0, "testMMYYYYPattern" );
+
+// testSpeed (the JVM test is @Disabled, but this is source-level behavior)
+function parseIt( dateString, mask ) {
+    iterations = 10000;
+    start = getTickCount();
+    for ( i = 1; i <= iterations; i++ ) {
+        parsed = isNull( mask ) ? parseDateTime( dateString ) : parseDateTime( dateString, mask );
+    }
+    return getTickCount() - start;
+}
+result = {
+    singleMillisTimestamp: parseIt( "2025-11-12 00:45:00.0" ),
+    singleMillisTimestampWithMask: parseIt( "2025-11-12 00:45:00.0", "yyyy-MM-dd HH:mm:ss.S" ),
+    isoTimestamp: parseIt( "2024-04-02T21:01:00Z" ),
+    isoTimestampWMask: parseIt( "2024-04-02T21:01:00Z", "yyyy-MM-dd'T'HH:mm:ssXXX" ),
+    mediumFormatZoned: parseIt( "Nov 22, 2022 11:01:51 CET" ),
+    mediumFormatZonedWithMask: parseIt( "Nov 22, 2022 11:01:51 CET", "MMM dd, yyyy HH:mm:ss zz" )
+};
+assert result.isoTimestamp >= 0 : "testSpeed isoTimestamp";
+assert result.isoTimestampWMask >= 0 : "testSpeed isoTimestampWMask";
+assert result.mediumFormatZoned >= 0 : "testSpeed mediumFormatZoned";
+assert result.mediumFormatZonedWithMask >= 0 : "testSpeed mediumFormatZonedWithMask";

@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/ClearTimezoneTest.java
+
+// testClearTimezone
+setTimezone( "America/Los_Angeles" );
+clearTimezone();
+
+// testClearNull
+clearTimezone();

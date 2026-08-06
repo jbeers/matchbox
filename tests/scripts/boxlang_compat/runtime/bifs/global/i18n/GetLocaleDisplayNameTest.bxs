@@ -1,0 +1,20 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/i18n/GetLocaleDisplayNameTest.java
+
+// testBifGetLocaleDisplayName
+setLocale( "en_US" );
+result = getLocaleDisplayName();
+assert result == "English (United States)" : "testBifGetLocaleDisplayName";
+
+// testGetLocaleDisplayNameSingleArg
+result = getLocaleDisplayName( "en-US" );
+assert result == "English (United States)" : "testGetLocaleDisplayNameSingleArg";
+
+// testGetLocaleDisplayNameBothArgs
+setLocale( "Germany" );
+result = getLocaleDisplayName( "en-US", "en-US" );
+assert result == "English (United States)" : "testGetLocaleDisplayNameBothArgs";
+
+// testGetLocaleDisplayNameDspArg
+setLocale( "en_US" );
+result = getLocaleDisplayName( dspLocale = "Germany" );
+assert result == "Englisch (Vereinigte Staaten)" : "testGetLocaleDisplayNameDspArg";

@@ -1,0 +1,60 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/xml/XMLTransformTest.java
+// ---------------------------------------------------------------------------
+
+xml = xmlParse( '<?xml version="1.0"?>
+    <breakfast_menu>
+     <food>
+      <name>Eggs Benedict</name>
+      <price>$8.95</price>
+     </food>
+     <food>
+      <name>Pancakes</name>
+      <price>$7.95</price>
+     </food>
+     <food>
+      <name>French Toast</name>
+      <price>$6.95</price>
+     </food>
+    </breakfast_menu>' );
+xslt = '<?xml version="1.0"?>
+    <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+    <xsl:output method="html" doctype-public="-//W3C//DTD HTML 4.0 Transitional//EN" />
+    <xsl:template match="/">
+    <html>
+    <body>
+    <table border="2" bgcolor="yellow">
+    <tr>
+    <th>Name</th>
+    <th>Price</th>
+    </tr>
+    <xsl:for-each select="breakfast_menu/food">
+    <tr>
+    <td><xsl:value-of select="name"/></td>
+    <td><xsl:value-of select="price"/></td>
+    </tr>
+    </xsl:for-each>
+    </table>
+    </body>
+    </html>
+    </xsl:template>
+    </xsl:stylesheet>';
+expected = '<!DOCTYPEhtmlPUBLIC="-//W3C//DTDHTML4.0Transitional//EN"><html><body><tableborder="2"bgcolor="yellow"><tr><th>Name</th><th>Price</th></tr><tr><td>EggsBenedict</td><td>$8.95</td></tr><tr><td>Pancakes</td><td>$7.95</td></tr><tr><td>FrenchToast</td><td>$6.95</td></tr></table></body></html>';
+
+// testCanTransform
+result = xmlTransform( xml, xslt );
+assert isString( result ) : "testCanTransform result-type";
+assert reReplace( result, "[[:space:]]", "", "all" ) == expected : "testCanTransform result";
+
+// testCanTransformMember
+result = xml.transform( xslt );
+assert isString( result ) : "testCanTransformMember result-type";
+assert reReplace( result, "[[:space:]]", "", "all" ) == expected : "testCanTransformMember result";
+
+// testCanTransformFromFile
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test uses
+// java.io.File and a JVM-relative XSLT fixture path.
+
+// testCanTransformFromFileMember
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test uses
+// java.io.File and a JVM-relative XSLT fixture path.

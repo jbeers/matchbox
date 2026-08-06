@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/LTrimTest.java
+assert lTrim( "  Grant  " ) == "Grant  " : "testLTrim";
+assert lTrim( "---Hello---", "-" ) == "Hello---" : "testLTrimCustom";
+assert lTrim( "Hello", "*" ) == "Hello" : "testLTrimNoMatch";

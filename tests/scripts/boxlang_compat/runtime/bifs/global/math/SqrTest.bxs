@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/SqrTest.java
+assert sqr( 16 ) == 4 : "testItReturnsSquareRoot 16";
+assert ( 16 ).sqr() == 4 : "testItReturnsSquareRootMember 16";
+assert abs( ( 5.5 ).sqr() - 2.345207879911715 ) < 0.0000001 : "testItReturnsSquareRootMember 5.5";

@@ -1,0 +1,21 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructKeyTranslateTest.java
+result = {
+    cow: { noise: "moo", size: "large" },
+    "bird.noise": "chirp",
+    "bird.size": "small"
+};
+structKeyTranslate( result );
+assert structKeyExists( result, "bird" ) : "testBif bird";
+assert result.bird.noise == "chirp" : "testBif noise";
+assert result.bird.size == "small" : "testBif size";
+assert structKeyExists( result, "cow" ) : "testBif cow";
+
+result = { "bird.noise": "chirp", "bird.size": "small" };
+structKeyTranslate( struct=result, retainKeys=true );
+assert structKeyExists( result, "bird" ) : "testBifKeyRetention bird";
+assert structKeyExists( result, "bird.noise" ) : "testBifKeyRetention original";
+
+result = { "bird.location.city": "Grand Rapids", "bird.location.state": "Michigan" };
+structKeyTranslate( struct=result, deep=true );
+assert result.bird.location.city == "Grand Rapids" : "testBifDeep city";
+assert result.bird.location.state == "Michigan" : "testBifDeep state";

@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryDeleteColumnTest.java
+q = queryNew( "a,b" );
+queryDeleteColumn( q, "b" );
+assert queryColumnExists( q, "b" ) == false : "testDeleteColumn";
+assert queryColumnExists( q, "a" ) : "testDeleteColumn keeps";

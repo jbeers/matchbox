@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderEndsWithTest.java
+// testEndsWithHeadless
+sb = sb{"Hello BoxLang"};
+result = stringBuilderEndsWith( sb, "Lang" );
+assert result == true : "testEndsWithHeadless";
+
+// testEndsWithMember
+sb = sb{"Hello BoxLang"};
+result = sb.endsWith( "boxlang" );
+assert result == false : "testEndsWithMember";

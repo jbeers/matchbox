@@ -1,0 +1,25 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/jdbc/IsInTransactionTest.java
+
+// testWithinTransaction
+// MatchBox does not currently parse the BoxLang transaction tag syntax, so
+// use the source-level transaction BIFs to keep this behavior test parseable.
+transactionBegin();
+result = isWithinTransaction();
+transactionRollback();
+assert result == true : "testWithinTransaction";
+
+// testNotWithinTransaction
+queryExecute( "SELECT 1 FROM developers" );
+result = isWithinTransaction();
+assert result == false : "testNotWithinTransaction";
+
+// testInTransaction
+transactionBegin();
+result = isInTransaction();
+transactionRollback();
+assert result == true : "testInTransaction";
+
+// testNotInTransaction
+queryExecute( "SELECT 1 FROM developers" );
+result = isInTransaction();
+assert result == false : "testNotInTransaction";

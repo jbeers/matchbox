@@ -1,0 +1,14 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsFileObjectTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testTrueConditions
+testFile = getTempDirectory() & "boxlang_compat_isfile.txt";
+fileWrite( testFile, "x" );
+assert isFileObject( fileOpen( testFile, "write" ) ) : "testTrueConditions";
+
+// testFalseConditions
+assert isFileObject( testFile ) == false : "testFalseConditions path";
+assert isFileObject( createObject( "java", "java.io.File" ) ) == false : "testFalseConditions java-class";

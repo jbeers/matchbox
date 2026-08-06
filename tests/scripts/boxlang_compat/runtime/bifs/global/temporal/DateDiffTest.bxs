@@ -1,0 +1,111 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/DateDiffTest.java
+
+date1 = parseDateTime( "2024-01-20T00:00:00Z" );
+date2 = parseDateTime( "2023-01-20T00:00:00Z" );
+
+// testDateDiffYears
+result = dateDiff( "yyyy", date1, date2 );
+assert result == -1 : "testDateDiffYears";
+
+// testDateDiffMemberYears
+result = date1.diff( "yyyy", date2 );
+assert result == -1 : "testDateDiffMemberYears";
+
+// testDateDiffMonths
+result = dateDiff( "m", date1, date2 );
+assert result == -12 : "testDateDiffMonths";
+
+// testDateDiffMemberMonths
+result = date1.diff( "m", date2 );
+assert result == -12 : "testDateDiffMemberMonths";
+
+// testDateDiffDays
+result = dateDiff( "d", date1, date2 );
+assert result == -365 : "testDateDiffDays";
+
+// testDateDiffMemberDays
+result = date1.diff( "d", date2 );
+assert result == -365 : "testDateDiffMemberDays";
+
+// testDateDiffWeekDays
+date1 = parseDateTime( "2024-01-20T00:00:00Z" );
+date2 = parseDateTime( "2024-01-15T00:00:00Z" );
+result = dateDiff( "wd", date1, date2 );
+assert result == -5 : "testDateDiffWeekDays";
+
+// testDateDiffMemberWeekDays
+result = date1.diff( "wd", date2 );
+assert result == -5 : "testDateDiffMemberWeekDays";
+
+// testDateDiffWeeks
+date1 = parseDateTime( "2024-01-20T00:00:00Z" );
+date2 = parseDateTime( "2023-01-20T00:00:00Z" );
+result = dateDiff( "w", date1, date2 );
+assert result == -52 : "testDateDiffWeeks";
+
+// testDateDiffMemberWeeks
+result = date1.diff( "w", date2 );
+assert result == -52 : "testDateDiffMemberWeeks";
+
+// testDateDiffHours
+date1 = parseDateTime( "2024-01-20T23:00:00Z" );
+date2 = parseDateTime( "2024-01-20T00:00:00Z" );
+result = dateDiff( "h", date1, date2 );
+assert result == -23 : "testDateDiffHours";
+
+// testDateDiffMemberHours
+result = date1.diff( "h", date2 );
+assert result == -23 : "testDateDiffMemberHours";
+
+// testDateDiffMinutes
+date1 = parseDateTime( "2024-01-20T00:59:00Z" );
+date2 = parseDateTime( "2024-01-20T00:00:00Z" );
+result = dateDiff( "n", date1, date2 );
+assert result == -59 : "testDateDiffMinutes";
+
+// testDateDiffStringDate
+setTimezone( "UTC" );
+date1 = parseDateTime( "2024-01-20T00:59:00Z" );
+date2 = dateTimeFormat( parseDateTime( "2024-01-20T00:00:00Z" ), "MMM dd, YYYY 00:00:00" );
+result = dateDiff( "d", date1, date2 );
+assert result == 0 : "testDateDiffStringDate";
+
+// testDateDiffMemberMinutes
+result = date1.diff( "n", parseDateTime( "2024-01-20T00:00:00Z" ) );
+assert result == -59 : "testDateDiffMemberMinutes";
+
+// testDateDiffSeconds
+date1 = parseDateTime( "2024-01-20T00:01:00Z" );
+date2 = parseDateTime( "2024-01-20T00:00:00Z" );
+result = dateDiff( "s", date1, date2 );
+assert result == -60 : "testDateDiffSeconds";
+
+// testDateDiffMemberSeconds
+result = date1.diff( "s", date2 );
+assert result == -60 : "testDateDiffMemberSeconds";
+
+// testDateDiffMilliseconds
+date1 = parseDateTime( "2024-01-20T00:00:00.100Z" );
+date2 = parseDateTime( "2024-01-20T00:00:00.000Z" );
+result = dateDiff( "l", date1, date2 );
+assert result == -100 : "testDateDiffMilliseconds";
+
+// testDateDiffMemberMilliseconds
+result = date1.diff( "l", date2 );
+assert result == -100 : "testDateDiffMemberMilliseconds";
+
+// testDateDiffError
+threw = false;
+try {
+    result = dateDiff( "blah", date1, date2 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testDateDiffError";
+
+// testDateDiffFractionalDays
+date1 = parseDateTime( "2024-01-20T00:00:00.000Z" );
+date2 = parseDateTime( "2024-01-21T00:00:00.000Z" );
+fractionalDays = date2.toEpochMillis() * 1.1574074074074e-8;
+result = dateDiff( "d", date1, fractionalDays );
+assert result == 1 : "testDateDiffFractionalDays";

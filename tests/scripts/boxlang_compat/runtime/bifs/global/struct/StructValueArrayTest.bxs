@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructValueArrayTest.java
+r = structValueArray( { a: 1, b: 2 } );
+assert arrayLen( r ) == 2 : "testValueArray size";
+assert r[1] == 1 : "testValueArray 1";
+assert r[2] == 2 : "testValueArray 2";

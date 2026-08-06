@@ -1,0 +1,12 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderTrimTest.java
+// testTrimHeadless
+sb = sb{"  hello  "};
+stringBuilderTrim( sb );
+result = sb.toString();
+assert result == "hello" : "testTrimHeadless";
+
+// testTrimMember
+sb = sb{"  hello  "};
+sb.trim();
+result = sb.toString();
+assert result == "hello" : "testTrimMember";

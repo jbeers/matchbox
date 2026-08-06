@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructKeyExistsTest.java
+myStruct = { flea: "bar" };
+assert StructKeyExists( myStruct, "flea" ) : "testKeyExists";
+assert StructKeyExists( myStruct, "flah" ) == false : "testKeyExistsMissing";

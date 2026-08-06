@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/RTrimTest.java
+assert rTrim( "  Grant  " ) == "  Grant" : "testRTrim";
+assert rTrim( "---Hello---", "-" ) == "---Hello" : "testRTrimCustom";

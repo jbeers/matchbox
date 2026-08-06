@@ -1,0 +1,27 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/DecrementTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (operator not yet implemented): testItCanCompountDecrement exercises
+// pre/post decrement (`--i` / `i--`), and testDecrementSetThrows expects the
+// set-form of decrement to throw. MatchBox does not parse `++`/`--` yet, so
+// those methods cannot be expressed. The value semantics of the operator are
+// transcribed below using `-= 1`.
+
+// testItCanAddNumbers
+i = 3;
+i -= 1;
+assert i == 2 : "testItCanAddNumbers 3";
+i = 3.5;
+i -= 1;
+assert i == 2.5 : "testItCanAddNumbers 3.5";
+
+// testItCanAddStrings
+i = "3";
+i -= 1;
+assert i == 2 : "testItCanAddStrings 3";
+i = "3.5";
+i -= 1;
+assert i == 2.5 : "testItCanAddStrings 3.5";

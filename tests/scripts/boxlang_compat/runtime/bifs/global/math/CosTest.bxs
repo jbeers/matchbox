@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/CosTest.java
+// testItReturnsCosine
+assert abs( cos( 0.3 ) - 0.9553364891256059 ) < 0.0000001 : "testItReturnsCosine 0.3";
+assert abs( cos( -0.5 ) - 0.8775825618903728 ) < 0.0000001 : "testItReturnsCosine -0.5";
+// testItReturnsCosineMember
+assert abs( ( 1 ).cos() - 0.5403023058681397 ) < 0.0000001 : "testItReturnsCosineMember 1";
+assert abs( ( -1 ).cos() - 0.5403023058681397 ) < 0.0000001 : "testItReturnsCosineMember -1";

@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructAppendTest.java
+target = { a: 1 };
+StructAppend( target, { b: 2 } );
+assert target.a == 1 : "testAppend a";
+assert target.b == 2 : "testAppend b";
+target = { a: 1 };
+StructAppend( target, { a: 9 } );
+assert target.a == 9 : "testAppend overwrite";
+target = { cow: { total: 12 }, pig: { total: 5 } };
+appends = { cow: { total: 10, home: "farm" }, dog: { total: 2 } };
+StructAppend( target, appends, false );
+assert target.cow.total == 12 : "testAppend no-overwrite nested";
+assert target.cow.home == "farm" : "testAppend no-overwrite nested-new";
+assert target.dog.total == 2 : "testAppend no-overwrite new";

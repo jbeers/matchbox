@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/ThreadCurrentTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): every JVM assertion
+// requires java.lang.Thread class identity, current-thread identity, or Java
+// Thread methods that cannot be expressed as portable BoxLang source.

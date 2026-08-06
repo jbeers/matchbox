@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/PrintTest.java
+// The JVM test captures System.out; Java-native-array and Java-number cases are
+// omitted while source-level print calls remain active.
+
+print( "Hello World" );
+print( [ 1, 2, 3 ] );
+print( { a: 1, b: 2 } );
+assert true : "testPrint";

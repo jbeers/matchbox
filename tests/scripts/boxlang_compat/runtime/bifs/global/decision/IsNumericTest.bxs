@@ -1,0 +1,55 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsNumericTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testNumerics
+int = isnumeric( 123 );
+stringInt = isnumeric( "123" );
+stringFloat = isnumeric( "123.4" );
+assert int : "testNumerics int";
+assert stringInt : "testNumerics string-int";
+assert stringFloat : "testNumerics string-float";
+
+// testSimpleNumerics
+int = isnumeric( "abc83" );
+hexadecimal = isnumeric( "3FA5" );
+badFloat = isnumeric( "123.xx" );
+struct = isnumeric( {} );
+assert int == false : "testSimpleNumerics abc83";
+assert hexadecimal == false : "testSimpleNumerics hex";
+assert badFloat == false : "testSimpleNumerics bad-float";
+assert struct == false : "testSimpleNumerics struct";
+
+// testBooleans
+booltrue = isNumeric( true );
+boolfalse = isNumeric( false );
+stringtrue = isNumeric( "true" );
+stringfalse = isNumeric( "false" );
+assert booltrue == false : "testBooleans true";
+assert boolfalse == false : "testBooleans false";
+assert stringtrue == false : "testBooleans str-true";
+assert stringfalse == false : "testBooleans str-false";
+
+// testWithLocale
+assert isNumeric( "1.50", "en_US" ) : "testWithLocale en-US";
+assert isNumeric( "1,50", "de_AT" ) : "testWithLocale de-AT";
+assert isNumeric( "blah" ) == false : "testWithLocale blah";
+
+// testBifUKSeparator
+assert isNumeric( "999" & char( 160 ) & "999", "en_UK" ) : "testBifUKSeparator";
+
+// testBooleanFalse
+result = isNumeric( true );
+result2 = isNumeric( false );
+result3 = isNumeric( "true" );
+result4 = isNumeric( "false" );
+result5 = isNumeric( "yes" );
+result6 = isNumeric( "no" );
+assert result == false : "testBooleanFalse true";
+assert result2 == false : "testBooleanFalse false";
+assert result3 == false : "testBooleanFalse str-true";
+assert result4 == false : "testBooleanFalse str-false";
+assert result5 == false : "testBooleanFalse yes";
+assert result6 == false : "testBooleanFalse no";

@@ -1,0 +1,21 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/PlusTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): testItCanAddDurationToDate and testItCanAddNumberToDate
+// operate on DateTime values not yet expressible in MatchBox.
+
+// testItCanAddNumbers
+assert ( 3 + 2 ) == 5 : "testItCanAddNumbers 3-2";
+assert ( 3.5 + 2.5 ) == 6 : "testItCanAddNumbers 3.5-2.5";
+
+// testItCanAddStrings
+assert ( "3" + "2" ) == 5 : "testItCanAddStrings 3-2";
+assert ( "3.5" + "2.5" ) == 6 : "testItCanAddStrings 3.5-2.5";
+
+// testItCanCompountAdd
+i = 4;
+i += 2;
+assert i == 6 : "testItCanCompountAdd";

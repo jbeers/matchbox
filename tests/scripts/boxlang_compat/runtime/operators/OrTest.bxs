@@ -1,0 +1,15 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/OrTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanPerformOr
+assert ( true || true ) : "testItCanPerformOr true-true";
+assert ( true || false ) : "testItCanPerformOr true-false";
+assert ( false || true ) : "testItCanPerformOr false-true";
+assert ( false || false ) == false : "testItCanPerformOr false-false";
+assert ( "true" || "true" ) : "testItCanPerformOr str-true-true";
+assert ( "true" || "false" ) : "testItCanPerformOr str-true-false";
+assert ( "false" || "true" ) : "testItCanPerformOr str-false-true";
+assert ( "false" || "false" ) == false : "testItCanPerformOr str-false-false";

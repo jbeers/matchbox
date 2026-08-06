@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructToSortedTest.java
+myStruct = { foo: 3, bar: 1, zena: 2 };
+r = StructToSorted( myStruct, "numeric" );
+assert isStruct( r ) : "testToSorted is-struct";
+assert structCount( r ) == 3 : "testToSorted size";

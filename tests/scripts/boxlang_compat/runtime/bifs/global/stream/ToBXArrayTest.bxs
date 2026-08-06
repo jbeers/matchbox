@@ -1,0 +1,8 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stream/ToBXArrayTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test calls
+// `.stream().toBXArray()` on BoxLang values, which requires Java Stream
+// interop that MatchBox does not provide. No BoxLang source outside that
+// interop is exercised.
+// ---------------------------------------------------------------------------

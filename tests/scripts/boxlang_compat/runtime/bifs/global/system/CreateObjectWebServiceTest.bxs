@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/CreateObjectWebServiceTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test requires
+// Java SOAP clients, WSDL class generation, and network-backed services.

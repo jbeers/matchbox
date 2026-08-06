@@ -1,0 +1,13 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/CreateUUIDTest.java
+
+uuid = createUUID();
+assert len( uuid ) == 36 : "isStandardUUIDFormat length";
+parts = listToArray( uuid, "-" );
+assert arrayLen( parts ) == 5 : "isStandardUUIDFormat parts";
+assert len( parts[ 1 ] ) == 8 : "isStandardUUIDFormat first-part";
+assert len( parts[ 2 ] ) == 4 : "isStandardUUIDFormat second-part";
+assert len( parts[ 3 ] ) == 4 : "isStandardUUIDFormat third-part";
+assert len( parts[ 4 ] ) == 4 : "isStandardUUIDFormat fourth-part";
+assert len( parts[ 5 ] ) == 12 : "isStandardUUIDFormat fifth-part";
+assert reFind( "^[A-Fa-f0-9]+-[A-Fa-f0-9]+-[A-Fa-f0-9]+-[A-Fa-f0-9]+-[A-Fa-f0-9]+$", uuid ) == 1 : "testIsHexadecimal";
+assert uuid == lCase( uuid ) : "testIsNotForcedUppercase";

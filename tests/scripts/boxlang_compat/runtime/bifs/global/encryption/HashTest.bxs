@@ -1,0 +1,75 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/encryption/HashTest.java
+// ---------------------------------------------------------------------------
+
+// testHashString
+result = hash( "Hash me baby!" );
+assert isString( result ) : "testHashString type";
+assert len( result ) == 32 : "testHashString length";
+
+// testHash40String
+result = hash40( "Hash me baby!" );
+assert isString( result ) : "testHash40String type";
+assert len( result ) == 40 : "testHash40String length";
+
+// testHashStruct
+result = hash( { "action": "Hash me baby!" } );
+assert isString( result ) : "testHashStruct type";
+assert len( result ) == 32 : "testHashStruct length";
+
+// testHashArray
+result = hash( [ "Hash me baby!" ] );
+assert isString( result ) : "testHashArray type";
+assert len( result ) == 32 : "testHashArray length";
+
+// testHashStringAlgorithm
+result = hash( "Hash me baby!", "sha512", "utf-16" );
+assert isString( result ) : "testHashStringAlgorithm type";
+assert len( result ) == 128 : "testHashStringAlgorithm length";
+
+// testHashAlgorithmError
+threw = false;
+try {
+    result = hash( "Hash me baby!", "ickyalgorithm" );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testHashAlgorithmError";
+
+// testHashEncodedString
+result = hash( "Hash me baby!", "md5", "utf-16" );
+assert isString( result ) : "testHashEncodedString type";
+assert len( result ) == 32 : "testHashEncodedString length";
+
+// testHashIterationsString
+result = hash( "Hash me baby!", "md5", "utf-16", 10 );
+assert isString( result ) : "testHashIterationsString type";
+assert len( result ) == 32 : "testHashIterationsString length";
+
+// testMemberString
+result = "Hash me baby!".hash();
+assert isString( result ) : "testMemberString type";
+assert len( result ) == 32 : "testMemberString length";
+
+// testQuickHash
+result = hash( "foo", "QUICK" );
+assert len( result ) == 16 : "testQuickHash length";
+assert result == "4d780c14822d4653" : "testQuickHash value";
+
+// testIterations
+result = hash( "hello world", "md5", "utf-8" );
+assert result == "5eb63bbbe01eeed093cb22bb8f5acdc3" : "testIterations default";
+result = hash( "hello world", "md5", "utf-8", 1 );
+assert result == "5eb63bbbe01eeed093cb22bb8f5acdc3" : "testIterations one";
+result = hash( "hello world", "md5", "utf-8", 2 );
+assert result == "241d8a27c836427bd7f04461b60e7359" : "testIterations two";
+result = hash( "hello world", "md5", "utf-8", 3 );
+assert result == "765ee851263ecc8bdb38f7f13bb137ea" : "testIterations three";
+result = hash( "hello world", "md5", "utf-8", 4 );
+assert result == "9074036bc3f46203468c06b09b303fb5" : "testIterations four";
+result = hash( "hello world", "md5", "utf-8", 5 );
+assert result == "58113448b78dec752c533eba7f5eab99" : "testIterations five";
+
+// hashStringAndBytesEqual
+testString = "Hash me baby!";
+assert hash( testString ) == hash( charsetDecode( testString, "utf-8" ) ) : "hashStringAndBytesEqual";

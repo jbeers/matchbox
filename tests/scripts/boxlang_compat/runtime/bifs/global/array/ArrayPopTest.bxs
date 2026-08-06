@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayPopTest.java
+a = ["a","b","c"];
+v = arrayPop( a );
+assert v == "c" : "testPop value";
+assert arrayLen( a ) == 2 : "testPop size";
+a = [];
+assert arrayPop( a, "default" ) == "default" : "testPop default";
+assert a.len() == 0 : "testPop default size";

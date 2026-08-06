@@ -1,0 +1,10 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/dynamic/casters/DateTimeCasterTest.java
+// ---------------------------------------------------------------------------
+// SKIPPED [boxlang_compat] (JVM-only / internal BoxLang behavior, hard
+// requirement): the JVM test drives the internal Java DateTimeCasterTest class directly
+// with Java types (java.util collections/iterables, java.time values, Query,
+// XML, exceptions, Key, StringBuilder, ...) and asserts Java type identity
+// (instanceof). No BoxLang source is evaluated, so there is nothing to
+// transfer as a black-box script.
+// ---------------------------------------------------------------------------

@@ -1,0 +1,352 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/set/SetBIFsTest.java
+// ---------------------------------------------------------------------------
+
+// testSetNewDefault
+s = setNew();
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM assertion
+// checks the internal BoxSet Java class; source-level set behavior remains active.
+assert s.size() == 0 : "testSetNewDefault size";
+
+// testSetNewFromArray
+s = setNew( type="linked", values=[1, 2, 2, 3, 3] );
+assert s.size() == 3 : "testSetNewFromArray size";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): BoxSet.Type.LINKED is
+// an internal JVM enum assertion.
+
+// testSetOf
+s = setOf( 1, 2, 2, 3 );
+assert s.size() == 3 : "testSetOf size";
+
+// testArrayToSet
+s = [1, 2, 2, 3].toSet();
+assert s.size() == 3 : "testArrayToSet size";
+
+// testCastAsSet
+s = [1, 2, 2].toSet();
+result = s castAs "Set";
+assert result.size() == 2 : "testCastAsSet size";
+
+// testAddAndAppend
+s = setNew();
+s.add( 1 );
+s.append( 2 );
+boxSetAdd( s, 3 );
+result = s.size();
+assert result == 3 : "testAddAndAppend size";
+
+// testContainsAndHas
+s = [1, 2, 3].toSet();
+a = s.contains( 2 );
+b = s.has( 2 );
+c = s.has( 99 );
+result = a & "," & b & "," & c;
+assert result == "true,true,false" : "testContainsAndHas";
+
+// testRemoveAndDelete
+s = [1, 2, 3].toSet();
+s.remove( 2 );
+s.delete( 3 );
+result = s.size();
+assert result == 1 : "testRemoveAndDelete size";
+
+// testSizeAliases
+s = setOf( 1, 2, 3 );
+result = s.size() & "," & s.len() & "," & s.length();
+assert result == "3,3,3" : "testSizeAliases";
+
+// testIsEmptyAndClear
+s = [1, 2].toSet();
+before = s.isEmpty();
+s.clear();
+after = s.isEmpty();
+result = before & "," & after;
+assert result == "false,true" : "testIsEmptyAndClear";
+
+// testSetAlgebra
+a = [1, 2, 3].toSet();
+b = [3, 4, 5].toSet();
+u = boxSetUnion( a, b );
+i = a.intersection( b );
+d = a.difference( b );
+x = a.symmetricDifference( b );
+result = u.size() & "," & i.size() & "," & d.size() & "," & x.size();
+assert result == "5,1,2,4" : "testSetAlgebra";
+
+// testRelations
+a = [1, 2].toSet();
+b = [1, 2, 3].toSet();
+c = [9, 10].toSet();
+result = a.isSubsetOf( b ) & "," & b.isSupersetOf( a ) & "," & a.isDisjointFrom( c );
+assert result == "true,true,true" : "testRelations";
+
+// testFunctional
+s = [1, 2, 3, 4, 5].toSet();
+doubled = s.map( v -> v * 2 );
+evens = s.filter( v -> v % 2 == 0 );
+total = s.reduce( ( acc, v ) -> acc + v, 0 );
+counter = [0];
+s.each( function( v ) { counter[1] += v; } );
+result = doubled.size() & "," & evens.size() & "," & total & "," & counter[1];
+assert result == "5,2,15,15" : "testFunctional";
+
+// testPredicateMethods
+s = [1, 2, 3, 4].toSet();
+e = s.every( v -> v > 0 );
+so = s.some( v -> v > 3 );
+n = s.none( v -> v > 100 );
+f = s.find( v -> v > 2 );
+result = e & "," & so & "," & n & "," & ( f >= 3 ? "yes" : "no" );
+assert result == "true,true,true,yes" : "testPredicateMethods";
+
+// testConversion
+s = setNew( type="linked", values=["a","b","c"] );
+arr = s.toArray();
+list = s.toList( "-" );
+result = arr.len() & "," & list;
+assert result == "3,a-b-c" : "testConversion";
+
+// testBulkMutators
+s = [1, 2, 3].toSet();
+s.addAll( [4, 5] );
+afterAdd = s.size();
+s.removeAll( [1, 2] );
+afterRem = s.size();
+s.retainAll( [3, 999] );
+afterRet = s.size();
+result = afterAdd & "," & afterRem & "," & afterRet;
+assert result == "5,3,1" : "testBulkMutators";
+
+// testLinkedOrder
+s = setNew( type="linked", values=["c","a","b","a"] );
+arr = s.toArray();
+assert arr.len() == 3 : "testLinkedOrder size";
+assert arr[1] == "c" : "testLinkedOrder first";
+assert arr[2] == "a" : "testLinkedOrder second";
+assert arr[3] == "b" : "testLinkedOrder third";
+
+// testSetLiteralDefault
+s = set{ 1, 2, 2, 3 };
+assert s.size() == 3 : "testSetLiteralDefault size";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): BoxSet.Type.DEFAULT is
+// an internal JVM enum assertion.
+
+// testEmptySetLiteral
+s = set{};
+assert s.size() == 0 : "testEmptySetLiteral size";
+
+// testSetAsIdentifier
+set = "hello";
+result = set;
+assert result == "hello" : "testSetAsIdentifier";
+
+// testStringListToSetDefault
+s = "a,b,c,a".listToSet();
+assert s.size() == 3 : "testStringListToSetDefault size";
+
+// testStringListToSetCustomDelimiter
+s = "a|b|c|b".listToSet( delimiter="|", type="linked" );
+assert s.size() == 3 : "testStringListToSetCustomDelimiter size";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): BoxSet.Type.LINKED is
+// an internal JVM enum assertion.
+
+// testStructKeySet
+s = { name: "Luis", age: 42, email: "x@y.z" }.keySet();
+result = s.size();
+assert result == 3 : "testStructKeySet size";
+
+// testStructKeySetNonStringKeys
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): this JVM test requires
+// java.lang.Thread, Java stack traces, and Java object keySet infrastructure.
+
+// testStructKeySetCaseInsensitive
+s = { name: "Luis", age: 42 }.keySet();
+result = s.isCaseSensitive();
+assert result == false : "testStructKeySetCaseInsensitive";
+
+// testStructKeySetCaseSensitive
+s = structNew( "casesensitive" );
+s[ "Name" ] = "Luis";
+s[ "name" ] = "Brad";
+keys = s.keySet();
+result = keys.isCaseSensitive();
+hasName = keys.contains( "Name" );
+hasname = keys.contains( "name" );
+assert result == true : "testStructKeySetCaseSensitive flag";
+assert hasName == true : "testStructKeySetCaseSensitive Name";
+assert hasname == true : "testStructKeySetCaseSensitive name";
+
+// testStructValueSet
+s = { a: 1, b: 1, c: 2 }.valueSet();
+result = s.size();
+assert result == 2 : "testStructValueSet size";
+
+// testJsonSerialization
+s = setNew( type="linked", values=["a","b","c"] );
+result = jsonSerialize( s );
+assert result == "[\"a\",\"b\",\"c\"]" : "testJsonSerialization";
+
+// testSortedOrder
+s = setNew( type="sorted", values=[9, 1, 5, 3] );
+arr = s.toArray();
+assert arr[1] == 1 : "testSortedOrder first";
+assert arr[2] == 3 : "testSortedOrder second";
+assert arr[3] == 5 : "testSortedOrder third";
+assert arr[4] == 9 : "testSortedOrder fourth";
+
+// testSetNewCaseSensitiveTrue
+s = setNew( values=["Hello", "hello", "HELLO"], caseSensitive=true );
+result = s.size();
+assert result == 3 : "testSetNewCaseSensitiveTrue";
+
+// testSetNewCaseSensitiveFalseDefault
+s = setNew( values=["Hello", "hello", "HELLO"] );
+result = s.size();
+assert result == 1 : "testSetNewCaseSensitiveFalseDefault";
+
+// testSetNewCaseSensitiveNumericsStillNormalized
+s = setNew( values=[1, 1.0], caseSensitive=true );
+result = s.size();
+assert result == 1 : "testSetNewCaseSensitiveNumericsStillNormalized";
+
+// testSetNewCaseSensitiveContains
+s = setNew( values=["Foo", "Bar"], caseSensitive=true );
+result = s.contains( "foo" );
+assert result == false : "testSetNewCaseSensitiveContains";
+
+// testSetNewCaseInsensitiveContains
+s = setNew( values=["Foo", "Bar"], caseSensitive=false );
+result = s.contains( "foo" );
+assert result == true : "testSetNewCaseInsensitiveContains";
+
+// testSetNewIsSynchronizedDefault
+s = setNew();
+result = s.isSynchronized();
+assert result == true : "testSetNewIsSynchronizedDefault";
+
+// testSetNewIsSynchronizedFalse
+s = setNew( isSynchronized=false );
+result = s.isSynchronized();
+assert result == false : "testSetNewIsSynchronizedFalse";
+
+// testSetNewIsSynchronizedFalseWithValues
+s = setNew( values=[1,2,3], isSynchronized=false );
+result = s.isSynchronized();
+assert result == false : "testSetNewIsSynchronizedFalseWithValues flag";
+assert s.size() == 3 : "testSetNewIsSynchronizedFalseWithValues size";
+
+// testPlusOperatorUnion
+a = set{ 1, 2, 3 };
+b = set{ 3, 4, 5 };
+result = a + b;
+assert result.size() == 5 : "testPlusOperatorUnion size";
+
+// testMinusOperatorDifference
+a = set{ 1, 2, 3 };
+b = set{ 2, 3, 4 };
+result = a - b;
+assert result.size() == 1 : "testMinusOperatorDifference size";
+assert result.contains( 1 ) : "testMinusOperatorDifference value";
+
+// testStarOperatorIntersection
+a = set{ 1, 2, 3 };
+b = set{ 2, 3, 4 };
+result = a * b;
+assert result.size() == 2 : "testStarOperatorIntersection size";
+assert result.contains( 2 ) : "testStarOperatorIntersection 2";
+assert result.contains( 3 ) : "testStarOperatorIntersection 3";
+
+// testCaretOperatorSymmetricDifference
+a = set{ 1, 2, 3 };
+b = set{ 2, 3, 4 };
+result = a ^ b;
+assert result.size() == 2 : "testCaretOperatorSymmetricDifference size";
+assert result.contains( 1 ) : "testCaretOperatorSymmetricDifference 1";
+assert result.contains( 4 ) : "testCaretOperatorSymmetricDifference 4";
+
+// testOperatorsFallThroughToMath
+plus = 2 + 3;
+minus = 5 - 2;
+star = 4 * 3;
+caret = 2 ^ 3;
+result = plus & "," & minus & "," & star & "," & caret;
+assert result == "5,3,12,8" : "testOperatorsFallThroughToMath";
+
+// testStarEqualCompoundIntersection
+a = set{ 1, 2, 3 };
+a *= set{ 2, 3, 4 };
+result = a;
+assert result.size() == 2 : "testStarEqualCompoundIntersection size";
+
+// testExplicitStarAssignmentIntersection
+a = set{ 1, 2, 3 };
+a = a * set{ 2, 3, 4 };
+result = a;
+assert result.size() == 2 : "testExplicitStarAssignmentIntersection size";
+assert result.contains( 2 ) : "testExplicitStarAssignmentIntersection 2";
+assert result.contains( 3 ) : "testExplicitStarAssignmentIntersection 3";
+
+// testSetLiteralSpreadArray
+arr = [3, 4, 5];
+result = set{ 1, 2, ...arr };
+assert result.size() == 5 : "testSetLiteralSpreadArray size";
+assert result.contains( 1 ) : "testSetLiteralSpreadArray 1";
+assert result.contains( 5 ) : "testSetLiteralSpreadArray 5";
+
+// testSetLiteralSpreadSet
+other = set{ 2, 3 };
+result = set{ 1, ...other, 4 };
+assert result.size() == 4 : "testSetLiteralSpreadSet size";
+
+// testSetLiteralSpreadDeduplicates
+arr = [1, 2, 3];
+result = set{ 1, 2, ...arr };
+assert result.size() == 3 : "testSetLiteralSpreadDeduplicates size";
+
+// testSetLiteralSpreadRange
+result = set{ ...(1..5) };
+assert result.size() == 5 : "testSetLiteralSpreadRange size";
+assert result.contains( 1 ) : "testSetLiteralSpreadRange 1";
+assert result.contains( 5 ) : "testSetLiteralSpreadRange 5";
+
+// testSetLiteralSpreadRangeDeduplicates
+result = set{ 3, 4, ...(1..5) };
+assert result.size() == 5 : "testSetLiteralSpreadRangeDeduplicates size";
+
+// testSetNewFromRange
+result = setNew( values=1..5 );
+assert result.size() == 5 : "testSetNewFromRange size";
+assert result.contains( 1 ) : "testSetNewFromRange 1";
+assert result.contains( 5 ) : "testSetNewFromRange 5";
+
+// testSetNewFromRangePositional
+result = setNew( "linked", 1..5 );
+assert result.size() == 5 : "testSetNewFromRangePositional size";
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): BoxSet.Type.LINKED is
+// an internal JVM enum assertion.
+
+// testSetOfWithRange
+result = setOf( ...(1..3) );
+assert result.size() == 3 : "testSetOfWithRange size";
+
+// testQueryToSet
+q = queryNew( "name,age", "varchar,integer", [ [ "Alice", 30 ], [ "Bob", 25 ] ] );
+result = q.toSet();
+assert result.size() == 2 : "testQueryToSet size";
+assert isStruct( result[1] ) : "testQueryToSet row struct";
+
+// testQueryColumnToSet
+q = queryNew( "name", "varchar", [ [ "Alice" ], [ "Bob" ], [ "Alice" ] ] );
+result = q.columnData( "name" ).toSet();
+assert result.size() == 2 : "testQueryColumnToSet size";
+assert result.contains( "Alice" ) : "testQueryColumnToSet Alice";
+assert result.contains( "Bob" ) : "testQueryColumnToSet Bob";
+
+// testDuplicateSet
+original = setNew( type="linked", values=[1, 2, 3] );
+copy = duplicate( original );
+copy.add( 4 );
+result = original.size();
+copySize = copy.size();
+assert result == 3 : "testDuplicateSet original";
+assert copySize == 4 : "testDuplicateSet copy";

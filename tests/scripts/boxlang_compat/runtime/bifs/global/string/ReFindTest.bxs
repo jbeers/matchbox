@@ -1,0 +1,14 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReFindTest.java
+r = reFind( "1[2-3]", "sdf", 1, false, "one" );
+assert r == 0 : "testReFindNoMatch";
+r = reFind( "(1)[2-3]", "test 123 test 123!", 1, false, "one" );
+assert isNumeric( r ) : "testReFindOne";
+r = reFind( "(1)[2-3]", "test 123 test 123!", 1, false, "all" );
+assert arrayLen( r ) == 2 : "testFindAllNoSub size";
+assert r[1] == 6 : "testFindAllNoSub first";
+assert r[2] == 15 : "testFindAllNoSub second";
+r = reFind( "(1)[2-3]", "test 123 test 123!", 1, true, "all" );
+assert arrayLen( r ) == 2 : "testFindAllWithSub size";
+assert isStruct( r[1] ) : "testFindAllWithSub struct";
+assert r[1].match[1] == "12" : "testFindAllWithSub match";
+assert r[1].pos[1] == 6 : "testFindAllWithSub position";

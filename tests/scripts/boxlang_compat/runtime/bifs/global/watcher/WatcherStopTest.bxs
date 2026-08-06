@@ -1,0 +1,11 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/watcher/WatcherStopTest.java
+
+// testWatcherStop
+watcherShutdownAll( false );
+watcherNew( "myWatcher", [ "./src" ], ( event, watcherContext ) => {} );
+watcherStart( "myWatcher" );
+instance = watcherStop( "myWatcher" );
+stopped = instance.isStopped();
+result = watcherExists( "myWatcher" );
+assert result : "testWatcherStop still-registered";
+assert stopped : "testWatcherStop stopped";

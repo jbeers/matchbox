@@ -1,0 +1,50 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/temporal/CreateTimeSpanTest.java
+
+// testCreateTimeSpanEmpty
+result = createTimespan( 0, 0, 0, 0, 0 );
+assert result == 0 : "testCreateTimeSpanEmpty millis";
+
+// testCreateTimeSpanHours
+result = createTimespan( 0, 1, 0, 0, 0 );
+assert result == 3600 : "testCreateTimeSpanHours";
+
+// testCreateTimeSpanMulti
+result = createTimespan( 365, 1, 2, 3, 4 );
+assert result == 31539603.004 : "testCreateTimeSpanMulti";
+
+// testCreateTimeSpanErro
+threw = false;
+try {
+    result = createTimespan( 365, 1, 2 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testCreateTimeSpanErro";
+
+// testCreateTimeSpanDecimals
+assert createTimespan( 0.5, 0, 0, 0 ) == 43200 : "testCreateTimeSpanDecimals days";
+assert createTimespan( 0, 0.5, 0, 0 ) == 1800 : "testCreateTimeSpanDecimals hours";
+assert createTimespan( 0, 0, 0.5, 0 ) == 30 : "testCreateTimeSpanDecimals minutes";
+assert createTimespan( 0, 0, 0, 0.5 ) == 0.5 : "testCreateTimeSpanDecimals seconds";
+
+// testMathGeneratedBigDecimals
+SessionTimeoutSeconds = 1800;
+SessionTimeoutDays = Floor( SessionTimeoutSeconds / 86400 );
+SessionTimeoutSeconds = SessionTimeoutSeconds - ( SessionTimeoutDays * 86400 );
+SessionTimeoutHours = Floor( SessionTimeoutSeconds / 3600 );
+SessionTimeoutSeconds = SessionTimeoutSeconds - ( SessionTimeoutHours * 3600 );
+SessionTimeoutMinutes = Floor( SessionTimeoutSeconds / 60 );
+SessionTimeoutSeconds = SessionTimeoutSeconds - ( SessionTimeoutMinutes * 60 );
+timeouts = {
+    SessionTimeoutDays: SessionTimeoutDays,
+    SessionTimeoutHours: SessionTimeoutHours,
+    SessionTimeoutMinutes: SessionTimeoutMinutes,
+    SessionTimeoutSeconds: SessionTimeoutSeconds
+};
+result = CreateTimeSpan(
+    timeouts.SessionTimeoutDays,
+    timeouts.SessionTimeoutHours,
+    timeouts.SessionTimeoutMinutes,
+    timeouts.SessionTimeoutSeconds
+);
+assert result == 1800 : "testMathGeneratedBigDecimals";

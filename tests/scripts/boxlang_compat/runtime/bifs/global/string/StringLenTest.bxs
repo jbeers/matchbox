@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringLenTest.java
+assert len( "abc" ) == 3 : "testLen";
+assert "abc".len() == 3 : "testLenMember";
+assert len( 12345 ) == 5 : "testLenNumber";

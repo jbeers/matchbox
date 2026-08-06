@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReReplaceTest.java
+assert reReplace( "hello world", "world", "BoxLang", "one" ) == "hello BoxLang" : "testReReplace";
+assert reReplace( "a1b2c3", "[0-9]", "", "all" ) == "abc" : "testReReplaceAll";

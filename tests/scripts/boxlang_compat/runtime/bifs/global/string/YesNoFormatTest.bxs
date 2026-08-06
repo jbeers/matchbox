@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/YesNoFormatTest.java
+assert yesNoFormat( true ) == "Yes" : "testYesNoFormat true";
+assert yesNoFormat( false ) == "No" : "testYesNoFormat false";

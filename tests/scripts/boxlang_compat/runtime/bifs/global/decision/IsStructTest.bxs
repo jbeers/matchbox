@@ -1,0 +1,24 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/decision/IsStructTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the omitted case
+// constructs a java.util.HashMap through Java interop.
+
+// testTrueConditions
+assert isStruct( {} ) : "testTrueConditions struct";
+assert isStruct( {} ) : "testTrueConditions ordered-struct";
+
+// testFalseConditions
+resultNumber = isStruct( 0 );
+resultBoolean = isStruct( false );
+resultDate = isStruct( now() );
+resultArray = isStruct( [] );
+resultString = isStruct( "someString" );
+assert resultNumber == false : "testFalseConditions number";
+assert resultBoolean == false : "testFalseConditions boolean";
+assert resultDate == false : "testFalseConditions date";
+assert resultArray == false : "testFalseConditions array";
+assert resultString == false : "testFalseConditions string";

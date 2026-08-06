@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayNoneTest.java
+r = arrayNone( [1,3,5], function( item ) { return item == 9; } );
+assert r : "testNone true";
+r = arrayNone( [1,3,5], function( item ) { return item == 3; } );
+assert r == false : "testNone false";
+r = arrayNone( [1,3,5], function( item ) { return item == 9; }, true );
+assert r : "testNone parallel";
+r = arrayNone( [1,3,5], function( item ) { return item == 9; }, true, 2 );
+assert r : "testNone parallel maxThreads";

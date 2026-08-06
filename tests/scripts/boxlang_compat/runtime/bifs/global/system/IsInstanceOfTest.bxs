@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/IsInstanceOfTest.java
+// Java collection and Java/BoxLang classloader cases are omitted; the
+// language-level type checks remain active as behavior-gap assertions.
+
+assert isInstanceOf( [], "Array" ) : "testCheckType array";
+assert isInstanceOf( {}, "Struct" ) : "testCheckType struct";
+assert isInstanceOf( "boxlang", "String" ) : "testCheckType string";
+assert isInstanceOf( "boxlang", "Array" ) == false : "testCheckType false";

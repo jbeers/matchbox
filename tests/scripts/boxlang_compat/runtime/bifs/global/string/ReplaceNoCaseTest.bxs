@@ -1,0 +1,2 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ReplaceNoCaseTest.java
+assert replaceNoCase( "BoxLang IS great", "IS", "is" ) == "BoxLang is great" : "testReplaceNoCase";

@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/query/QueryColumnExistsTest.java
+q = queryNew( "a,b" );
+assert queryColumnExists( q, "a" ) : "testColumnExists";
+assert queryColumnExists( q, "zzz" ) == false : "testColumnNotExists";

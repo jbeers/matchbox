@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayDeleteTest.java
+arr = ["a","b","c"];
+arraydelete( arr, "b" );
+assert arrayLen( arr ) == 2 : "testDelete size";
+assert arr[2] == "c" : "testDelete value";
+arr = ["a","b","c","b"];
+arrayDelete( arr, "b", "all" );
+assert arrayLen( arr ) == 2 : "testDeleteAll size";
+assert arr[1] == "a" : "testDeleteAll first";
+assert arr[2] == "c" : "testDeleteAll second";

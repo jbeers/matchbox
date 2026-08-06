@@ -1,0 +1,54 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/JSONDeserializeTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testCanSerializeNull
+result = jsonDeserialize( "null" );
+assert result == null : "testCanSerializeNull";
+
+// testCanSerializeString
+result = jsonDeserialize( '"Hello World"' );
+assert result == "Hello World" : "testCanSerializeString";
+
+// testCanSerializeNumber
+result = jsonDeserialize( "42" );
+assert result == 42 : "testCanSerializeNumber";
+
+// testCanSerializeBoolean
+result = jsonDeserialize( "false" );
+assert result == false : "testCanSerializeBoolean";
+
+// testCanSerializeArray
+result = jsonDeserialize( '[1,"brad",true,[],null]' );
+assert isArray( result ) : "testCanSerializeArray is-array";
+assert arrayLen( result ) == 5 : "testCanSerializeArray size";
+assert result[1] == 1 : "testCanSerializeArray 1";
+assert result[2] == "brad" : "testCanSerializeArray brad";
+assert result[3] == true : "testCanSerializeArray true";
+assert isArray( result[4] ) : "testCanSerializeArray nested-array";
+assert result[5] == null : "testCanSerializeArray null";
+
+// testCanSerializeStruct
+result = jsonDeserialize( '{ "one" : "wood", "two" : null, "three" : "42.1", "four" : [1,2,3], "five" : {}, "six" : true }' );
+assert isStruct( result ) : "testCanSerializeStruct is-struct";
+assert structCount( result ) == 6 : "testCanSerializeStruct size";
+assert result.one == "wood" : "testCanSerializeStruct one";
+assert result.three == "42.1" : "testCanSerializeStruct three";
+assert isArray( result.four ) : "testCanSerializeStruct four-array";
+assert arrayLen( result.four ) == 3 : "testCanSerializeStruct four-size";
+assert result.six == true : "testCanSerializeStruct six";
+
+// testCanDeserializeQuerySerializedAsColumns
+queryAsJSON = jsonSerialize( queryNew( "col1,col2", "numeric,varchar", [[1,"brad"],[2,"wood"]] ), "column" );
+result = jsonDeserialize( queryAsJSON, false );
+assert isQuery( result ) : "testCanDeserializeQuery";
+assert queryRecordCount( result ) == 2 : "testCanDeserializeQuery rows";
+
+// testCanUseCustomDeserializers
+result = jsonDeserialize( '{"string":"boxlang","numeric":1,"date":"2022-10-31"}' );
+assert isStruct( result ) : "testCanUseCustomDeserializers struct";
+assert result.string == "boxlang" : "testCanUseCustomDeserializers string";
+date = result.date.toDateTime();
+assert isDate( date ) : "testCanUseCustomDeserializers date";

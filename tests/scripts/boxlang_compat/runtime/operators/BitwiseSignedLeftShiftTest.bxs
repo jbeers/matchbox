@@ -1,0 +1,10 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/BitwiseSignedLeftShiftTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testNumbers
+assert ( 12 b<< 25 ) == 402653184 : "testNumbers 12-25";
+assert ( 25 b<< 12 ) == 102400 : "testNumbers 25-12";
+assert ( 5 b<< 9 ) == 2560 : "testNumbers 5-9";

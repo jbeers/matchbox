@@ -1,0 +1,20 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/InstanceOfTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: MatchBox has no `isInstanceOf` BIF yet; this file is expected to fail
+// (red) until it lands.
+// ---------------------------------------------------------------------------
+
+// SKIPPED (JVM-only): the interface / superinterface / supertype methods and
+// testBoxLangPreCompiledClassNames construct Java collections (HashMap,
+// ArrayList, ConcurrentHashMap) and BoxLang class files; no BoxLang source
+// exists for them.
+
+// testItCanCheckType (expressible subset)
+assert ( isInstanceOf( "Brad", "String" ) ) : "testItCanCheckType String";
+assert ( isInstanceOf( "Brad", "java.lang.String" ) ) : "testItCanCheckType fq";
+assert ( isInstanceOf( "Brad", "JAVA.LANG.STRING" ) ) : "testItCanCheckType upper";
+assert ( isInstanceOf( "Brad", "FooBar" ) == false ) : "testItCanCheckType unknown";
+assert ( isInstanceOf( "Brad", "java.lang.Double" ) == false ) : "testItCanCheckType double";

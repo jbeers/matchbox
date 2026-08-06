@@ -1,0 +1,23 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/conversion/ToScriptTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testBif
+result = toScript( 123, "myVar" );
+assert result contains "123" : "testBif integer";
+result = toScript( "Hello, World!", "myVar" );
+assert result contains "Hello, World!" : "testBif string";
+result = toScript( [1,2,3], "myVar" );
+assert result contains "[1,2,3]" : "testCanScriptArrays";
+result = toScript( { name: "Grant" }, "myVar" );
+assert result contains '"name"' : "testCanScriptStruct key";
+assert result contains '"Grant"' : "testCanScriptStruct value";
+setTimezone( "UTC" );
+result = toScript( parseDateTime( "2024-03-07T16:35:43.362397-06:00" ), "myVar" );
+assert result contains "new Date" : "testCanScriptDate";
+query = queryNew( "col1", "varchar", { col1: "Grant" } );
+result = toScript( query, "myVar" );
+assert result contains "columns" : "testCanScriptQuery columns";
+assert result contains "Grant" : "testCanScriptQuery value";

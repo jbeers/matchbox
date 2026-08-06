@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructFindValueTest.java
+myStruct = { farm: "animals", zoo: "mammal" };
+r = structFindValue( myStruct, "animals", "all" );
+assert isArray( r ) : "testFindValue array";
+assert structCount( r[1] ) > 0 : "testFindValue meta";
+assert r[1].key == "farm" : "testFindValue key";
+assert r[1].path == ".farm" : "testFindValue path";
+myStruct = { cow: "farm", pig: "farm", cat: "house" };
+r = structFindValue( myStruct, "farm", "all" );
+assert arrayLen( r ) == 2 : "testFindValue all";

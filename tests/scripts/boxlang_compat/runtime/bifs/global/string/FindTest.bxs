@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/FindTest.java
+assert find( "ColdFusion", "BoxLang is great" ) == 0 : "testFindMissing";
+assert find( "Lang", "BoxLang is great" ) == 4 : "testFindPosition";
+assert find( "Lang", "BoxLang is great", 2 ) == 4 : "testFindStart";

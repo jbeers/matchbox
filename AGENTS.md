@@ -12,6 +12,7 @@ The VM includes tiered JIT compilation (Cranelift backend) for hot code paths, N
 cargo build                    # Build
 cargo test                     # Run all tests
 cargo test vm_array_bifs       # Run specific test
+cargo test --test boxlang_compat_tests  # Run the BoxLang compat transfer suite
 cargo clippy                   # Lint
 cargo build --release --features "bif-http,bif-zip"  # Verify release build
 ```

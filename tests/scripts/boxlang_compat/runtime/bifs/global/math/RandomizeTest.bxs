@@ -1,0 +1,8 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/RandomizeTest.java
+// SKIPPED (JVM-only): asserting reproducible PRNG output depends on the
+// underlying algorithm; only determinism-after-seed is observable.
+randomize( 12345 );
+a = rand();
+randomize( 12345 );
+b = rand();
+assert a == b : "testRandomize-deterministic";

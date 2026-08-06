@@ -1,0 +1,12 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/BitwiseComplementTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+//
+// NOTE: the `b~` bitwise operator is not parsed by MatchBox yet; this file
+// is expected to fail (red) until it lands.
+// ---------------------------------------------------------------------------
+
+// testNumbers
+assert ( b~ 35 ) == -36 : "testNumbers 35";
+assert ( b~ 2 ) == -3 : "testNumbers 2";

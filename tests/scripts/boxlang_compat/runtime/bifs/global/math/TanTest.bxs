@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/TanTest.java
+assert abs( tan( 1 ) - 1.5574077246549023 ) < 0.0000001 : "testItReturnsTan one";
+assert ( 1 ).tan() == tan( 1 ) : "testItReturnsTanMember one";
+assert abs( ( 0.5 ).tan() - 0.5463024898437905 ) < 0.0000001 : "testItReturnsTanMember half";

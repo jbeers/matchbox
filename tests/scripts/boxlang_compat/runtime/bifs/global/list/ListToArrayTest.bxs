@@ -1,0 +1,18 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/list/ListToArrayTest.java
+list = "a,b,c";
+result = listToArray( list );
+assert isArray( result ) : "testToArray is-array";
+assert arrayLen( result ) == 3 : "testToArray size";
+assert result[1] == "a" : "testToArray 1";
+assert result[2] == "b" : "testToArray 2";
+assert result[3] == "c" : "testToArray 3";
+result = listToArray( "foo,bar,,", ",", true );
+assert arrayLen( result ) == 4 : "testKeepEmpty size";
+assert result[4] == "" : "testKeepEmpty trailing";
+result = listToArray( "foo,bar|baz", ",|" );
+assert arrayLen( result ) == 3 : "testMultiDelim size";
+result = listToArray( list="foo,|bar,|baz", delimiter=",|", multiCharacterDelimiter=true );
+assert arrayLen( result ) == 3 : "testMultiCharDelim size";
+result = listToArray( "first second third", "" );
+assert result[1] == "f" : "testEmptyDelimiter first";
+assert result[6] == " " : "testEmptyDelimiter space";

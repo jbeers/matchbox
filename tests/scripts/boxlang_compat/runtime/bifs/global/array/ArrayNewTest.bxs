@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayNewTest.java
+r = arrayNew();
+assert isArray( r ) : "testNew";
+assert arrayLen( r ) == 0 : "testNew empty";

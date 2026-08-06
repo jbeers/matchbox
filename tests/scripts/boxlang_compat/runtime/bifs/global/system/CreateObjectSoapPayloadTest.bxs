@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/CreateObjectSoapPayloadTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM test uses
+// WireMock and BoxSoapClient Java interop to inspect SOAP payloads.

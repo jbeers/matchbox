@@ -1,0 +1,7 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileMoveTest.java
+src = getTempDirectory() & "/matchbox-move-src.txt";
+dst = getTempDirectory() & "/matchbox-move-dst.txt";
+fileWrite( src, "hello" );
+fileMove( src, dst );
+assert fileExists( dst ) : "testMove";
+assert fileExists( src ) == false : "testMoveSrcGone";

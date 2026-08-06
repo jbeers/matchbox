@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/MidTest.java
+assert mid( "abcdef", 2, 3 ) == "bcd" : "testMid";
+assert mid( "1234", 2 ) == "234" : "testMidToEnd";
+assert mid( "abcdef", 2, 0 ) == "" : "testMidZeroLen";

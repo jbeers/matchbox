@@ -1,0 +1,16 @@
+// ---------------------------------------------------------------------------
+// boxlang_compat: ortus/boxlang/runtime/operators/PowerTest.java
+// MatchBox black-box transfer of the BoxLang JVM test. One block per JVM
+// @Test method, using `assert <expr> : "<TestName>"`.
+// ---------------------------------------------------------------------------
+
+// testItCanPowerNumbers
+assert ( 3 ^ 2 ) == 9 : "testItCanPowerNumbers 3-2";
+assert ( 5 ^ 5 ) == 3125 : "testItCanPowerNumbers 5-5";
+// JVM asserts the full BigDecimal rendering of 2^5.5; MatchBox computes in
+// f64, so the exact string match is expected to diverge until decimal support.
+assert ( 2 ^ 5.5 ) == 45.25483399593904465518789947964251 : "testItCanPowerNumbers 2-5.5";
+
+// testItCanPowerStrings
+assert ( "3" ^ "2" ) == 9 : "testItCanPowerStrings 3-2";
+assert ( "5" ^ "5" ) == 3125 : "testItCanPowerStrings 5-5";

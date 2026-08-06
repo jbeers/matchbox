@@ -1,0 +1,5 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileGetMimeTypeTest.java
+p = getTempDirectory() & "/matchbox-mime-test.txt";
+fileWrite( p, "x" );
+r = fileGetMimeType( p );
+assert len( r ) > 0 : "testMimeType";

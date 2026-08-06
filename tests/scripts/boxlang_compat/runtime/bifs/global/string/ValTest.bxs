@@ -1,0 +1,4 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ValTest.java
+assert val( "123abc" ) == 123 : "testVal";
+assert val( "abc" ) == 0 : "testValZero";
+assert val( "3.14" ) == 3.14 : "testValDecimal";

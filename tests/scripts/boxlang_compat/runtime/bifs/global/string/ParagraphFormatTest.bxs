@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/ParagraphFormatTest.java
+r = paragraphFormat( "Line1" & chr( 10 ) & "Line2" );
+assert len( r ) > 0 : "testParagraphFormat";

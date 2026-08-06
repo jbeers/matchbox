@@ -1,0 +1,109 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/async/FutureNewTest.java
+
+// testIncompleteFuture
+result = FutureNew();
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only BoxFuture
+// class assertion has no source-level equivalent.
+assert result != null : "testIncompleteFuture result";
+
+// testCompleteFuture
+result = FutureNew( 42 );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only BoxFuture
+// class assertion has no source-level equivalent.
+assert result.get() == 42 : "testCompleteFuture value";
+
+// testCompleteFutureWithLambda
+result = FutureNew( () -> 42 );
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): the JVM-only BoxFuture
+// class assertion has no source-level equivalent.
+assert result.get() == 42 : "testCompleteFutureWithLambda value";
+
+// testCompleteExceptionally
+result = FutureNew( () => {
+    sleep( 1000 );
+    return 42;
+} );
+result.completeExceptionally( "My exception" );
+assert result.isCompletedExceptionally() : "testCompleteExceptionally";
+
+// testCompleteOnTimeout
+result = FutureNew( () => {
+    sleep( 1000 );
+    return 42;
+} );
+result.completeOnTimeout( 100, 200 );
+assert result.get() == 100 : "testCompleteOnTimeout default unit";
+
+result = FutureNew( () => {
+    sleep( 1000 );
+    return 42;
+} );
+result.completeOnTimeout( 100, 200, "milliseconds" );
+assert result.get() == 100 : "testCompleteOnTimeout milliseconds";
+
+// testJoinWith
+result = FutureNew( () => null ).joinOrDefault( 42 );
+assert result == 42 : "testJoinWith";
+
+// testGetWith
+result = FutureNew( () => null ).getOrDefault( 42 );
+assert result == 42 : "testGetWith";
+
+// testGetWithTimeout
+threw = false;
+try {
+    result = FutureNew( () => {
+        sleep( 1000 );
+        return 42;
+    } ).get( 100 );
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testGetWithTimeout";
+
+// testOrTimeout
+threw = false;
+try {
+    result = FutureNew( () => {
+        sleep( 1000 );
+        return 42;
+    } ).orTimeout( 100 );
+    result.get();
+} catch ( e ) {
+    threw = true;
+}
+assert threw : "testOrTimeout";
+
+// testOnError
+result = FutureNew( () => {
+    throw( type = "AsyncException", message = "My Exception" );
+} ).onError( throwable -> {
+    println( throwable.getMessage() );
+    return "async";
+} );
+assert result.get() == "async" : "testOnError value";
+assert result.isCompletedExceptionally() == false : "testOnError status";
+
+// testExceptionally
+result = FutureNew( () => {
+    throw( type = "AsyncException", message = "My Exception" );
+} ).exceptionally( throwable -> {
+    println( throwable.getMessage() );
+    return "async";
+} );
+assert result.get() == "async" : "testExceptionally value";
+assert result.isCompletedExceptionally() == false : "testExceptionally status";
+
+// testThen
+result = FutureNew( () => {
+    sleep( 1000 );
+    return 42;
+} ).then( value -> {
+    return value + 1;
+} );
+assert result.get() == 43 : "testThen value";
+assert result.isCompletedExceptionally() == false : "testThen status";
+
+// testGetAsAttempt
+result = FutureNew( () => "done 3" ).getAsAttempt();
+println( result.get() );

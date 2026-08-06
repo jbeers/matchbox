@@ -1,0 +1,26 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/net/GetLocalhostIpTest.java
+
+// NetworkUtil.isIpv4/isIpv6 are represented with source-level checks so the
+// result validation remains active rather than becoming a JVM-only skip.
+function isIpAddress( value ) {
+    return isIPv6( value ) || reFind( "^[0-9]+([.][0-9]+){3}$", value ) == 1;
+}
+
+// testGetLocalhostIpSingle
+result = getLocalhostIp();
+assert result != null : "testGetLocalhostIpSingle non-null";
+assert len( result ) > 0 : "testGetLocalhostIpSingle non-empty";
+assert isIpAddress( result ) : "testGetLocalhostIpSingle ip";
+
+// testGetLocalhostIpAll
+result = getLocalhostIp( all = true );
+assert isArray( result ) : "testGetLocalhostIpAll array";
+assert arrayLen( result ) >= 1 : "testGetLocalhostIpAll non-empty";
+for ( ipValue in result ) {
+    assert isIpAddress( toString( ipValue ) ) : "testGetLocalhostIpAll ip";
+}
+
+// testGetLocalhostIpAllWithRefresh
+result = getLocalhostIp( all = true, refresh = true );
+assert isArray( result ) : "testGetLocalhostIpAllWithRefresh array";
+assert arrayLen( result ) >= 1 : "testGetLocalhostIpAllWithRefresh non-empty";

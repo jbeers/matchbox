@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/struct/StructIsOrderedTest.java
+assert structIsOrdered( {} ) == false : "testIsOrdered default";
+assert structIsOrdered( structNew( "ordered" ) ) : "testIsOrdered ordered";

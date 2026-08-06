@@ -1,0 +1,16 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderAppendTest.java
+// testAppendHeadless
+sb = sb{"Hello"};
+stringBuilderAppend( sb, " World" );
+result = sb.toString();
+assert result == "Hello World" : "testAppendHeadless";
+
+// testAppendMember
+sb = sb{"Hello"};
+sb.append( " World" );
+result = sb.toString();
+assert result == "Hello World" : "testAppendMember";
+
+// testAppendChaining
+result = sb{"foo"}.append( "bar" ).append( "baz" ).toString();
+assert result == "foobarbaz" : "testAppendChaining";

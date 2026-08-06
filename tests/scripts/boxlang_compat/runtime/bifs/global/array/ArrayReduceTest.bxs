@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayReduceTest.java
+r = arrayReduce( [1,2,3,4], function( acc, item ) { return acc + item; }, 0 );
+assert r == 10 : "testReduce";

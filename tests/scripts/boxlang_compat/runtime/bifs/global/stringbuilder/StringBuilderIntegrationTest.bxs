@@ -1,0 +1,83 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/stringbuilder/StringBuilderIntegrationTest.java
+// testConcatAssignMutatesInPlace
+sb = sb{"Hello"};
+ref = sb;
+sb &= " World";
+result = sb.toString();
+sameInstance = ( sb === ref );
+assert result == "Hello World" : "testConcatAssignMutatesInPlace result";
+assert sameInstance == true : "testConcatAssignMutatesInPlace identity";
+
+// testSBLiteralDoubleQuoteEmpty
+result = sb{""};
+assert isStringBuilder( result ) : "testSBLiteralDoubleQuoteEmpty type";
+assert result.toString() == "" : "testSBLiteralDoubleQuoteEmpty value";
+
+// testSBLiteralSingleQuoteEmpty
+result = sb{''};
+assert isStringBuilder( result ) : "testSBLiteralSingleQuoteEmpty type";
+assert result.toString() == "" : "testSBLiteralSingleQuoteEmpty value";
+
+// testSBLiteralDoubleQuoteSeeded
+result = sb{"Hello"};
+assert isStringBuilder( result ) : "testSBLiteralDoubleQuoteSeeded type";
+assert result.toString() == "Hello" : "testSBLiteralDoubleQuoteSeeded value";
+
+// testSBLiteralSingleQuoteSeeded
+result = sb{'Hello'};
+assert isStringBuilder( result ) : "testSBLiteralSingleQuoteSeeded type";
+assert result.toString() == "Hello" : "testSBLiteralSingleQuoteSeeded value";
+
+// testSBLiteralDoubleQuoteInterpolation
+name = "World";
+result = sb{"Hello #name#"};
+assert isStringBuilder( result ) : "testSBLiteralDoubleQuoteInterpolation type";
+assert result.toString() == "Hello World" : "testSBLiteralDoubleQuoteInterpolation value";
+
+// testSBLiteralSingleQuoteInterpolation
+name = "World";
+result = sb{'Hello #name#'};
+assert isStringBuilder( result ) : "testSBLiteralSingleQuoteInterpolation type";
+assert result.toString() == "Hello World" : "testSBLiteralSingleQuoteInterpolation value";
+
+// testSBLiteralChaining
+result = sb{"Hello"}.append( " World" ).toString();
+assert result == "Hello World" : "testSBLiteralChaining";
+
+// testStringBuilderLiteralAlias
+result = stringbuilder{"Hello"};
+assert isStringBuilder( result ) : "testStringBuilderLiteralAlias type";
+assert result.toString() == "Hello" : "testStringBuilderLiteralAlias value";
+
+// testSBLiteralExpressionForms
+myVar = "Alpha";
+function getString() { return "Beta"; }
+foo = { bar: () => "Gamma" };
+fromVar = sb{ myVar };
+fromUDF = sb{ getString() };
+fromMethod = sb{ foo.bar() };
+fromLambdaCall = sb{( () => "foo" )()};
+assert isStringBuilder( fromVar ) : "testSBLiteralExpressionForms fromVar type";
+assert isStringBuilder( fromUDF ) : "testSBLiteralExpressionForms fromUDF type";
+assert isStringBuilder( fromMethod ) : "testSBLiteralExpressionForms fromMethod type";
+assert isStringBuilder( fromLambdaCall ) : "testSBLiteralExpressionForms fromLambdaCall type";
+assert fromVar.toString() == "Alpha" : "testSBLiteralExpressionForms fromVar";
+assert fromUDF.toString() == "Beta" : "testSBLiteralExpressionForms fromUDF";
+assert fromMethod.toString() == "Gamma" : "testSBLiteralExpressionForms fromMethod";
+assert fromLambdaCall.toString() == "foo" : "testSBLiteralExpressionForms fromLambdaCall";
+
+// testJavaStringBuilderIntoBIF
+// testJavaStringBuilderDeleteMemberCollision
+// These JVM tests require constructing and invoking java.lang.StringBuilder.
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): raw Java StringBuilder
+// interop and Java member dispatch cannot be expressed as MatchBox source.
+
+// testSBAsIdentifier
+sb = "not a stringbuilder";
+result = sb;
+assert result == "not a stringbuilder" : "testSBAsIdentifier";
+
+// testStringVsStringBuilderAppendTiming1000Iterations (@Disabled)
+// FindBreakingPointOfStringConcatPerformance (@Disabled)
+// These JVM benchmark tests have no compatibility assertions and are
+// intentionally not executed in this transfer.

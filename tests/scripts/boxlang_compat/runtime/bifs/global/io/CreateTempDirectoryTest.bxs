@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/CreateTempDirectoryTest.java
+r = createTempDirectory();
+assert directoryExists( r ) : "testCreateTempDirectory";

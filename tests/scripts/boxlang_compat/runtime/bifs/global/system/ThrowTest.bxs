@@ -1,0 +1,25 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/system/ThrowTest.java
+
+try {
+    throw(
+        message = "boom message",
+        detail = "boom detail",
+        errorcode = "boom code",
+        type = "boom.type",
+        extendedinfo = [ "boom", "extended", "info" ]
+    );
+    assert false : "testThrowEverything did not throw";
+} catch ( e ) {
+    assert e.message == "boom message" : "testThrowEverything message";
+    assert e.detail == "boom detail" : "testThrowEverything detail";
+    assert e.errorCode == "boom code" : "testThrowEverything errorcode";
+    assert e.type == "boom.type" : "testThrowEverything type";
+    assert arrayLen( e.extendedInfo ) == 3 : "testThrowEverything extendedinfo";
+}
+
+try {
+    throw( "boom" );
+    assert false : "testThrowMessage did not throw";
+} catch ( e ) {
+    assert e.message == "boom" : "testThrowMessage";
+}

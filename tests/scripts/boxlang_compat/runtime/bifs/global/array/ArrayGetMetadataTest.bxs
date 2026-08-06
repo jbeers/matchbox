@@ -1,0 +1,17 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArrayGetMetadataTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): JVM class-name and
+// design-time metadata assertions are not expressible without Java reflection.
+arr = [1,2,3];
+r = arrayGetMetadata( arr );
+assert isStruct( r ) : "testReturnValue struct";
+assert structKeyExists( r, "type" ) : "testReturnValue type";
+assert structKeyExists( r, "datatype" ) : "testReturnValue datatype";
+assert structKeyExists( r, "dimensions" ) : "testReturnValue dimensions";
+assert r.dimensions == 1 : "testReturnValue dimensions-value";
+
+r = arrayGetMetadata( arrayNew() );
+assert r.type == "synchronized" : "testArrayNewDefaultIsSynchronized";
+
+r = arrayGetMetadata( arrayNew( 1, false ) );
+assert r.type == "unsynchronized" : "testArrayNewUnsynchronized";
+// SKIPPED (JVM-only): asserts metadata class names (Array/design-time arrays).

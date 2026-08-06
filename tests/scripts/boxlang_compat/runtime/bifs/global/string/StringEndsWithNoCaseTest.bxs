@@ -1,0 +1,3 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/string/StringEndsWithNoCaseTest.java
+assert stringEndsWithNoCase( "Hello World", "WORLD" ) : "testEndsWithNoCase";
+assert stringEndsWithNoCase( "Hello", "Hi" ) == false : "testEndsWithNoCaseFalse";

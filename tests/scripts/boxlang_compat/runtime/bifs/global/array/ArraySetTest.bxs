@@ -1,0 +1,6 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/array/ArraySetTest.java
+arr = arrayNew();
+arraySet( arr, 1, 3, "x" );
+assert arrayLen( arr ) == 3 : "testSet size";
+assert arr[1] == "x" : "testSet 1";
+assert arr[3] == "x" : "testSet 3";

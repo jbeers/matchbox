@@ -1,0 +1,9 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/math/RoundTest.java
+assert round( 0.3 ) == 0 : "testRound 0.3";
+assert round( 1.7 ) == 2 : "testRound 1.7";
+assert round( 1.5 ) == 2 : "testRound 1.5";
+assert ( 0.3 ).round() == 0 : "testRoundMember 0.3";
+assert ( 1.7 ).round() == 2 : "testRoundMember 1.7";
+assert round( 0.37, 1 ) == 0.4 : "testRoundDec 0.37/1";
+assert round( 1.72, 1 ) == 1.7 : "testRoundDec 1.72/1";
+assert round( 1.123456789, 4 ) == 1.1235 : "testRoundDec 1.123456789/4";

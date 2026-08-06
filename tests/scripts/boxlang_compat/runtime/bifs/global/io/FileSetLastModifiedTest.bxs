@@ -1,0 +1,10 @@
+// boxlang_compat: ortus/boxlang/runtime/bifs/global/io/FileSetLastModifiedTest.java
+// SKIPPED [boxlang_compat] (JVM-only, hard requirement): open BoxFile
+// mutation assertions remain omitted; path and numeric-date calls execute below.
+p = createTempFile();
+fileWrite( p, "file modified time test" );
+fileSetLastModified( p, 0 );
+assert fileExists( p ) : "testFilePathSetLastModified numeric";
+fileSetLastModified( p, now() );
+assert fileExists( p ) : "testFileSetLastModifiedWithDateTime";
+fileDelete( p );
