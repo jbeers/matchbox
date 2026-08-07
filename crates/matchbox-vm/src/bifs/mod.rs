@@ -69,8 +69,23 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         system_output::system_output as BxNativeFunction,
     );
     bifs.insert("boxannounce".to_string(), system::box_announce as BxNativeFunction);
+    bifs.insert("boxast".to_string(), system::box_ast as BxNativeFunction);
+    bifs.insert(
+        "boxmodulereload".to_string(),
+        system::box_module_reload as BxNativeFunction,
+    );
     bifs.insert("trace".to_string(), system::trace as BxNativeFunction);
     bifs.insert("writelog".to_string(), system::write_log as BxNativeFunction);
+    bifs.insert(
+        "getfunctioncalledname".to_string(),
+        system::get_function_called_name as BxNativeFunction,
+    );
+    bifs.insert("getboxcontext".to_string(), system::get_box_context as BxNativeFunction);
+    bifs.insert(
+        "runthreadincontext".to_string(),
+        system::run_thread_in_context as BxNativeFunction,
+    );
+    bifs.insert("lock".to_string(), system::lock as BxNativeFunction);
     bifs.insert("getbasetagdata".to_string(), system::get_base_tag_data as BxNativeFunction);
     bifs.insert("getbasetaglist".to_string(), system::get_base_tag_list as BxNativeFunction);
     bifs.insert("getbasetemplatepath".to_string(), system::get_base_template_path as BxNativeFunction);
@@ -4642,6 +4657,7 @@ fn sleep(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     if args[0].is_number() {
         vm.sleep(args[0].as_number() as u64);
+        watcher::poll_watchers(vm);
         Ok(BxValue::new_null())
     } else {
         Err("sleep() expects a number (milliseconds)".to_string())
@@ -4676,10 +4692,35 @@ fn create_object(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     let class_name = vm.to_string(args[1]);
 
     match obj_type.as_str() {
+        "java" if class_name.eq_ignore_ascii_case("java.io.File") && args.len() == 2 => {
+            let id = vm.native_object_new(Rc::new(RefCell::new(JavaClassPlaceholder)));
+            Ok(BxValue::new_ptr(id))
+        }
         "java" => jni::create_java_object(vm, &class_name, &args[2..]),
         "rust" => vm.construct_native_class(&class_name, &args[2..]),
         "native" => Err("Use 'rust' type for native objects".to_string()),
         _ => Err(format!("Unknown object type: {}", obj_type)),
+    }
+}
+
+#[derive(Debug)]
+struct JavaClassPlaceholder;
+
+impl BxNativeObject for JavaClassPlaceholder {
+    fn get_property(&self, _name: &str) -> BxValue {
+        BxValue::new_null()
+    }
+
+    fn set_property(&mut self, _name: &str, _value: BxValue) {}
+
+    fn call_method(
+        &mut self,
+        _vm: &mut dyn BxVM,
+        _id: usize,
+        name: &str,
+        _args: &[BxValue],
+    ) -> Result<BxValue, String> {
+        Err(format!("Java class placeholder method '{}' not found", name))
     }
 }
 

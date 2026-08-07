@@ -924,6 +924,11 @@ pub fn run() -> Result<()> {
     match filename {
         Some(name) => {
             let path = Path::new(name);
+            let script_args = args
+                .iter()
+                .position(|arg| arg == name)
+                .map(|position| args[position + 1..].to_vec())
+                .unwrap_or_default();
             if path.is_dir() {
                 process_directory(
                     path,
@@ -941,9 +946,10 @@ pub fn run() -> Result<()> {
                     is_watch,
                     is_full_flash,
                     esp32_web,
+                    &script_args,
                 )?;
             } else {
-                process_file(
+                process_file_with_args(
                     path,
                     is_build,
                     target,
@@ -959,6 +965,7 @@ pub fn run() -> Result<()> {
                     is_watch,
                     is_full_flash,
                     esp32_web,
+                    script_args,
                 )?;
             }
         }
@@ -1532,11 +1539,49 @@ pub fn process_file(
     is_full_flash: bool,
     esp32_web: bool,
 ) -> Result<()> {
+    process_file_with_args(
+        source_path,
+        is_build,
+        orig_target,
+        keep_symbols,
+        no_shaking,
+        no_std_lib,
+        strip_source,
+        output,
+        extra_module_paths,
+        is_flash,
+        orig_chip,
+        is_fast_deploy,
+        is_watch,
+        is_full_flash,
+        esp32_web,
+        Vec::new(),
+    )
+}
+
+fn process_file_with_args(
+    source_path: &Path,
+    is_build: bool,
+    orig_target: Option<&str>,
+    keep_symbols: Vec<String>,
+    no_shaking: bool,
+    no_std_lib: bool,
+    strip_source: bool,
+    output: Option<&Path>,
+    extra_module_paths: &[PathBuf],
+    is_flash: bool,
+    orig_chip: Option<&str>,
+    is_fast_deploy: bool,
+    is_watch: bool,
+    is_full_flash: bool,
+    esp32_web: bool,
+    cli_args: Vec<String>,
+) -> Result<()> {
     if source_path.extension().and_then(|s| s.to_str()) == Some("bxb") {
         let bytes = fs::read(source_path)?;
         let mut chunk: Chunk = postcard::from_bytes(&bytes)?;
         chunk.reconstruct_functions();
-        run_chunk(chunk, &[])?;
+        run_chunk_with_args(chunk, &[], cli_args)?;
     } else {
         let source = fs::read_to_string(source_path)?;
         let ext = source_path
@@ -1660,7 +1705,7 @@ pub fn process_file(
             #[cfg(all(not(target_arch = "wasm32"), feature = "bif-datasource"))]
             register_datasources_from_config(&cwd)?;
 
-            run_chunk(chunk, &modules_info)?;
+            run_chunk_with_args(chunk, &modules_info, cli_args)?;
         }
 
         if is_watch {
@@ -1694,6 +1739,7 @@ fn process_directory(
     is_watch: bool,
     is_full_flash: bool,
     esp32_web: bool,
+    cli_args: &[String],
 ) -> Result<()> {
     let entry_points = ["index.bxs", "main.bxs", "Application.bx"];
     let mut entry_file = None;
@@ -1705,7 +1751,7 @@ fn process_directory(
         }
     }
     let entry_file = entry_file.context("No entry point found in directory")?;
-    process_file(
+    process_file_with_args(
         &entry_file,
         is_build,
         orig_target,
@@ -1721,6 +1767,7 @@ fn process_directory(
         is_watch,
         is_full_flash,
         esp32_web,
+        cli_args.to_vec(),
     )
 }
 
@@ -1786,6 +1833,14 @@ fn register_datasources_from_config(project_dir: &Path) -> Result<()> {
 
 pub fn run_chunk(chunk: Chunk, modules: &[modules::ModuleInfo]) -> Result<()> {
     let args: Vec<String> = std_env::args().collect();
+    run_chunk_with_args(chunk, modules, args)
+}
+
+fn run_chunk_with_args(
+    chunk: Chunk,
+    modules: &[modules::ModuleInfo],
+    args: Vec<String>,
+) -> Result<()> {
 
     let mut external_bifs = HashMap::new();
     #[allow(unused_mut)]
@@ -1820,7 +1875,7 @@ pub fn run_chunk(chunk: Chunk, modules: &[modules::ModuleInfo]) -> Result<()> {
     }
 
     let mut vm = vm::VM::new_with_bifs(external_bifs, native_classes);
-    vm.cli_args = args.clone();
+    vm.cli_args = args;
 
     #[cfg(feature = "jit")]
     vm.enable_jit();

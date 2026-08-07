@@ -10,7 +10,7 @@ assert result == 3600 : "testCreateTimeSpanHours";
 
 // testCreateTimeSpanMulti
 result = createTimespan( 365, 1, 2, 3, 4 );
-assert result == 31539603.004 : "testCreateTimeSpanMulti";
+assert result == 31539723.004 : "testCreateTimeSpanMulti";
 
 // testCreateTimeSpanErro
 threw = false;

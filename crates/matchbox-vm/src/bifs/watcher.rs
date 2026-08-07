@@ -1,5 +1,6 @@
 use crate::types::{BxNativeFunction, BxNativeObject, BxVM, BxValue};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -14,6 +15,9 @@ fn watchers() -> &'static Mutex<HashMap<String, usize>> {
 struct WatcherObject {
     name: String,
     state: WatcherState,
+    roots: Vec<PathBuf>,
+    listener: BxValue,
+    known_paths: HashSet<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +30,14 @@ enum WatcherState {
 #[derive(Debug)]
 struct WatcherNameObject {
     name: String,
+}
+
+#[derive(Debug)]
+struct WatcherEventObject {
+    kind: String,
+    path: String,
+    watch_root: String,
+    relative_path: String,
 }
 
 impl BxNativeObject for WatcherObject {
@@ -63,6 +75,7 @@ impl BxNativeObject for WatcherObject {
             "isstopped" => Ok(BxValue::new_bool(self.state == WatcherState::Stopped)),
             "start" => {
                 self.state = WatcherState::Running;
+                self.known_paths = snapshot_paths(&self.roots);
                 Ok(BxValue::new_ptr(id))
             }
             "stop" | "shutdown" => {
@@ -71,7 +84,47 @@ impl BxNativeObject for WatcherObject {
             }
             "restart" => {
                 self.state = WatcherState::Running;
+                self.known_paths = snapshot_paths(&self.roots);
                 Ok(BxValue::new_ptr(id))
+            }
+            "poll" => {
+                if self.state != WatcherState::Running {
+                    return Ok(BxValue::new_null());
+                }
+                let new_path = self.roots.iter().find_map(|root| {
+                    snapshot_paths(std::slice::from_ref(root))
+                        .difference(&self.known_paths)
+                        .next()
+                        .cloned()
+                        .map(|path| (path, root.clone()))
+                });
+                let Some((path, root)) = new_path else {
+                    return Ok(BxValue::new_null());
+                };
+                self.known_paths.insert(path.clone());
+                let relative_path = path
+                    .strip_prefix(&root)
+                    .unwrap_or(path.as_path())
+                    .to_string_lossy()
+                    .trim_start_matches(std::path::MAIN_SEPARATOR)
+                    .to_string();
+                let event_id = vm.native_object_new(std::rc::Rc::new(std::cell::RefCell::new(
+                    WatcherEventObject {
+                        kind: "CREATED".to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        watch_root: root.to_string_lossy().to_string(),
+                        relative_path,
+                    },
+                )));
+                let chunk = vm
+                    .current_chunk()
+                    .ok_or_else(|| "No chunk context available".to_string())?;
+                vm.call_function_by_value(
+                    &self.listener,
+                    vec![BxValue::new_ptr(event_id), BxValue::new_ptr(id)],
+                    chunk,
+                )?;
+                Ok(BxValue::new_null())
             }
             _ => Err(format!("Watcher method '{}' not found", name)),
         }
@@ -97,6 +150,45 @@ impl BxNativeObject for WatcherNameObject {
             _ => Err(format!("Watcher name method '{}' not found", name)),
         }
     }
+}
+
+impl BxNativeObject for WatcherEventObject {
+    fn get_property(&self, _name: &str) -> BxValue {
+        BxValue::new_null()
+    }
+
+    fn set_property(&mut self, _name: &str, _value: BxValue) {}
+
+    fn call_method(
+        &mut self,
+        vm: &mut dyn BxVM,
+        _id: usize,
+        name: &str,
+        _args: &[BxValue],
+    ) -> Result<BxValue, String> {
+        let value = match name.to_ascii_lowercase().as_str() {
+            "getkind" => &self.kind,
+            "getpath" => &self.path,
+            "getwatchroot" => &self.watch_root,
+            "getrelativepath" => &self.relative_path,
+            _ => return Err(format!("Watcher event method '{}' not found", name)),
+        };
+        Ok(BxValue::new_ptr(vm.string_new(value.clone())))
+    }
+}
+
+fn snapshot_paths(roots: &[PathBuf]) -> HashSet<PathBuf> {
+    roots
+        .iter()
+        .flat_map(|root| {
+            std::fs::read_dir(root)
+                .ok()
+                .into_iter()
+                .flat_map(|entries| entries.filter_map(Result::ok))
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 pub fn register_watcher_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
@@ -195,9 +287,25 @@ fn watcher_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         }
         registry.remove(&name);
     }
+    let roots = if vm.is_string_value(args[1]) {
+        vec![PathBuf::from(vm.to_string(args[1]))]
+    } else {
+        let array_id = args[1]
+            .as_gc_id()
+            .ok_or_else(|| "watcherNew() paths must be an array or string".to_string())?;
+        (0..vm.array_len(array_id))
+            .map(|index| PathBuf::from(vm.to_string(vm.array_get(array_id, index))))
+            .collect()
+    };
+    if roots.is_empty() {
+        return Err("watcherNew() requires at least one path".to_string());
+    }
     let id = vm.native_object_new(std::rc::Rc::new(std::cell::RefCell::new(WatcherObject {
         name: name.clone(),
         state: WatcherState::Created,
+        roots,
+        listener: args[2],
+        known_paths: HashSet::new(),
     })));
     registry.insert(name, id);
     Ok(BxValue::new_ptr(id))
@@ -249,4 +357,14 @@ fn watcher_stop_all(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, Str
         let _ = vm.native_object_call_method(id, "stop", &[]);
     }
     Ok(BxValue::new_null())
+}
+
+pub(crate) fn poll_watchers(vm: &mut dyn BxVM) {
+    let entries = watchers()
+        .lock()
+        .map(|registry| registry.values().copied().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for id in entries {
+        let _ = vm.native_object_call_method(id, "poll", &[]);
+    }
 }

@@ -298,7 +298,12 @@ fn create_time_span(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     let minutes = args[2].as_number();
     let seconds = args[3].as_number();
     let millis = args.get(4).map(|v| v.as_number()).unwrap_or(0.0);
-    let total_seconds = days * 86400.0 + hours * 3600.0 + minutes * 60.0 + seconds + millis / 1000.0;
+    let total_millis = days * 86_400_000.0
+        + hours * 3_600_000.0
+        + minutes * 60_000.0
+        + seconds * 1_000.0
+        + millis;
+    let total_seconds = total_millis / 1_000.0;
     Ok(BxValue::new_number(total_seconds))
 }
 

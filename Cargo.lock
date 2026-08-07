@@ -266,6 +266,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "blowfish"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e412e2cd0f2b2d93e02543ceae7917b3c70331573df19ee046bcbc35e45e87d7"
+dependencies = [
+ "byteorder",
+ "cipher",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -822,6 +832,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "des"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
+dependencies = [
+ "cipher",
 ]
 
 [[package]]
@@ -1825,10 +1844,14 @@ version = "0.2.0"
 name = "matchbox_vm"
 version = "0.2.0"
 dependencies = [
+ "aes",
  "anyhow",
  "base64",
  "bincode",
+ "blowfish",
+ "bzip2",
  "chrono",
+ "cipher",
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-jit",
@@ -1836,8 +1859,10 @@ dependencies = [
  "cranelift-native",
  "crossterm",
  "ctrlc",
+ "des",
  "digest",
  "filetime",
+ "flate2",
  "fs_extra",
  "getrandom 0.4.2",
  "hmac",
@@ -1857,6 +1882,7 @@ dependencies = [
  "serde_yaml",
  "sha1",
  "sha2",
+ "tar",
  "urlencoding",
  "uuid",
  "walkdir",
@@ -2973,6 +2999,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+ "xattr",
 ]
 
 [[package]]
@@ -4237,6 +4274,16 @@ name = "writeable"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
+
+[[package]]
+name = "xattr"
+version = "1.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
+dependencies = [
+ "libc",
+ "rustix 1.1.4",
+]
 
 [[package]]
 name = "xz2"

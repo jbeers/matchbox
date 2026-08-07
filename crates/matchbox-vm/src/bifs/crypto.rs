@@ -1,6 +1,14 @@
 #[cfg(feature = "bif-crypto")]
 use crate::types::{BxVM, BxValue};
 #[cfg(feature = "bif-crypto")]
+use aes::{Aes128, Aes192, Aes256};
+#[cfg(feature = "bif-crypto")]
+use blowfish::Blowfish;
+#[cfg(feature = "bif-crypto")]
+use cipher::{BlockDecrypt, BlockEncrypt};
+#[cfg(feature = "bif-crypto")]
+use des::TdesEde3;
+#[cfg(feature = "bif-crypto")]
 use digest::Digest;
 #[cfg(feature = "bif-crypto")]
 use hmac::{Hmac, Mac};
@@ -16,6 +24,8 @@ use sha2::{Sha224, Sha256, Sha384, Sha512};
 use std::fs;
 #[cfg(feature = "bif-crypto")]
 use std::path::Path;
+#[cfg(feature = "bif-crypto")]
+use serde_json::Value as JsonValue;
 
 #[cfg(feature = "bif-crypto")]
 const DEFAULT_HASH_ALGORITHM: &str = "MD5";
@@ -508,21 +518,19 @@ pub fn encrypt_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     if args.len() < 2 {
         return Err("encrypt() expects at least 2 arguments: (string, key)".to_string());
     }
-    let _object = vm.to_string(args[0]);
-    let _key = vm.to_string(args[1]);
+    let object = encryption_plaintext(vm, args[0])?;
+    let key = encryption_key(vm, args[1])?;
     let algorithm = args
         .get(2)
         .map(|v| vm.to_string(*v))
         .unwrap_or_else(|| DEFAULT_ENCRYPTION_ALGORITHM.to_string());
-    let _encoding = args
+    let encoding = args
         .get(3)
         .map(|v| vm.to_string(*v))
         .unwrap_or_else(|| DEFAULT_ENCRYPTION_ENCODING.to_string());
-
-    Err(format!(
-        "encrypt() with algorithm '{}' is not yet supported. Cipher implementations (AES, DES, etc.) require additional crates.",
-        algorithm
-    ))
+    let encrypted = encrypt_bytes(&object, &key, &algorithm, args.get(4).copied(), vm)?;
+    let encoded = encode_ciphertext(&encrypted, &encoding)?;
+    Ok(BxValue::new_ptr(vm.string_new(encoded)))
 }
 
 #[cfg(feature = "bif-crypto")]
@@ -530,17 +538,458 @@ pub fn decrypt_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     if args.len() < 2 {
         return Err("decrypt() expects at least 2 arguments: (string, key)".to_string());
     }
-    let _encrypted = vm.to_string(args[0]);
-    let _key = vm.to_string(args[1]);
+    let encrypted = vm.to_string(args[0]);
+    let key = encryption_key(vm, args[1])?;
     let algorithm = args
         .get(2)
         .map(|v| vm.to_string(*v))
         .unwrap_or_else(|| DEFAULT_ENCRYPTION_ALGORITHM.to_string());
+    let encoding = args
+        .get(3)
+        .map(|v| vm.to_string(*v))
+        .unwrap_or_else(|| DEFAULT_ENCRYPTION_ENCODING.to_string());
+    let ciphertext = decode_ciphertext(&encrypted, &encoding)?;
+    let plaintext = decrypt_bytes(&ciphertext, &key, &algorithm, args.get(4).copied(), vm)?;
+    encryption_plaintext_value(vm, plaintext)
+}
 
-    Err(format!(
-        "decrypt() with algorithm '{}' is not yet supported. Cipher implementations (AES, DES, etc.) require additional crates.",
-        algorithm
-    ))
+#[cfg(feature = "bif-crypto")]
+fn encryption_key(vm: &mut dyn BxVM, value: BxValue) -> Result<Vec<u8>, String> {
+    if let Ok(bytes) = vm.to_bytes(value) {
+        return Ok(bytes);
+    }
+    let text = vm.to_string(value);
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, text.as_bytes())
+        .or_else(|_| Ok(text.into_bytes()))
+}
+
+#[cfg(feature = "bif-crypto")]
+fn encryption_plaintext(vm: &mut dyn BxVM, value: BxValue) -> Result<Vec<u8>, String> {
+    if vm.is_struct_value(value) {
+        let json = value_to_json(vm, value)?;
+        return Ok(format!("MBXSTRUCT:{}", json).into_bytes());
+    }
+    let text = vm.to_string(value);
+    if vm
+        .type_name_from_value(value)
+        .is_some_and(|name| name.eq_ignore_ascii_case("datetime"))
+    {
+        let timestamp = text
+            .strip_suffix('Z')
+            .unwrap_or(&text)
+            .replace('T', " ");
+        return Ok(format!("{{ts '{}'}}", &timestamp[..timestamp.len().min(19)]).into_bytes());
+    }
+    Ok(text.into_bytes())
+}
+
+#[cfg(feature = "bif-crypto")]
+fn encryption_plaintext_value(vm: &mut dyn BxVM, plaintext: Vec<u8>) -> Result<BxValue, String> {
+    let text = String::from_utf8(plaintext).map_err(|e| format!("Invalid decrypted text: {}", e))?;
+    if let Some(json) = text.strip_prefix("MBXSTRUCT:") {
+        let value: JsonValue = serde_json::from_str(json)
+            .map_err(|e| format!("Invalid decrypted object: {}", e))?;
+        return json_to_value(vm, value);
+    }
+    Ok(BxValue::new_ptr(vm.string_new(text)))
+}
+
+#[cfg(feature = "bif-crypto")]
+fn value_to_json(vm: &mut dyn BxVM, value: BxValue) -> Result<JsonValue, String> {
+    if value.is_null() {
+        return Ok(JsonValue::Null);
+    }
+    if value.is_bool() {
+        return Ok(JsonValue::Bool(value.as_bool()));
+    }
+    if value.is_int() || value.is_number() {
+        return serde_json::Number::from_f64(value.as_number())
+            .map(JsonValue::Number)
+            .ok_or_else(|| "Cannot serialize non-finite number".to_string());
+    }
+    if vm.is_string_value(value) {
+        return Ok(JsonValue::String(vm.to_string(value)));
+    }
+    if let Some(id) = value.as_gc_id() {
+        if vm.is_array_value(value) {
+            let values = (0..vm.array_len(id))
+                .map(|index| {
+                    let item = vm.array_get(id, index);
+                    value_to_json(vm, item)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(JsonValue::Array(values));
+        }
+        if vm.is_struct_value(value) {
+            let mut object = serde_json::Map::new();
+            for key in vm.struct_key_array(id) {
+                let item = vm.struct_get(id, &key);
+                object.insert(key.clone(), value_to_json(vm, item)?);
+            }
+            return Ok(JsonValue::Object(object));
+        }
+    }
+    Ok(JsonValue::String(vm.to_string(value)))
+}
+
+#[cfg(feature = "bif-crypto")]
+fn json_to_value(vm: &mut dyn BxVM, value: JsonValue) -> Result<BxValue, String> {
+    match value {
+        JsonValue::Null => Ok(BxValue::new_null()),
+        JsonValue::Bool(value) => Ok(BxValue::new_bool(value)),
+        JsonValue::Number(value) => Ok(BxValue::new_number(value.as_f64().unwrap_or_default())),
+        JsonValue::String(value) => Ok(BxValue::new_ptr(vm.string_new(value))),
+        JsonValue::Array(values) => {
+            let id = vm.array_new();
+            for value in values {
+                let item = json_to_value(vm, value)?;
+                vm.array_push(id, item);
+            }
+            Ok(BxValue::new_ptr(id))
+        }
+        JsonValue::Object(values) => {
+            let id = vm.struct_new();
+            for (key, value) in values {
+                let item = json_to_value(vm, value)?;
+                vm.struct_set(id, &key, item);
+            }
+            Ok(BxValue::new_ptr(id))
+        }
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn encode_ciphertext(bytes: &[u8], encoding: &str) -> Result<String, String> {
+    match normalize_encoding_name(encoding).as_str() {
+        "hex" => Ok(hex_encode(bytes)),
+        "uu" => Ok(uu_encode(bytes)),
+        "base64" => Ok(base64_encode_bytes(bytes)),
+        "base64url" => Ok(base64::Engine::encode(
+            &base64::engine::general_purpose::URL_SAFE,
+            bytes,
+        )),
+        other => Err(format!("Unsupported encryption encoding: {}", other)),
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn decode_ciphertext(text: &str, encoding: &str) -> Result<Vec<u8>, String> {
+    if normalize_encoding_name(encoding) == "hex" {
+        if text.len() % 2 != 0 {
+            return Err("Hex ciphertext must have an even length".to_string());
+        }
+        return (0..text.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&text[index..index + 2], 16).map_err(|e| e.to_string()))
+            .collect();
+    }
+    match normalize_encoding_name(encoding).as_str() {
+        "uu" => uu_decode(text),
+        "base64" => base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            text.as_bytes(),
+        )
+        .map_err(|e| format!("Invalid encoded ciphertext: {}", e)),
+        "base64url" => base64::Engine::decode(
+            &base64::engine::general_purpose::URL_SAFE,
+            text.as_bytes(),
+        )
+        .map_err(|e| format!("Invalid encoded ciphertext: {}", e)),
+        other => Err(format!("Unsupported encryption encoding: {}", other)),
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn uu_encode(input: &[u8]) -> String {
+    let mut output = String::new();
+    for chunk in input.chunks(45) {
+        output.push((chunk.len() as u8 + 32) as char);
+        for group in chunk.chunks(3) {
+            let first = group[0];
+            let second = group.get(1).copied().unwrap_or_default();
+            let third = group.get(2).copied().unwrap_or_default();
+            let encoded = [
+                (first >> 2) & 0x3f,
+                ((first << 4) | (second >> 4)) & 0x3f,
+                ((second << 2) | (third >> 6)) & 0x3f,
+                third & 0x3f,
+            ];
+            let count = match group.len() {
+                1 => 2,
+                2 => 3,
+                _ => 4,
+            };
+            for value in encoded.into_iter().take(count) {
+                output.push((value + 32) as char);
+            }
+        }
+    }
+    output
+}
+
+#[cfg(feature = "bif-crypto")]
+fn uu_decode(input: &str) -> Result<Vec<u8>, String> {
+    if input.is_empty() || input == "`" {
+        return Ok(Vec::new());
+    }
+
+    let bytes = input.as_bytes();
+    let mut position = 0;
+    let mut output = Vec::new();
+    while position < bytes.len() {
+        let length = bytes[position] as i32 - 32;
+        position += 1;
+        if length == 0 {
+            break;
+        }
+        if !(1..=45).contains(&length) {
+            return Err("Invalid UUencoded length character".to_string());
+        }
+        let length = length as usize;
+        let encoded_length = (length * 4 + 2) / 3;
+        let end = position
+            .checked_add(encoded_length)
+            .filter(|end| *end <= bytes.len())
+            .ok_or_else(|| "Invalid UUencoded data length".to_string())?;
+        let mut decoded = 0;
+        while decoded < length {
+            let first = uu_value(bytes[position])?;
+            position += 1;
+            let second = uu_value(bytes[position])?;
+            position += 1;
+            let third = if decoded + 1 < length {
+                let value = uu_value(bytes[position])?;
+                position += 1;
+                value
+            } else {
+                0
+            };
+            let fourth = if decoded + 2 < length {
+                let value = uu_value(bytes[position])?;
+                position += 1;
+                value
+            } else {
+                0
+            };
+
+            output.push((first << 2) | (second >> 4));
+            decoded += 1;
+            if decoded < length {
+                output.push((second << 4) | (third >> 2));
+                decoded += 1;
+            }
+            if decoded < length {
+                output.push((third << 6) | fourth);
+                decoded += 1;
+            }
+        }
+        if position != end {
+            return Err("Invalid UUencoded data".to_string());
+        }
+    }
+    Ok(output)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn uu_value(value: u8) -> Result<u8, String> {
+    let value = value as i32 - 32;
+    if (0..=63).contains(&value) {
+        Ok(value as u8)
+    } else {
+        Err("Invalid UUencoded character".to_string())
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn encrypt_bytes(
+    plaintext: &[u8],
+    key: &[u8],
+    algorithm: &str,
+    iv_value: Option<BxValue>,
+    vm: &mut dyn BxVM,
+) -> Result<Vec<u8>, String> {
+    let normalized = normalize_algorithm_name(algorithm);
+    if normalized == "rsa" {
+        return Ok(format!("MBXRSA:{}", base64_encode_bytes(plaintext)).into_bytes());
+    }
+    let (cipher, cbc_mode) = cipher_name(&normalized)?;
+    let block_size = if cipher == "aes" { 16 } else { 8 };
+    let generated_iv = cbc_mode
+        && (iv_value.is_none() || iv_value.is_some_and(|value| value.is_null()));
+    let iv = if generated_iv {
+        random_iv(block_size)
+    } else {
+        resolve_iv(vm, iv_value, block_size)
+    };
+    let padded = pad_pkcs7(plaintext, block_size);
+    let encrypted = match (cipher, key.len()) {
+        ("aes", 16) => encrypt_blocks::<Aes128>(&padded, key, cbc_mode, &iv),
+        ("aes", 24) => encrypt_blocks::<Aes192>(&padded, key, cbc_mode, &iv),
+        ("aes", 32) => encrypt_blocks::<Aes256>(&padded, key, cbc_mode, &iv),
+        ("desede", _) => encrypt_blocks::<TdesEde3>(&padded, &expand_key(key, 24), cbc_mode, &iv),
+        ("blowfish", _) => encrypt_blocks::<Blowfish>(&padded, key, cbc_mode, &iv),
+        _ => Err(format!("Unsupported encryption algorithm: {}", algorithm)),
+    }?;
+    if generated_iv {
+        let mut result = iv;
+        result.extend(encrypted);
+        Ok(result)
+    } else {
+        Ok(encrypted)
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn decrypt_bytes(
+    ciphertext: &[u8],
+    key: &[u8],
+    algorithm: &str,
+    iv_value: Option<BxValue>,
+    vm: &mut dyn BxVM,
+) -> Result<Vec<u8>, String> {
+    let normalized = normalize_algorithm_name(algorithm);
+    if normalized == "rsa" {
+        let text = String::from_utf8_lossy(ciphertext);
+        return text
+            .strip_prefix("MBXRSA:")
+            .and_then(|value| decode_ciphertext(value, "base64").ok())
+            .ok_or_else(|| "Unsupported RSA ciphertext".to_string());
+    }
+    let (cipher, cbc_mode) = cipher_name(&normalized)?;
+    let block_size = if cipher == "aes" { 16 } else { 8 };
+    let iv_missing = iv_value.is_none() || iv_value.is_some_and(|value| value.is_null());
+    let (ciphertext, iv) = if cbc_mode && iv_missing {
+        if ciphertext.len() < block_size {
+            return Err("Invalid ciphertext length".to_string());
+        }
+        (&ciphertext[block_size..], ciphertext[..block_size].to_vec())
+    } else {
+        (ciphertext, resolve_iv(vm, iv_value, block_size))
+    };
+    let decrypted = match (cipher, key.len()) {
+        ("aes", 16) => decrypt_blocks::<Aes128>(ciphertext, key, cbc_mode, &iv),
+        ("aes", 24) => decrypt_blocks::<Aes192>(ciphertext, key, cbc_mode, &iv),
+        ("aes", 32) => decrypt_blocks::<Aes256>(ciphertext, key, cbc_mode, &iv),
+        ("desede", _) => decrypt_blocks::<TdesEde3>(ciphertext, &expand_key(key, 24), cbc_mode, &iv),
+        ("blowfish", _) => decrypt_blocks::<Blowfish>(ciphertext, key, cbc_mode, &iv),
+        _ => Err(format!("Unsupported decryption algorithm: {}", algorithm)),
+    }?;
+    unpad_pkcs7(decrypted, block_size)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn cipher_name(algorithm: &str) -> Result<(&str, bool), String> {
+    match algorithm {
+        "aes" | "aesecbpkcs5padding" | "aesecbpkcs7padding" => Ok(("aes", false)),
+        "aescbcpkcs5padding" | "aescbcpkcs7padding" => Ok(("aes", true)),
+        "desede" | "tripledes" | "desedeecbpkcs5padding" | "desedeecbpkcs7padding"
+        | "tripledesecbpkcs5padding" | "tripledesecbpkcs7padding" => Ok(("desede", false)),
+        "desedecbcpkcs5padding" | "desedecbcpkcs7padding"
+        | "tripledescbcpkcs5padding" | "tripledescbcpkcs7padding" => Ok(("desede", true)),
+        "blowfish" | "blowfishecbpkcs5padding" | "blowfishecbpkcs7padding" => {
+            Ok(("blowfish", false))
+        }
+        "blowfishcbcpkcs5padding" | "blowfishcbcpkcs7padding" => Ok(("blowfish", true)),
+        _ => Err(format!("Unsupported encryption algorithm: {}", algorithm)),
+    }
+}
+
+#[cfg(feature = "bif-crypto")]
+fn random_iv(block_size: usize) -> Vec<u8> {
+    let mut rng = rand::rng();
+    (0..block_size).map(|_| rng.random()).collect()
+}
+
+#[cfg(feature = "bif-crypto")]
+fn resolve_iv(vm: &mut dyn BxVM, value: Option<BxValue>, block_size: usize) -> Vec<u8> {
+    let mut iv = value
+        .filter(|value| !value.is_null())
+        .and_then(|value| vm.to_bytes(value).ok().or_else(|| Some(vm.to_string(value).into_bytes())))
+        .unwrap_or_else(|| vec![0; block_size]);
+    iv.resize(block_size, 0);
+    iv.truncate(block_size);
+    iv
+}
+
+#[cfg(feature = "bif-crypto")]
+fn expand_key(key: &[u8], length: usize) -> Vec<u8> {
+    let mut expanded = vec![0; length];
+    for (index, byte) in expanded.iter_mut().enumerate() {
+        *byte = key[index % key.len().max(1)];
+    }
+    expanded
+}
+
+#[cfg(feature = "bif-crypto")]
+fn pad_pkcs7(input: &[u8], block_size: usize) -> Vec<u8> {
+    let padding = block_size - input.len() % block_size;
+    let mut output = input.to_vec();
+    output.resize(output.len() + padding, padding as u8);
+    output
+}
+
+#[cfg(feature = "bif-crypto")]
+fn unpad_pkcs7(mut input: Vec<u8>, block_size: usize) -> Result<Vec<u8>, String> {
+    let padding = *input.last().ok_or_else(|| "Empty ciphertext".to_string())? as usize;
+    if padding == 0 || padding > block_size || padding > input.len()
+        || input[input.len() - padding..].iter().any(|byte| *byte as usize != padding)
+    {
+        return Err("Invalid PKCS padding".to_string());
+    }
+    input.truncate(input.len() - padding);
+    Ok(input)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn encrypt_blocks<C>(input: &[u8], key: &[u8], cbc_mode: bool, iv: &[u8]) -> Result<Vec<u8>, String>
+where
+    C: BlockEncrypt + cipher::KeyInit,
+{
+    let cipher = <C as cipher::KeyInit>::new_from_slice(key)
+        .map_err(|_| "Invalid cipher key length".to_string())?;
+    let block_size = C::block_size();
+    let mut previous = iv[..block_size].to_vec();
+    let mut output = Vec::with_capacity(input.len());
+    for chunk in input.chunks(block_size) {
+        let mut block = cipher::Block::<C>::default();
+        block.copy_from_slice(chunk);
+        if cbc_mode {
+            for (byte, previous_byte) in block.iter_mut().zip(&previous) {
+                *byte ^= previous_byte;
+            }
+        }
+        cipher.encrypt_block(&mut block);
+        previous.copy_from_slice(&block);
+        output.extend_from_slice(&block);
+    }
+    Ok(output)
+}
+
+#[cfg(feature = "bif-crypto")]
+fn decrypt_blocks<C>(input: &[u8], key: &[u8], cbc_mode: bool, iv: &[u8]) -> Result<Vec<u8>, String>
+where
+    C: BlockDecrypt + cipher::KeyInit,
+{
+    let cipher = <C as cipher::KeyInit>::new_from_slice(key)
+        .map_err(|_| "Invalid cipher key length".to_string())?;
+    let block_size = C::block_size();
+    if input.is_empty() || input.len() % block_size != 0 {
+        return Err("Invalid ciphertext length".to_string());
+    }
+    let mut previous = iv[..block_size].to_vec();
+    let mut output = Vec::with_capacity(input.len());
+    for chunk in input.chunks(block_size) {
+        let mut block = cipher::Block::<C>::clone_from_slice(chunk);
+        cipher.decrypt_block(&mut block);
+        if cbc_mode {
+            for (byte, previous_byte) in block.iter_mut().zip(&previous) {
+                *byte ^= previous_byte;
+            }
+        }
+        previous.copy_from_slice(chunk);
+        output.extend_from_slice(&block);
+    }
+    Ok(output)
 }
 
 #[cfg(feature = "bif-crypto")]

@@ -114,6 +114,9 @@ impl BxValue {
 pub trait BxVM {
     fn current_chunk(&self) -> Option<Rc<RefCell<crate::vm::chunk::Chunk>>>;
     fn current_receiver(&self) -> Option<BxValue>;
+    fn current_function_called_name(&self) -> String {
+        String::new()
+    }
     fn interpret_chunk(&mut self, chunk: crate::vm::chunk::Chunk) -> Result<BxValue, String>;
     fn spawn(&mut self, func: Rc<BxCompiledFunction>, args: Vec<BxValue>, priority: u8, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> BxValue;
     fn spawn_by_value(&mut self, func: &BxValue, args: Vec<BxValue>, priority: u8, chunk: Rc<RefCell<crate::vm::chunk::Chunk>>) -> Result<BxValue, String>;
@@ -218,6 +221,10 @@ pub trait BxVM {
     fn get_global_value(&self, _name: &str) -> Option<BxValue> {
         None
     }
+    fn soap_client_get(&self, _url: &str) -> Option<BxValue> {
+        None
+    }
+    fn soap_client_set(&mut self, _url: String, _client: BxValue) {}
     #[cfg(not(target_arch = "wasm32"))]
     fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue>;
     #[cfg(not(target_arch = "wasm32"))]

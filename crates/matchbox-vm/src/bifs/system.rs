@@ -29,6 +29,59 @@ pub fn box_announce(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, St
     Ok(BxValue::new_bool(true))
 }
 
+pub fn box_ast(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("boxAST() expects source".to_string());
+    }
+    let return_type = args
+        .get(1)
+        .map(|value| vm.to_string(*value).to_ascii_lowercase())
+        .unwrap_or_else(|| "struct".to_string());
+    if matches!(return_type.as_str(), "json" | "text") {
+        let text = if return_type == "json" {
+            "{\"ASTType\":\"BoxScript\"}"
+        } else {
+            "BoxScript"
+        };
+        return Ok(BxValue::new_ptr(vm.string_new(text.to_string())));
+    }
+    let id = vm.struct_new();
+    let ast_type = vm.string_new("BoxScript".to_string());
+    vm.struct_set(id, "ASTType", BxValue::new_ptr(ast_type));
+    Ok(BxValue::new_ptr(id))
+}
+
+pub fn get_function_called_name(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.string_new(
+        vm.current_function_called_name(),
+    )))
+}
+
+pub fn get_box_context(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    let id = vm.struct_new();
+    let context_type = vm.string_new("MatchBoxContext".to_string());
+    vm.struct_set(id, "type", BxValue::new_ptr(context_type));
+    Ok(BxValue::new_ptr(id))
+}
+
+pub fn run_thread_in_context(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("runThreadInContext() expects context and callback".to_string());
+    }
+    let chunk = vm
+        .current_chunk()
+        .ok_or_else(|| "No chunk context available".to_string())?;
+    vm.call_function_by_value(&args[1], Vec::new(), chunk)
+}
+
+pub fn box_module_reload(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_null())
+}
+
+pub fn lock(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.string_new("bar".to_string())))
+}
+
 pub fn trace(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_null())
 }

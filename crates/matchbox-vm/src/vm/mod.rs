@@ -500,6 +500,7 @@ pub struct VM {
     pub native_classes: HashMap<String, BxNativeFunction>,
     pub interner: StringInterner,
     pub cli_args: Vec<String>,
+    soap_clients: HashMap<String, BxValue>,
     pub output_buffer: Option<String>,
     pub gc_suspended: bool,
     thread_futures: HashSet<usize>,
@@ -546,6 +547,37 @@ impl BxVM for VM {
             .and_then(|idx| self.fibers.get(idx))
             .and_then(|fiber| fiber.frames.last())
             .and_then(|frame| frame.receiver)
+    }
+
+    fn current_function_called_name(&self) -> String {
+        let Some(fiber) = self.current_fiber_idx.and_then(|idx| self.fibers.get(idx)) else {
+            return String::new();
+        };
+        let Some(frame) = fiber.frames.last() else {
+            return String::new();
+        };
+        let function_name = frame.function.name.clone();
+        let Some(function_value) = frame
+            .stack_base
+            .checked_sub(1)
+            .and_then(|index| fiber.stack.get(index))
+            .copied()
+        else {
+            return String::new();
+        };
+        if let Some(alias) = fiber.variables.borrow().iter().find_map(|(name, value)| {
+            (*value == function_value && *name != function_name).then(|| name.clone())
+        }) {
+            return alias;
+        }
+        self.global_names
+            .iter()
+            .find_map(|(name_id, index)| {
+                let value = self.global_values.get(*index)?;
+                (*value == function_value && self.interner.resolve(*name_id) != function_name)
+                    .then(|| self.interner.resolve(*name_id).to_string())
+            })
+            .unwrap_or(function_name)
     }
 
     fn interpret_chunk(&mut self, chunk: Chunk) -> Result<BxValue, String> {
@@ -1662,6 +1694,14 @@ impl BxVM for VM {
         self.cli_args.clone()
     }
 
+    fn soap_client_get(&self, url: &str) -> Option<BxValue> {
+        self.soap_clients.get(url).copied()
+    }
+
+    fn soap_client_set(&mut self, url: String, client: BxValue) {
+        self.soap_clients.insert(url, client);
+    }
+
     fn write_output(&mut self, s: &str) {
         if let Some(ref mut buffer) = self.output_buffer {
             buffer.push_str(s);
@@ -2172,6 +2212,7 @@ impl VM {
                 .collect(),
             interner: StringInterner::new(),
             cli_args: Vec::new(),
+            soap_clients: HashMap::new(),
             output_buffer: None,
             gc_suspended: false,
             thread_futures: HashSet::new(),
@@ -7553,6 +7594,29 @@ impl VM {
             "getlocaledisplayname" | "getlocaleinfo" => vec!["locale", "dsplocale"],
             "asyncallapply" => vec!["items", "mapper", "timeout", "timeunit"],
             "threadnew" => vec!["runnable", "name", "virtual"],
+            "boxast" => vec!["source", "returntype"],
+            "runthreadincontext" => vec!["context", "callback"],
+            "lock" => vec!["name", "timeout", "type"],
+            "compress" => vec![
+                "format",
+                "source",
+                "destination",
+                "includebasefolder",
+                "overwrite",
+                "prefix",
+                "filter",
+                "recurse",
+                "compressionlevel",
+            ],
+            "extract" => vec![
+                "format",
+                "source",
+                "destination",
+                "overwrite",
+                "recurse",
+                "filter",
+                "entrypaths",
+            ],
             _ => return args,
         };
 
@@ -8623,6 +8687,7 @@ impl VM {
         // 2. Globals
         roots.extend(self.global_values.iter().cloned());
         roots.extend(self.script_variables.borrow().values().copied());
+        roots.extend(self.soap_clients.values().copied());
         #[cfg(all(target_arch = "wasm32", feature = "js"))]
         roots.extend(self.callback_registry.borrow().values().cloned());
         for completion in &self.native_completions {
