@@ -201,6 +201,8 @@ pub fn file_info(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         "size",
         BxValue::new_number(metadata.len() as f64),
     );
+    let type_id = vm.string_new(if metadata.is_dir() { "Dir" } else { "File" }.to_string());
+    vm.struct_set(struct_id, "type", BxValue::new_ptr(type_id));
     vm.struct_set(
         struct_id,
         "is_directory",

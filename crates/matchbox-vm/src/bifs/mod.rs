@@ -542,6 +542,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         );
         bifs.insert("filecopy".to_string(), fs::file_copy as BxNativeFunction);
         bifs.insert("fileinfo".to_string(), fs::file_info as BxNativeFunction);
+        bifs.insert("getfileinfo".to_string(), fs::file_info as BxNativeFunction);
         bifs.insert(
             "filecreatesymlink".to_string(),
             fs::file_create_symlink as BxNativeFunction,
