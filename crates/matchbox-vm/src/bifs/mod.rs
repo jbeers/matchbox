@@ -78,6 +78,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("getfunctionlist".to_string(), system::get_function_list as BxNativeFunction);
     bifs.insert("getmoduleinfo".to_string(), system::get_module_info as BxNativeFunction);
     bifs.insert("getmodulelist".to_string(), system::get_module_list as BxNativeFunction);
+    bifs.insert("invoke".to_string(), system::invoke as BxNativeFunction);
     bifs.insert(
         "urlencodedformat".to_string(),
         system::url_encoded_format as BxNativeFunction,

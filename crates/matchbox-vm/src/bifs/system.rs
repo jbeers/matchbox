@@ -82,3 +82,33 @@ pub fn get_module_info(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, 
 pub fn get_module_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_ptr(vm.struct_new()))
 }
+
+pub fn invoke(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("invoke() expects a target, method name, and optional arguments".to_string());
+    }
+    let target = args[0];
+    let method = vm.to_string(args[1]);
+    let function = if target.is_null() || (vm.is_string_value(target) && vm.to_string(target).is_empty()) {
+        vm.resolve_variable_path(&method)
+            .ok_or_else(|| format!("Function '{}' was not found", method))?
+    } else if let Some(id) = target.as_gc_id().filter(|_| vm.is_struct_value(target)) {
+        let function = vm.struct_get(id, &method);
+        if function.is_null() {
+            return Err(format!("Function '{}' was not found", method));
+        }
+        function
+    } else {
+        return Err("invoke() target must be a struct or empty string".to_string());
+    };
+
+    let call_args = args
+        .get(2)
+        .and_then(|value| value.as_gc_id().filter(|_| vm.is_array_value(*value)))
+        .map(|id| (0..vm.array_len(id)).map(|index| vm.array_get(id, index)).collect())
+        .unwrap_or_default();
+    let chunk = vm
+        .current_chunk()
+        .ok_or_else(|| "invoke() requires an active execution context".to_string())?;
+    vm.call_function_by_value(&function, call_args, chunk)
+}
