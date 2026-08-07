@@ -829,13 +829,14 @@ impl<'a> Lexer<'a> {
         let str_start_col = self.col;
 
         self.advance(); // consume opening quote
+        let xml_like_string = quote == '"' && self.source[self.pos..].trim_start().starts_with('<');
 
         loop {
             if self.pos >= self.source.len() {
                 break;
             }
             let ch = self.current_char();
-            let xml_attribute_quote = if quote == '"' {
+            let xml_attribute_quote = if xml_like_string {
                 let mut lookahead = self.pos + ch.len_utf8();
                 let mut result = false;
                 while lookahead < self.source.len() {

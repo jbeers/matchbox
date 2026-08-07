@@ -22,13 +22,14 @@ assert ( "B" > "a" ) : "testItCanCompareStringsCaseInsensitive B-a";
 assert ( "A" == "a" ) : "testItCanCompareStringsCaseInsensitive A-a";
 
 // testItCanCompareStringsCaseSensitive
-// NOTE: these rely on case-sensitive ordering; MatchBox string comparison is
-// case-insensitive today, so these are expected to fail until that is added.
-assert ( "Brad" > "BRAD" ) : "testItCanCompareStringsCaseSensitive brad-BRAD";
-assert ( "BRAD" < "Brad" ) : "testItCanCompareStringsCaseSensitive BRAD-brad";
-assert ( "A" == "A" ) : "testItCanCompareStringsCaseSensitive A-A";
-assert ( "A" < "a" ) : "testItCanCompareStringsCaseSensitive A-a";
-assert ( "a" > "A" ) : "testItCanCompareStringsCaseSensitive a-A";
+// The JVM test calls Compare.invoke's case-sensitive overload directly; use
+// the equivalent case-sensitive compare BIF rather than the case-insensitive
+// BoxLang relational operators.
+assert compare( "Brad", "BRAD" ) > 0 : "testItCanCompareStringsCaseSensitive brad-BRAD";
+assert compare( "BRAD", "Brad" ) < 0 : "testItCanCompareStringsCaseSensitive BRAD-brad";
+assert compare( "A", "A" ) == 0 : "testItCanCompareStringsCaseSensitive A-A";
+assert compare( "A", "a" ) < 0 : "testItCanCompareStringsCaseSensitive A-a";
+assert compare( "a", "A" ) > 0 : "testItCanCompareStringsCaseSensitive a-A";
 
 // testItCanCompareNumbers
 assert ( 1 == 1 ) : "testItCanCompareNumbers 1-1";

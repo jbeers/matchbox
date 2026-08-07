@@ -1380,8 +1380,8 @@ impl BxVM for VM {
     fn future_status(&self, future: BxValue) -> Option<FutureStatus> {
         future
             .as_gc_id()
-            .and_then(|id| match self.heap.get(id) {
-                GcObject::Future(f) => Some(f.status.clone()),
+            .and_then(|id| match self.heap.get_opt(id) {
+                Some(GcObject::Future(f)) => Some(f.status.clone()),
                 _ => None,
             })
     }
@@ -1389,8 +1389,8 @@ impl BxVM for VM {
     fn future_value(&self, future: BxValue) -> Option<BxValue> {
         future
             .as_gc_id()
-            .and_then(|id| match self.heap.get(id) {
-                GcObject::Future(f) => Some(f.value),
+            .and_then(|id| match self.heap.get_opt(id) {
+                Some(GcObject::Future(f)) => Some(f.value),
                 _ => None,
             })
     }
