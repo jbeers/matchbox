@@ -24,3 +24,15 @@ pub fn get_file_from_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue
     let file = path.rsplit(['/', '\\']).next().unwrap_or_default();
     Ok(BxValue::new_ptr(vm.string_new(file.to_string())))
 }
+
+pub fn box_announce(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(true))
+}
+
+pub fn trace(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_null())
+}
+
+pub fn write_log(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_null())
+}
