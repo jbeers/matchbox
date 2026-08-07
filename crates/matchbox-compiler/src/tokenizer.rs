@@ -821,7 +821,25 @@ impl<'a> Lexer<'a> {
                 break;
             }
             let ch = self.current_char();
-            if ch == quote {
+            let xml_attribute_quote = if quote == '"' {
+                let mut lookahead = self.pos + ch.len_utf8();
+                let mut result = false;
+                while lookahead < self.source.len() {
+                    let next = self.source[lookahead..].chars().next().unwrap();
+                    if !next.is_whitespace() {
+                        let after_next = lookahead + next.len_utf8();
+                        result = next.is_ascii_alphanumeric()
+                            || next == '>'
+                            || (next == '/' && self.source[after_next..].starts_with('>'));
+                        break;
+                    }
+                    lookahead += next.len_utf8();
+                }
+                result
+            } else {
+                false
+            };
+            if ch == quote && !xml_attribute_quote {
                 self.advance();
                 if self.pos < self.source.len() && self.current_char() == quote {
                     self.advance();
@@ -837,6 +855,23 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if ch == '#' {
+                let mut lookahead = self.pos + 1;
+                let mut has_closing_hash = false;
+                while lookahead < self.source.len() {
+                    let next = self.source[lookahead..].chars().next().unwrap();
+                    if next == quote {
+                        break;
+                    }
+                    if next == '#' {
+                        has_closing_hash = true;
+                        break;
+                    }
+                    lookahead += next.len_utf8();
+                }
+                if !has_closing_hash {
+                    self.advance();
+                    continue;
+                }
                 self.advance();
                 if self.pos < self.source.len() && self.current_char() == '#' {
                     self.advance();

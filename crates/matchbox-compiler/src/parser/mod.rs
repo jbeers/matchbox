@@ -1903,6 +1903,21 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
             }
         }
         if chars[i] == '#' {
+            let closing = chars[i + 1..].iter().position(|character| *character == '#');
+            let valid_interpolation = closing.is_some_and(|closing| {
+                let expression: String = chars[i + 1..i + 1 + closing].iter().collect();
+                if expression.contains('<') || expression.contains('>') {
+                    return false;
+                }
+                let lexed = crate::tokenizer::lex(&expression);
+                let mut parser = Parser::new(&expression, lexed.tokens(), None);
+                parser.parse_expression().is_ok() && parser.pos == parser.tokens.len()
+            });
+            if !valid_interpolation {
+                text.push('#');
+                i += 1;
+                continue;
+            }
             i += 1;
             if i < chars.len() && chars[i] == '#' {
                 text.push('#');

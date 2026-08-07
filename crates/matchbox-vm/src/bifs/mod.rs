@@ -54,6 +54,7 @@ mod type_format;
 mod watcher;
 mod yaml;
 mod zip;
+pub(crate) mod xml;
 
 pub fn register_all() -> HashMap<String, BxNativeFunction> {
     let mut bifs = HashMap::new();
@@ -114,8 +115,13 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Array BIFs
     bifs.insert("arrayappend".to_string(), array_append as BxNativeFunction);
+    bifs.insert(
+        "arrayappendmember".to_string(),
+        array_append_member as BxNativeFunction,
+    );
     bifs.insert("arraymap".to_string(), array_map as BxNativeFunction);
     bifs.insert("arraylen".to_string(), len as BxNativeFunction);
+    bifs.insert("arrayprepend".to_string(), array_prepend as BxNativeFunction);
     bifs.insert("arraynew".to_string(), array_new as BxNativeFunction);
     bifs.insert(
         "arrayissynchronized".to_string(),
@@ -877,6 +883,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     set::register_set_bifs(&mut bifs);
     i18n::register_i18n_bifs(&mut bifs);
     watcher::register_watcher_bifs(&mut bifs);
+    xml::register_xml_bifs(&mut bifs);
     cache::register_cache_bifs(&mut bifs);
     net::register_net_bifs(&mut bifs);
 
@@ -3004,6 +3011,22 @@ fn array_append(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     } else {
         Err("arrayAppend() expects an array as the first argument".to_string())
     }
+}
+
+fn array_append_member(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    array_append(vm, args)?;
+    Ok(args[0])
+}
+
+fn array_prepend(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() != 2 {
+        return Err("arrayPrepend() expects exactly 2 arguments".to_string());
+    }
+    let id = args[0]
+        .as_gc_id()
+        .ok_or_else(|| "arrayPrepend() expects an array as the first argument".to_string())?;
+    vm.array_insert_at(id, 0, args[1])?;
+    Ok(args[0])
 }
 
 fn array_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {

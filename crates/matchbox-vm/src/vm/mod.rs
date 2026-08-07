@@ -1920,6 +1920,9 @@ impl VM {
         } else if val.is_null() {
             "null".to_string()
         } else if let Some(id) = val.as_gc_id() {
+            if let Some(xml) = crate::bifs::xml::try_xml_to_string(self, val) {
+                return xml;
+            }
             match self.heap.get(id) {
                 GcObject::String(s) => s.to_string(),
                 GcObject::Bytes(bytes) => String::from_utf8_lossy(bytes).to_string(),
@@ -2447,6 +2450,17 @@ impl VM {
         }
 
         if let Some(id) = receiver.as_gc_id() {
+            if self.struct_key_exists(id, "__xml_kind") {
+                return match name.as_str() {
+                     "xmlformat" => Some("xmlformat".to_string()),
+                    "search" => Some("xmlsearch".to_string()),
+                    "transform" => Some("xmltransform".to_string()),
+                    "getnodetype" => Some("xmlgetnodetype".to_string()),
+                    "childpos" => Some("xmlchildpos".to_string()),
+                    "size" => Some("xmlsize".to_string()),
+                    _ => None,
+                };
+            }
             match self.heap.get(id) {
                 GcObject::String(_) => match name.as_str() {
                     "len" | "length" => Some("len".to_string()),
@@ -2479,6 +2493,7 @@ impl VM {
                     "startswith" => Some("stringstartswith".to_string()),
                      "val" => Some("val".to_string()),
                      "urlencodedformat" => Some("urlencodedformat".to_string()),
+                     "xmlformat" => Some("xmlformat".to_string()),
                      "todatetime" => Some("parsedatetime".to_string()),
                      "tojson" => Some("serializejson".to_string()),
                     "fromjson" => Some("deserializejson".to_string()),
@@ -2549,7 +2564,9 @@ impl VM {
                  },
                  GcObject::Array(_) => match name.as_str() {
                      "len" | "length" | "count" | "size" => Some("len".to_string()),
-                     "append" | "add" => Some("arrayappend".to_string()),
+                     "append" => Some("arrayappendmember".to_string()),
+                     "add" => Some("arrayappend".to_string()),
+                     "xmlgetnodetype" | "getnodetype" => Some("xmlgetnodetype".to_string()),
                      "avg" => Some("arrayavg".to_string()),
                      "chunk" => Some("arraychunk".to_string()),
                        "contains" => Some("arraycontains".to_string()),

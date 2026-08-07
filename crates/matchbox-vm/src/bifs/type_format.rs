@@ -262,7 +262,15 @@ fn is_valid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
                 }
             }
         }
-        "xml" => false,
+        "xml" => {
+            if crate::bifs::xml::xml_kind(vm, value).is_some() {
+                true
+            } else if vm.is_string_value(value) {
+                is_well_formed_xml(&vm.to_string(value))
+            } else {
+                false
+            }
+        }
         "zipcode" => { let d: String = vm.to_string(value).chars().filter(|c| c.is_ascii_digit()).collect(); d.len() == 5 || d.len() == 9 }
         "creditcard" => {
             let raw = vm.to_string(value);
@@ -292,10 +300,13 @@ fn is_valid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 }
 
 fn is_xml_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
-    if args.is_empty() || !vm.is_string_value(args[0]) {
+    if args.is_empty() {
         return Ok(BxValue::new_bool(false));
     }
-    Ok(BxValue::new_bool(is_well_formed_xml(&vm.to_string(args[0]))))
+    Ok(BxValue::new_bool(
+        crate::bifs::xml::xml_kind(vm, args[0]).is_some()
+            || (vm.is_string_value(args[0]) && is_well_formed_xml(&vm.to_string(args[0]))),
+    ))
 }
 
 fn is_well_formed_xml(input: &str) -> bool {
@@ -371,11 +382,25 @@ fn xml_tag_end(input: &str, start: usize) -> Option<usize> {
     }
     None
 }
-fn is_xml_attribute_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
-fn is_xml_doc_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
-fn is_xml_element_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
-fn is_xml_node_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
-fn is_xml_root_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
+fn is_xml_attribute_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(args.first().is_some_and(|value| crate::bifs::xml::xml_kind(vm, *value).as_deref() == Some("ATTRIBUTE"))))
+}
+fn is_xml_doc_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(args.first().is_some_and(|value| crate::bifs::xml::xml_kind(vm, *value).as_deref() == Some("DOCUMENT"))))
+}
+fn is_xml_element_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(args.first().is_some_and(|value| crate::bifs::xml::xml_kind(vm, *value).as_deref() == Some("ELEMENT"))))
+}
+fn is_xml_node_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_bool(args.first().is_some_and(|value| matches!(crate::bifs::xml::xml_kind(vm, *value).as_deref(), Some("DOCUMENT") | Some("ELEMENT") | Some("ATTRIBUTE")))))
+}
+fn is_xml_root_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let result = args.first().and_then(|value| value.as_gc_id()).is_some_and(|id| {
+        crate::bifs::xml::xml_kind(vm, args[0]).as_deref() == Some("ELEMENT")
+            && vm.struct_get(id, "__xmlRoot").as_bool()
+    });
+    Ok(BxValue::new_bool(result))
+}
 
 fn boolean_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Err("booleanFormat() requires a value argument".to_string()); }
@@ -529,6 +554,7 @@ pub fn register_type_format_bifs(bifs: &mut std::collections::HashMap<String, Bx
     bifs.insert("isxmlattribute".to_string(), is_xml_attribute_bif as BxNativeFunction);
     bifs.insert("isxmldoc".to_string(), is_xml_doc_bif as BxNativeFunction);
     bifs.insert("isxmlelement".to_string(), is_xml_element_bif as BxNativeFunction);
+    bifs.insert("isxmlelem".to_string(), is_xml_element_bif as BxNativeFunction);
     bifs.insert("isxmlnode".to_string(), is_xml_node_bif as BxNativeFunction);
     bifs.insert("isxmlroot".to_string(), is_xml_root_bif as BxNativeFunction);
     bifs.insert("booleanformat".to_string(), boolean_format_bif as BxNativeFunction);
