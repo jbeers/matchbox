@@ -944,7 +944,7 @@ impl BxVM for VM {
                     Ok(BxValue::new_bool(self.is_truthy(val)))
                 }
             }
-            "array" => {
+            "array" | "set" => {
                 if self.is_array_value(val) {
                     Ok(val)
                 } else {
@@ -1148,6 +1148,20 @@ impl BxVM for VM {
         self.heap.alloc(GcObject::Array(Vec::new()))
     }
 
+    fn range_values(&self, id: usize) -> Option<Vec<BxValue>> {
+        if let GcObject::Range(range) = self.heap.get_opt(id)? {
+            let (start, end) = range.iter_bounds();
+            let step = if start <= end { 1 } else { -1 };
+            Some(
+                (0..range.len())
+                    .map(|offset| BxValue::new_int((start + step * offset as i64) as i32))
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    }
+
     fn struct_len(&self, id: usize) -> usize {
         if let GcObject::Struct(s) = self.heap.get(id) {
             s.properties.len()
@@ -1188,7 +1202,7 @@ impl BxVM for VM {
     }
 
     fn struct_set(&mut self, id: usize, key: &str, val: BxValue) {
-        let key_id = self.interner.intern(key);
+        let key_id = self.struct_key_id(id, key);
         if let GcObject::Struct(s) = self.heap.get_mut(id) {
             if let Some(idx) = self.shapes.get_index(s.shape_id, key_id) {
                 s.properties[idx as usize] = val;
@@ -1200,7 +1214,7 @@ impl BxVM for VM {
     }
 
     fn struct_get(&self, id: usize, key: &str) -> BxValue {
-        let key_id = self.interner.get_id(key).unwrap_or(u32::MAX);
+        let key_id = self.struct_key_lookup_id(id, key).unwrap_or(u32::MAX);
         if let GcObject::Struct(s) = self.heap.get(id) {
             if let Some(idx) = self.shapes.get_index(s.shape_id, key_id) {
                 return s.properties[idx as usize];
@@ -1210,7 +1224,7 @@ impl BxVM for VM {
     }
 
     fn struct_delete(&mut self, id: usize, key: &str) -> bool {
-        let key_id = self.interner.get_id(key).unwrap_or(u32::MAX);
+        let key_id = self.struct_key_lookup_id(id, key).unwrap_or(u32::MAX);
         if let GcObject::Struct(s) = self.heap.get_mut(id) {
             if self.shapes.get_index(s.shape_id, key_id).is_some() {
                 // To delete from a shape-based struct, we must reconstruct the struct's state
@@ -1242,7 +1256,7 @@ impl BxVM for VM {
     }
 
     fn struct_key_exists(&self, id: usize, key: &str) -> bool {
-        let key_id = self.interner.get_id(key).unwrap_or(u32::MAX);
+        let key_id = self.struct_key_lookup_id(id, key).unwrap_or(u32::MAX);
         if let GcObject::Struct(s) = self.heap.get(id) {
             return self.shapes.get_index(s.shape_id, key_id).is_some();
         }
@@ -1623,6 +1637,24 @@ impl BxVM for VM {
 }
 
 impl VM {
+    fn struct_key_id(&mut self, id: usize, key: &str) -> u32 {
+        let case_sensitive = matches!(self.heap.get_opt(id), Some(GcObject::Struct(s)) if s.case_sensitive);
+        if case_sensitive {
+            self.interner.intern_case_sensitive(key)
+        } else {
+            self.interner.intern(key)
+        }
+    }
+
+    fn struct_key_lookup_id(&self, id: usize, key: &str) -> Option<u32> {
+        let case_sensitive = matches!(self.heap.get_opt(id), Some(GcObject::Struct(s)) if s.case_sensitive);
+        if case_sensitive {
+            self.interner.get_exact_id(key)
+        } else {
+            self.interner.get_id(key)
+        }
+    }
+
     fn new_variables_scope() -> Rc<RefCell<HashMap<String, BxValue>>> {
         Rc::new(RefCell::new(HashMap::new()))
     }
@@ -1636,14 +1668,20 @@ impl VM {
 
     fn flatten_spread_array_value(&self, val: BxValue) -> Result<Vec<BxValue>> {
         if let Some(id) = val.as_gc_id() {
-            if let GcObject::Array(arr) = self.heap.get(id) {
-                Ok(arr.iter().copied().collect())
-            } else {
-                bail!(
+            match self.heap.get(id) {
+                GcObject::Array(arr) => Ok(arr.iter().copied().collect()),
+                GcObject::Range(range) => {
+                    let (start, end) = range.iter_bounds();
+                    let step = if start <= end { 1 } else { -1 };
+                    Ok((0..range.len())
+                        .map(|offset| BxValue::new_int((start + step * offset as i64) as i32))
+                        .collect())
+                }
+                _ => bail!(
                     "Cannot spread value of type [{}] into an array literal.",
                     self.type_name_from_value(val)
                         .unwrap_or_else(|| "unknown".to_string())
-                )
+                ),
             }
         } else {
             bail!(
@@ -2391,6 +2429,7 @@ impl VM {
                 "sqr" => Some("sqr".to_string()),
                 "decimalformat" => Some("decimalformat".to_string()),
                 "numberformat" => Some("numberformat".to_string()),
+                "currencyformat" => Some("currencyformat".to_string()),
                 "booleanformat" | "truefalseformat" => Some("booleanformat".to_string()),
                 "log" => Some("log".to_string()),
                 "log10" => Some("log10".to_string()),
@@ -2487,7 +2526,8 @@ impl VM {
                      "listsome" => Some("listsome".to_string()),
                      "listsort" => Some("listsort".to_string()),
                      "listvaluecount" => Some("listvaluecount".to_string()),
-                     "listvaluecountnocase" => Some("listvaluecountnocase".to_string()),
+                      "listvaluecountnocase" => Some("listvaluecountnocase".to_string()),
+                     "listtoset" => Some("listtoset".to_string()),
                     "jsformat" | "jsstringformat" => Some("jsstringformat".to_string()),
                     "ljustify" => Some("ljustify".to_string()),
                     "rjustify" => Some("rjustify".to_string()),
@@ -2512,19 +2552,25 @@ impl VM {
                      "append" | "add" => Some("arrayappend".to_string()),
                      "avg" => Some("arrayavg".to_string()),
                      "chunk" => Some("arraychunk".to_string()),
-                      "contains" => Some("arraycontains".to_string()),
+                       "contains" => Some("arraycontains".to_string()),
+                       "has" => Some("boxsetcontains".to_string()),
+                       "remove" | "delete" => Some("boxsetremove".to_string()),
+                       "clear" => Some("boxsetclear".to_string()),
+                       "addall" => Some("boxsetaddall".to_string()),
+                       "removeall" => Some("boxsetremoveall".to_string()),
+                       "retainall" => Some("boxsetretainall".to_string()),
+                       "isempty" => Some("boxsetisempty".to_string()),
                       "containsnocase" => Some("arraycontainsnocase".to_string()),
-                     "delete" => Some("arraydelete".to_string()),
-                     "deletenocase" => Some("arraydeletenocase".to_string()),
+                      "deletenocase" => Some("arraydeletenocase".to_string()),
                      "deleteat" => Some("arraydeleteat".to_string()),
                      "resize" => Some("arrayresize".to_string()),
                      "swap" => Some("arrayswap".to_string()),
-                     "each" => Some("arrayeach".to_string()),
-                     "every" => Some("arrayevery".to_string()),
-                     "map" => Some("arraymap".to_string()),
-                     "reduce" => Some("arrayreduce".to_string()),
-                     "filter" => Some("arrayfilter".to_string()),
-                     "find" => Some("arrayfind".to_string()),
+                      "each" => Some("boxseteach".to_string()),
+                      "every" => Some("boxsetevery".to_string()),
+                      "map" => Some("boxsetmap".to_string()),
+                      "reduce" => Some("boxsetreduce".to_string()),
+                      "filter" => Some("boxsetfilter".to_string()),
+                      "find" => Some("boxsetfind".to_string()),
                      "findall" => Some("arrayfindall".to_string()),
                      "findallnocase" => Some("arrayfindallnocase".to_string()),
                      "findfirst" => Some("arrayfindfirst".to_string()),
@@ -2535,13 +2581,12 @@ impl VM {
                      "groupby" => Some("arraygroupby".to_string()),
                      "indexexists" => Some("arrayindexexists".to_string()),
                      "insertat" => Some("arrayinsertat".to_string()),
-                     "isempty" => Some("arrayisempty".to_string()),
-                     "last" => Some("arraylast".to_string()),
+                      "last" => Some("arraylast".to_string()),
                      "max" => Some("arraymax".to_string()),
                      "median" => Some("arraymedian".to_string()),
                      "merge" => Some("arraymerge".to_string()),
                      "min" => Some("arraymin".to_string()),
-                     "none" => Some("arraynone".to_string()),
+                      "none" => Some("boxsetnone".to_string()),
                      "pop" => Some("arraypop".to_string()),
                      "prepend" => Some("arrayprepend".to_string()),
                      "push" => Some("arraypush".to_string()),
@@ -2552,11 +2597,21 @@ impl VM {
                      "set" => Some("arrayset".to_string()),
                      "shift" => Some("arrayshift".to_string()),
                      "slice" => Some("arrayslice".to_string()),
-                     "some" => Some("arraysome".to_string()),
+                      "some" => Some("boxsetsome".to_string()),
                      "sort" => Some("arraysort".to_string()),
                      "splice" => Some("arraysplice".to_string()),
-                     "sum" => Some("arraysum".to_string()),
-                     "tolist" => Some("arraytolist".to_string()),
+                      "sum" => Some("arraysum".to_string()),
+                      "intersection" => Some("boxsetintersection".to_string()),
+                      "difference" => Some("boxsetdifference".to_string()),
+                      "symmetricdifference" => Some("boxsetsymmetricdifference".to_string()),
+                      "union" => Some("boxsetunion".to_string()),
+                      "issubsetof" => Some("boxsetissubsetof".to_string()),
+                      "issupersetof" => Some("boxsetissupersetof".to_string()),
+                      "isdisjointfrom" => Some("boxsetisdisjointfrom".to_string()),
+                      "iscasesensitive" => Some("boxsetiscasesensitive".to_string()),
+                      "issynchronized" => Some("boxsetissynchronized".to_string()),
+                      "toarray" => Some("boxsettoarray".to_string()),
+                      "tolist" => Some("boxsettolist".to_string()),
                      "tostruct" => Some("arraytostruct".to_string()),
                      "transpose" => Some("arraytranspose".to_string()),
                      "unique" => Some("arrayunique".to_string()),
@@ -2587,7 +2642,9 @@ impl VM {
                     "toquerystring" => Some("structtoquerystring".to_string()),
                     "tosorted" => Some("structtosorted".to_string()),
                     "keytranslate" => Some("structkeytranslate".to_string()),
-                    "findkey" => Some("structfindkey".to_string()),
+                     "findkey" => Some("structfindkey".to_string()),
+                     "keyset" => Some("structkeyset".to_string()),
+                     "valueset" => Some("structvalueset".to_string()),
                     _ => None,
                 },
                 GcObject::Future(_) => match name.as_str() {
@@ -4082,7 +4139,29 @@ impl VM {
                 op::MULTIPLY => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                    let array_intersection = match (a.as_gc_id(), b.as_gc_id()) {
+                        (Some(a_id), Some(b_id)) => {
+                            let (left, right) = match (self.heap.get(a_id), self.heap.get(b_id)) {
+                                (GcObject::Array(left), GcObject::Array(right)) => {
+                                    (Some(left.clone()), Some(right.clone()))
+                                }
+                                _ => (None, None),
+                            };
+                            left.zip(right).map(|(left, right)| {
+                                left.into_iter()
+                                    .filter(|value| {
+                                        right.iter().any(|other| self.is_equal(*value, *other))
+                                    })
+                                    .collect::<Vec<_>>()
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(values) = array_intersection {
+                        let id = self.heap.alloc(GcObject::Array(values));
+                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                    } else if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
                         self.fibers[fiber_idx]
                             .stack
                             .push(BxValue::new_number(na * nb));
@@ -4327,7 +4406,37 @@ impl VM {
                 op::POW => {
                     let b = self.fibers[fiber_idx].stack.pop().unwrap();
                     let a = self.fibers[fiber_idx].stack.pop().unwrap();
-                    if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
+                    let array_symmetric_difference = match (a.as_gc_id(), b.as_gc_id()) {
+                        (Some(a_id), Some(b_id)) => {
+                            let (left, right) = match (self.heap.get(a_id), self.heap.get(b_id)) {
+                                (GcObject::Array(left), GcObject::Array(right)) => {
+                                    (Some(left.clone()), Some(right.clone()))
+                                }
+                                _ => (None, None),
+                            };
+                            left.zip(right).map(|(left, right)| {
+                                let mut values = left
+                                    .iter()
+                                    .filter(|value| {
+                                        !right.iter().any(|other| self.is_equal(**value, *other))
+                                    })
+                                    .copied()
+                                    .collect::<Vec<_>>();
+                                values.extend(
+                                    right.iter().filter(|value| {
+                                        !left.iter().any(|other| self.is_equal(**value, *other))
+                                    }).copied(),
+                                );
+                                values
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    if let Some(values) = array_symmetric_difference {
+                        let id = self.heap.alloc(GcObject::Array(values));
+                        self.fibers[fiber_idx].stack.push(BxValue::new_ptr(id));
+                    } else if let (Some(na), Some(nb)) = (self.numeric_value(a), self.numeric_value(b)) {
                         self.fibers[fiber_idx]
                             .stack
                             .push(BxValue::new_number(na.powf(nb)));
@@ -4845,16 +4954,10 @@ impl VM {
                                     continue 'quantum;
                                 }
                             }
-                            GcObject::Struct(s) => {
+                            GcObject::Struct(_) => {
                                 let key_str = self.to_string(index_val);
-                                let key_id = self.interner.intern(&key_str);
-                                if let Some(idx) = self.shapes.get_index(s.shape_id, key_id) {
-                                    self.fibers[fiber_idx]
-                                        .stack
-                                        .push(s.properties[idx as usize]);
-                                } else {
-                                    self.fibers[fiber_idx].stack.push(BxValue::new_null());
-                                }
+                                let value = self.struct_get(id, &key_str);
+                                self.fibers[fiber_idx].stack.push(value);
                             }
                             _ => {
                                 flush_ip!();
@@ -4884,7 +4987,7 @@ impl VM {
                     if let Some(id) = base_val.as_gc_id() {
                         let index_string = self.to_string(index_val);
                         let key_id = if !index_val.is_number() && !index_val.is_int() {
-                            Some(self.interner.intern(&index_string))
+                            Some(self.struct_key_id(id, &index_string))
                         } else {
                             None
                         };
@@ -5095,7 +5198,10 @@ impl VM {
                                     _ => {}
                                 }
 
-                                if let Some(idx) = self.shapes.get_index(shape_id, name_id) {
+                                let key_name = self.interner.resolve(name_id).to_string();
+                                if let Some(idx) = self.struct_key_lookup_id(id, &key_name)
+                                    .and_then(|key_id| self.shapes.get_index(shape_id, key_id))
+                                {
                                     {
                                         let frame = self.fibers[fiber_idx].frames.last().unwrap();
                                         let mut chunk = frame.chunk.borrow_mut();
@@ -5331,8 +5437,16 @@ impl VM {
                             }
                         }
 
+                        let struct_name_id = if matches!(self.heap.get_opt(id), Some(GcObject::Struct(_))) {
+                            let name = self.interner.resolve(name_id).to_string();
+                            Some(self.struct_key_id(id, &name))
+                        } else {
+                            None
+                        };
+
                         match self.heap.get_mut(id) {
                             GcObject::Struct(s) => {
+                                let name_id = struct_name_id.unwrap_or(name_id);
                                 let shape_id = s.shape_id;
                                 let ic = {
                                     let fiber = &self.fibers[fiber_idx];
@@ -7225,6 +7339,9 @@ impl VM {
             ],
             "structkeytranslate" => vec!["struct", "deep", "retainkeys"],
             "stringbuildernew" => vec!["value", "capacity"],
+            "setnew" => vec!["type", "values", "casesensitive", "issynchronized"],
+            "listtoset" => vec!["list", "delimiter", "type", "casesensitive"],
+            "getlocaledisplayname" | "getlocaleinfo" => vec!["locale", "dsplocale"],
             _ => return args,
         };
 
@@ -7629,7 +7746,8 @@ impl VM {
                                 args.push(self.fibers[fiber_idx].stack.pop().unwrap());
                             }
                             args.reverse();
-                            self.fibers[fiber_idx].stack.pop();
+                            // Keep the receiver as the frame marker so returning from a
+                            // nested method call does not remove the caller's function.
                             let final_args = if let Some(names_list) = names {
                                 self.reorder_arguments(args, names_list, &function.params)
                             } else {

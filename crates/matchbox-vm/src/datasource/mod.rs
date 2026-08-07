@@ -88,6 +88,23 @@ impl BxNativeObject for BxQuery {
     ) -> Result<BxValue, String> {
         match name.to_lowercase().as_str() {
             "len" | "length" | "size" => Ok(BxValue::new_number(self.record_count as f64)),
+            "toset" => {
+                let set_id = vm.array_new();
+                for row_idx in 0..self.record_count {
+                    let row_id = vm.struct_new();
+                    for (col_idx, column) in self.columns.iter().enumerate() {
+                        let value = self
+                            .data
+                            .get(col_idx)
+                            .and_then(|column_data| column_data.get(row_idx))
+                            .map(|value| sql_to_bx(vm, value))
+                            .unwrap_or_else(BxValue::new_null);
+                        vm.struct_set(row_id, &column.name, value);
+                    }
+                    vm.array_push(set_id, BxValue::new_ptr(row_id));
+                }
+                Ok(BxValue::new_ptr(set_id))
+            }
             "columnlist" | "getcolumnlist" => {
                 let list: String = self
                     .columns

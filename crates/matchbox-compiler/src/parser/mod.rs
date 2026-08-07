@@ -1556,6 +1556,42 @@ impl<'a> Parser<'a> {
                         line,
                     ));
                 }
+                if name.eq_ignore_ascii_case("set") && self.peek_is(TokenKind::LeftBrace) {
+                    self.pos += 1;
+                    let mut items = Vec::new();
+                    if !self.peek_is(TokenKind::RightBrace) {
+                        loop {
+                            if self.peek_is(TokenKind::DotDotDot) {
+                                self.pos += 1;
+                                let expr = self.parse_expression()?;
+                                items.push(Expression::new(ExpressionKind::Spread(Box::new(expr)), line));
+                            } else {
+                                items.push(self.parse_expression()?);
+                            }
+                            if !self.peek_is(TokenKind::Comma) {
+                                break;
+                            }
+                            self.pos += 1;
+                            if self.peek_is(TokenKind::RightBrace) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(TokenKind::RightBrace)?;
+                    return Ok(Expression::new(
+                        ExpressionKind::FunctionCall {
+                            base: Box::new(Expression::new(
+                                ExpressionKind::Identifier("toset".to_string()),
+                                line,
+                            )),
+                            args: vec![Argument {
+                                name: None,
+                                value: Expression::new(ExpressionKind::Literal(Literal::Array(items)), line),
+                            }],
+                        },
+                        line,
+                    ));
+                }
                 // Check for lambda: identifier => expr
                 if self.peek_is(TokenKind::EqualGreater) || self.peek_is(TokenKind::MinusGreater) {
                     let is_lambda = self.peek_is(TokenKind::MinusGreater);
@@ -1847,12 +1883,28 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
     let mut parts = Vec::new();
     let mut text = String::new();
     let mut i = 0;
-    let bytes = inner.as_bytes();
+    let chars: Vec<char> = inner.chars().collect();
 
-    while i < bytes.len() {
-        if bytes[i] == b'#' {
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            let escaped = match chars[i + 1] {
+                'n' => Some('\n'),
+                'r' => Some('\r'),
+                't' => Some('\t'),
+                '\\' => Some('\\'),
+                '"' => Some('"'),
+                '\'' => Some('\''),
+                _ => None,
+            };
+            if let Some(escaped) = escaped {
+                text.push(escaped);
+                i += 2;
+                continue;
+            }
+        }
+        if chars[i] == '#' {
             i += 1;
-            if i < bytes.len() && bytes[i] == b'#' {
+            if i < chars.len() && chars[i] == '#' {
                 text.push('#');
                 i += 1;
                 continue;
@@ -1862,31 +1914,31 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
                 parts.push(StringPart::Text(std::mem::take(&mut text)));
             }
             let mut expr = String::new();
-            while i < bytes.len() {
-                if bytes[i] == b'"' {
+            while i < chars.len() {
+                if chars[i] == '"' {
                     // Skip over nested string
                     expr.push('"');
                     i += 1;
-                    while i < bytes.len() && bytes[i] != b'"' {
-                        expr.push(bytes[i] as char);
+                    while i < chars.len() && chars[i] != '"' {
+                        expr.push(chars[i]);
                         i += 1;
                     }
-                    if i < bytes.len() { expr.push('"'); i += 1; }
+                    if i < chars.len() { expr.push('"'); i += 1; }
                     continue;
                 }
-                if bytes[i] == b'\'' {
+                if chars[i] == '\'' {
                     expr.push('\'');
                     i += 1;
-                    while i < bytes.len() && bytes[i] != b'\'' {
-                        expr.push(bytes[i] as char);
+                    while i < chars.len() && chars[i] != '\'' {
+                        expr.push(chars[i]);
                         i += 1;
                     }
-                    if i < bytes.len() { expr.push('\''); i += 1; }
+                    if i < chars.len() { expr.push('\''); i += 1; }
                     continue;
                 }
-                if bytes[i] == b'#' {
+                if chars[i] == '#' {
                     i += 1;
-                    if i < bytes.len() && bytes[i] == b'#' {
+                    if i < chars.len() && chars[i] == '#' {
                         expr.push_str("##");
                         i += 1;
                         continue;
@@ -1894,7 +1946,7 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
                     // Closing #
                     break;
                 }
-                expr.push(bytes[i] as char);
+                expr.push(chars[i]);
                 i += 1;
             }
             if !expr.is_empty() {
@@ -1905,7 +1957,7 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
                 }
             }
         } else {
-            text.push(bytes[i] as char);
+            text.push(chars[i]);
             i += 1;
         }
     }

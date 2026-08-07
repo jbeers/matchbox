@@ -829,6 +829,13 @@ impl<'a> Lexer<'a> {
                 }
                 break; // closing quote
             }
+            if ch == '\\' {
+                self.advance();
+                if self.pos < self.source.len() {
+                    self.advance();
+                }
+                continue;
+            }
             if ch == '#' {
                 self.advance();
                 if self.pos < self.source.len() && self.current_char() == '#' {

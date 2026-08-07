@@ -157,6 +157,9 @@ pub trait BxVM {
     fn array_insert_at(&mut self, id: usize, idx: usize, val: BxValue) -> Result<(), String>;
     fn array_clear(&mut self, id: usize) -> Result<(), String>;
     fn array_new(&mut self) -> usize;
+    fn range_values(&self, _id: usize) -> Option<Vec<BxValue>> {
+        None
+    }
     fn struct_len(&self, id: usize) -> usize;
     fn struct_new(&mut self) -> usize;
     fn struct_new_with_options(&mut self, _options: &[String]) -> usize {
