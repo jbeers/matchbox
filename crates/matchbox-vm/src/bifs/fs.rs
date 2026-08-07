@@ -1,6 +1,8 @@
 #[cfg(feature = "bif-io")]
 use crate::types::{BxVM, BxValue};
 #[cfg(feature = "bif-io")]
+use chrono::DateTime;
+#[cfg(feature = "bif-io")]
 use std::fs;
 #[cfg(all(feature = "bif-io", unix))]
 use std::os::unix::fs::OpenOptionsExt;
@@ -797,6 +799,8 @@ pub fn file_set_last_modified(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxV
 
     let epoch_millis: f64 = if let Ok(n) = date_str.parse::<f64>() {
         n
+    } else if let Ok(date) = DateTime::parse_from_rfc3339(&date_str) {
+        date.timestamp_millis() as f64
     } else {
         return Err(format!("Cannot parse date: {}", date_str));
     };
