@@ -805,6 +805,20 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
+        if self.pos < self.source.len() && matches!(self.current_char(), 'e' | 'E') {
+            let exponent_start = self.pos;
+            self.advance();
+            if self.pos < self.source.len() && matches!(self.current_char(), '+' | '-') {
+                self.advance();
+            }
+            let digits_start = self.pos;
+            while self.pos < self.source.len() && self.current_char().is_ascii_digit() {
+                self.advance();
+            }
+            if self.pos == digits_start {
+                self.pos = exponent_start;
+            }
+        }
         let end = self.pos;
         self.push_token(TokenKind::Number, start, end, start_line, start_col);
     }

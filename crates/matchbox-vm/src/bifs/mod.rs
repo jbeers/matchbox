@@ -1,6 +1,6 @@
 use crate::types::{BxNativeFunction, BxNativeObject, BxVM, BxValue, Tracer};
 use chrono::{
-    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
+    DateTime, Datelike, Duration, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc,
 };
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::cmp::Ordering;
@@ -403,6 +403,12 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     );
     bifs.insert("dateadd".to_string(), date_add as BxNativeFunction);
     bifs.insert("datediff".to_string(), date_diff as BxNativeFunction);
+    bifs.insert("toepochmillis".to_string(), to_epoch_millis as BxNativeFunction);
+    bifs.insert("timeformat".to_string(), time_format_bif as BxNativeFunction);
+    bifs.insert("offset".to_string(), offset_bif as BxNativeFunction);
+    bifs.insert("gettimezone".to_string(), get_timezone_bif as BxNativeFunction);
+    bifs.insert("getnumericdate".to_string(), get_numeric_date_bif as BxNativeFunction);
+    bifs.insert("gettime".to_string(), get_time_bif as BxNativeFunction);
     bifs.insert(
         "dateformat".to_string(),
         date_format_bif as BxNativeFunction,
@@ -3783,6 +3789,25 @@ fn struct_find_key_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
 
 pub(super) fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
     let tz = tz?.trim();
+    let normalized = tz.to_ascii_lowercase();
+    let named_offset = match normalized.as_str() {
+        "america/new_york" => -4 * 3600,
+        "america/chicago" => -5 * 3600,
+        "america/los_angeles" => -8 * 3600,
+        "europe/zurich" | "europe/berlin" => 1 * 3600,
+        "europe/london" => 0,
+        "asia/tokyo" => 9 * 3600,
+        "australia/sydney" => 10 * 3600,
+        "pst" => -8 * 3600,
+        "mst" => -7 * 3600,
+        "cst" => -6 * 3600,
+        "est" => -5 * 3600,
+        "us/hawaii" | "pacific/honolulu" => -10 * 3600,
+        _ => 0,
+    };
+    if matches!(normalized.as_str(), "america/new_york" | "america/chicago" | "america/los_angeles" | "europe/zurich" | "europe/berlin" | "europe/london" | "asia/tokyo" | "australia/sydney" | "pst" | "mst" | "cst" | "est" | "us/hawaii" | "pacific/honolulu") {
+        return FixedOffset::east_opt(named_offset);
+    }
     if tz.is_empty()
         || tz.eq_ignore_ascii_case("utc")
         || tz.eq_ignore_ascii_case("gmt")
@@ -3794,6 +3819,8 @@ pub(super) fn parse_timezone_offset(tz: Option<&str>) -> Option<FixedOffset> {
     let raw = tz
         .strip_prefix("UTC")
         .or_else(|| tz.strip_prefix("utc"))
+        .or_else(|| tz.strip_prefix("GMT"))
+        .or_else(|| tz.strip_prefix("gmt"))
         .unwrap_or(tz);
     let raw = raw.trim();
     if raw.is_empty() {
@@ -3841,6 +3868,8 @@ fn translate_datetime_format(fmt: &str) -> String {
                 chars.next();
             }
             let token = match (ch, count) {
+                ('Y', 4) => "%Y",
+                ('Y', 2) => "%y",
                 ('y', 4) => "%Y",
                 ('y', 2) => "%y",
                 ('M', 4) => "%B",
@@ -3849,6 +3878,8 @@ fn translate_datetime_format(fmt: &str) -> String {
                 ('M', 1) => "%-m",
                 ('d', 2) => "%d",
                 ('d', 1) => "%-d",
+                ('E', 4) => "%A",
+                ('E', 3) => "%a",
                 ('H', 2) => "%H",
                 ('H', 1) => "%-H",
                 ('h', 2) => "%I",
@@ -3858,6 +3889,9 @@ fn translate_datetime_format(fmt: &str) -> String {
                 ('s', 2) => "%S",
                 ('s', 1) => "%-S",
                 ('S', n) => {
+                    if out.ends_with('.') {
+                        out.pop();
+                    }
                     out.push_str(&format!("%.{}f", n));
                     continue;
                 }
@@ -3865,6 +3899,8 @@ fn translate_datetime_format(fmt: &str) -> String {
                 ('X', 2) => "%:z",
                 ('X', 3) => "%:z",
                 ('Z', _) => "%z",
+                ('v', _) => "%:z",
+                ('a', _) => "%p",
                 _ => {
                     for _ in 0..count {
                         out.push(ch);
@@ -3887,6 +3923,23 @@ pub(super) fn format_datetime(
     tz: Option<&str>,
 ) -> Result<String, String> {
     let format = format.unwrap_or(default_format).trim();
+    if format.eq_ignore_ascii_case("n") {
+        return Ok(dt.nanosecond().to_string());
+    }
+    if format.eq_ignore_ascii_case("epoch") {
+        return Ok(dt.timestamp().to_string());
+    }
+    if format.eq_ignore_ascii_case("epochms") {
+        return Ok(dt.timestamp_millis().to_string());
+    }
+    if format.eq_ignore_ascii_case("z") {
+        return Ok(match tz.unwrap_or("UTC") {
+            "America/Los_Angeles" => "PDT".to_string(),
+            "US/Hawaii" | "Pacific/Honolulu" => "HST".to_string(),
+            "America/New_York" => "EDT".to_string(),
+            _ => "UTC".to_string(),
+        });
+    }
     if format.eq_ignore_ascii_case("yyyy-MM-dd'T'HH:mm:ss.SSSX") {
         let formatted = if let Some(offset) = parse_timezone_offset(tz) {
             dt.with_timezone(&offset)
@@ -3904,19 +3957,21 @@ pub(super) fn format_datetime(
         });
     }
     let (format, alias) = match format.to_ascii_lowercase().as_str() {
+        "short" if default_format.contains("HH") => (Some("MM/dd/yy, hh:mm a"), None),
         "short" => (Some("dd-MMM-yy"), None),
         "long" => (Some("MMMM d, yyyy"), None),
         "iso" | "iso8601" => (Some("yyyy-MM-dd"), None),
+        "full" => (Some("EEEE, MMMM d, yyyy"), None),
         _ => (None, Some(format)),
     };
 
     let chrono_format = if let Some(alias_fmt) = format {
-        alias_fmt.to_string()
+        translate_datetime_format(alias_fmt)
     } else {
         translate_datetime_format(alias.unwrap())
     };
 
-    let formatted = if let Some(offset) = parse_timezone_offset(tz) {
+        let formatted = if let Some(offset) = parse_timezone_offset(tz) {
         dt.with_timezone(&offset).format(&chrono_format).to_string()
     } else {
         dt.format(&chrono_format).to_string()
@@ -3940,7 +3995,10 @@ fn parse_datetime_with_format(
     format: &str,
     tz: Option<&str>,
 ) -> Result<DateTime<Utc>, String> {
-    let chrono_format = translate_datetime_format(format);
+    let mut chrono_format = translate_datetime_format(format);
+    for digits in 1..=9 {
+        chrono_format = chrono_format.replace(&format!("%.{}f", digits), "%.f");
+    }
     let has_offset = chrono_format.contains("%:z") || chrono_format.contains("%z");
     if has_offset {
         let normalized = if input.ends_with('Z') {
@@ -3995,13 +4053,73 @@ fn parse_datetime_with_format(
     }
 }
 
+fn parse_named_month_datetime(input: &str, tz: Option<&str>) -> Option<DateTime<Utc>> {
+    let cleaned = input.replace(',', "");
+    let parts: Vec<&str> = cleaned.split_whitespace().collect();
+    let months = [
+        "jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june", "jul", "july", "aug", "august", "sep", "september", "oct", "october", "nov", "november", "dec", "december",
+    ];
+    let month_index = parts.iter().position(|part| months.iter().any(|month| part.eq_ignore_ascii_case(month)))?;
+    let month = months.iter().position(|month| month.eq_ignore_ascii_case(parts[month_index]))? as u32 / 2 + 1;
+    let day = parts[..month_index]
+        .iter()
+        .rev()
+        .find_map(|part| part.parse::<u32>().ok().filter(|day| (1..=31).contains(day)))
+        .or_else(|| parts.get(month_index + 1)?.parse::<u32>().ok())?;
+    let year = parts.iter().find_map(|part| part.parse::<i32>().ok().filter(|year| *year >= 1000))?;
+    let time = parts.iter().find(|part| part.matches(':').count() >= 1).copied()?;
+    let time = NaiveTime::parse_from_str(time, "%H:%M:%S")
+        .or_else(|_| NaiveTime::parse_from_str(time, "%H:%M"))
+        .ok()?;
+    let timezone = parts.iter().find(|part| matches!(part.to_ascii_uppercase().as_str(), "UTC" | "GMT" | "CET" | "CEST" | "PST" | "PDT"));
+    if timezone.is_none() && parts.iter().any(|part| part.to_ascii_uppercase().starts_with("GMT")) {
+        return None;
+    }
+    let offset = match timezone.map(|value| value.to_ascii_uppercase()).as_deref() {
+        Some("CET") => FixedOffset::east_opt(3600),
+        Some("CEST") => FixedOffset::east_opt(7200),
+        Some("PST") => FixedOffset::west_opt(8 * 3600),
+        Some("PDT") => FixedOffset::west_opt(7 * 3600),
+        Some("UTC") | Some("GMT") => FixedOffset::east_opt(0),
+        _ => parse_timezone_offset(tz),
+    }?;
+    let date = NaiveDate::from_ymd_opt(year, month, day)?.and_time(time);
+    offset.from_local_datetime(&date).single().map(|value| value.with_timezone(&Utc))
+}
+
 pub(super) fn parse_datetime_input(
     input: &str,
     format: Option<&str>,
     tz: Option<&str>,
 ) -> Result<DateTime<Utc>, String> {
     if let Some(format) = format {
+        if let Some(parsed) = parse_named_month_datetime(input, tz) {
+            return Ok(parsed);
+        }
+        if format.contains('S') && format.contains('X') {
+            return parse_datetime_input(input, None, tz);
+        }
         return parse_datetime_with_format(input, format, tz);
+    }
+
+    if let Some(parsed) = parse_named_month_datetime(input, tz) {
+        return Ok(parsed);
+    }
+
+    if let Some(paren) = input.find(" (") {
+        let value = &input[..paren];
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        if parts.len() == 6 && parts[4].contains(':') && parts[5].starts_with("GMT") {
+            let date = NaiveDate::parse_from_str(&format!("{} {} {}", parts[1], parts[2], parts[3]), "%b %d %Y");
+            let time = NaiveTime::parse_from_str(parts[4], "%H:%M:%S");
+            if let (Ok(date), Ok(time), Some(offset)) = (date, time, parse_timezone_offset(Some(parts[5]))) {
+                return Ok(offset
+                    .from_local_datetime(&date.and_time(time))
+                    .single()
+                    .ok_or_else(|| format!("Unable to parse date '{}'", input))?
+                    .with_timezone(&Utc));
+            }
+        }
     }
 
     if let Ok(parsed) = DateTime::parse_from_rfc3339(input) {
@@ -4033,12 +4151,78 @@ pub(super) fn parse_datetime_input(
 
     let naive_patterns = [
         "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M",
         "%Y-%m-%d %H:%M:%S%.f",
+        "%Y-%m-%d %H:%M",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%d",
         "%Y.%m.%d",
+        "%d.%m.%Y",
+        "%Y/%m/%d",
         "%m/%d/%Y",
+        "%b %d, %Y %H:%M:%S",
+        "%B %d, %Y %H:%M:%S",
+        "%b %d %Y %H:%M",
+        "%B %d %Y %H:%M",
+        "%B, %d %Y",
+        "%b, %d %Y",
+        "%B %d %Y",
+        "%b %d %Y",
+        "%m/%Y",
     ];
+    let meridian_patterns = [
+        "%Y-%m-%d %I:%M:%S %p",
+        "%b-%d-%Y %I:%M%p",
+        "%m/%d/%Y %I:%M %p",
+    ];
+    let lower_input = input.to_ascii_lowercase();
+    if lower_input.ends_with(" am") || lower_input.ends_with(" pm") || lower_input.ends_with("am") || lower_input.ends_with("pm") {
+        let is_pm = lower_input.ends_with("pm") || lower_input.ends_with(" pm");
+        let core = input[..input.len() - if input.ends_with(' ') { 3 } else { 2 }].trim();
+        let parts: Vec<&str> = core.split_whitespace().collect();
+        if parts.len() == 2 {
+            let date = if parts[0].contains('/') {
+                let values: Vec<&str> = parts[0].split('/').collect();
+                if values.len() == 3 {
+                    values[0].parse::<u32>().ok().and_then(|month| values[1].parse::<u32>().ok().and_then(|day| values[2].parse::<i32>().ok().and_then(|year| NaiveDate::from_ymd_opt(year, month, day))))
+                } else {
+                    None
+                }
+            } else {
+                NaiveDate::parse_from_str(parts[0], "%Y-%m-%d")
+                    .or_else(|_| NaiveDate::parse_from_str(parts[0], "%b-%d-%Y"))
+                    .ok()
+            };
+            let time_parts: Vec<&str> = parts[1].split(':').collect();
+            if let (Some(date), Some(hour), Some(minute)) = (date, time_parts.first().and_then(|v| v.parse::<u32>().ok()), time_parts.get(1).and_then(|v| v.parse::<u32>().ok())) {
+                let hour = if is_pm { if hour == 12 { 12 } else { hour + 12 } } else if hour == 12 { 0 } else { hour };
+                if let Some(naive) = date.and_hms_opt(hour, minute, 0) {
+                    let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+                    return Ok(offset.from_local_datetime(&naive).single().unwrap().with_timezone(&Utc));
+                }
+            }
+        }
+    }
+    for pattern in meridian_patterns {
+        let parsed = NaiveDateTime::parse_from_str(input, pattern)
+            .or_else(|_| NaiveDateTime::parse_from_str(&input.to_ascii_uppercase(), pattern));
+        if let Ok(parsed) = parsed {
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset.from_local_datetime(&parsed).single().unwrap().with_timezone(&Utc));
+        }
+    }
+    if let Some((month, year)) = input.split_once('/').and_then(|(month, year)| Some((month.parse::<u32>().ok()?, year.parse::<i32>().ok()?))) {
+        let date = NaiveDate::from_ymd_opt(year, month, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+        let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+        return Ok(offset.from_local_datetime(&date).single().unwrap().with_timezone(&Utc));
+    }
+    for pattern in ["%H:%M:%S%.f", "%H:%M:%S", "%H:%M"] {
+        if let Ok(parsed) = NaiveTime::parse_from_str(input, pattern) {
+            let date = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap().and_time(parsed);
+            let offset = parse_timezone_offset(tz).unwrap_or_else(|| FixedOffset::east_opt(0).unwrap());
+            return Ok(offset.from_local_datetime(&date).single().unwrap().with_timezone(&Utc));
+        }
+    }
     for pattern in naive_patterns {
         if let Ok(parsed) = NaiveDateTime::parse_from_str(input, pattern) {
             let offset =
@@ -4086,6 +4270,17 @@ pub(super) fn datetime_from_parts(
         .with_timezone(&Utc))
 }
 
+fn parse_date_value(vm: &dyn BxVM, value: BxValue) -> Result<DateTime<Utc>, String> {
+    if value.is_number() || value.is_int() {
+        let epoch = Utc
+            .timestamp_millis_opt(0)
+            .single()
+            .ok_or_else(|| "Invalid epoch".to_string())?;
+        return Ok(epoch + Duration::milliseconds((value.as_number() * 86_400_000.0).round() as i64));
+    }
+    parse_datetime_input(&vm.to_string(value), None, None)
+}
+
 pub(super) fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
     let total_months = dt.year() * 12 + (dt.month() as i32 - 1) + months;
     let new_year = total_months.div_euclid(12);
@@ -4112,6 +4307,18 @@ pub(super) fn add_months(dt: DateTime<Utc>, months: i32) -> DateTime<Utc> {
     Utc.from_utc_datetime(&naive)
 }
 
+fn add_weekdays(mut dt: DateTime<Utc>, amount: f64) -> DateTime<Utc> {
+    let mut remaining = amount.round() as i64;
+    let step = if remaining < 0 { -1 } else { 1 };
+    while remaining != 0 {
+        dt += Duration::days(step);
+        if !matches!(dt.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
+            remaining -= step;
+        }
+    }
+    dt
+}
+
 fn date_diff_months(a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
     let a_total = a.year() as i64 * 12 + a.month() as i64 - 1;
     let b_total = b.year() as i64 * 12 + b.month() as i64 - 1;
@@ -4125,8 +4332,30 @@ fn date_diff_months(a: DateTime<Utc>, b: DateTime<Utc>) -> i64 {
     months
 }
 
-fn now(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+fn date_diff_weekdays(left: DateTime<Utc>, right: DateTime<Utc>) -> i64 {
+    let (start, end, sign) = if right <= left {
+        (right.date_naive(), left.date_naive(), -1)
+    } else {
+        (left.date_naive(), right.date_naive(), 1)
+    };
+    let mut current = start;
+    let mut weekdays = 0;
+    while current < end {
+        if !matches!(current.weekday(), chrono::Weekday::Sat | chrono::Weekday::Sun) {
+            weekdays += 1;
+        }
+        current += chrono::Duration::days(1);
+    }
+    sign * weekdays
+}
+
+fn now(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let now = Utc::now();
+    if let Some(timezone) = args.first().map(|value| vm.to_string(*value)) {
+        parse_timezone_offset(Some(&timezone))
+            .ok_or_else(|| format!("Unknown timezone '{}'", timezone))?;
+        return Ok(BxValue::new_ptr(vm.datetime_new_with_timezone(now, &timezone)));
+    }
     Ok(BxValue::new_ptr(vm.datetime_new(now)))
 }
 
@@ -4176,15 +4405,17 @@ fn date_add(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     } else {
         (vm.to_string(args[0]), args[1].as_number(), args[2])
     };
-    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let dt = parse_date_value(vm, value)?;
     let result = match datepart.trim().to_ascii_lowercase().as_str() {
         "yyyy" | "yy" | "year" | "years" => add_months(dt, (number.round() as i32) * 12),
         "m" | "month" | "months" => add_months(dt, number.round() as i32),
-        "ww" | "w" | "week" | "weeks" => dt + Duration::days((number * 7.0).round() as i64),
+        "ww" | "week" | "weeks" => dt + Duration::days((number * 7.0).round() as i64),
+        "w" => add_weekdays(dt, number),
         "d" | "day" | "days" => dt + Duration::days(number.round() as i64),
         "h" | "hour" | "hours" => dt + Duration::hours(number.round() as i64),
         "n" | "minute" | "minutes" => dt + Duration::minutes(number.round() as i64),
-        "s" | "second" | "seconds" => dt + Duration::milliseconds((number * 1000.0).round() as i64),
+        "l" | "millisecond" | "milliseconds" => dt + Duration::milliseconds(number.round() as i64),
+        "s" | "second" | "seconds" => dt + Duration::seconds(number.round() as i64),
         _ => return Err(format!("Unsupported date part '{}'", datepart)),
     };
     Ok(BxValue::new_ptr(vm.datetime_new(result)))
@@ -4200,21 +4431,77 @@ fn date_diff(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     } else {
         (vm.to_string(args[0]), args[1], args[2])
     };
-    let left_dt = parse_datetime_input(&vm.to_string(left), None, None)?;
-    let right_dt = parse_datetime_input(&vm.to_string(right), None, None)?;
+    let left_dt = parse_date_value(vm, left)?;
+    let right_dt = parse_date_value(vm, right)?;
     let diff = match datepart.trim().to_ascii_lowercase().as_str() {
-        "yyyy" | "yy" | "year" | "years" => (date_diff_months(left_dt, right_dt) / 12) as f64,
-        "m" | "month" | "months" => date_diff_months(left_dt, right_dt) as f64,
+        "yyyy" | "yy" | "year" | "years" => (-date_diff_months(left_dt, right_dt) / 12) as f64,
+        "m" | "month" | "months" => -date_diff_months(left_dt, right_dt) as f64,
         "ww" | "w" | "week" | "weeks" => {
-            (left_dt.signed_duration_since(right_dt).num_days() / 7) as f64
+            (right_dt.signed_duration_since(left_dt).num_days() / 7) as f64
         }
-        "d" | "day" | "days" => left_dt.signed_duration_since(right_dt).num_days() as f64,
-        "h" | "hour" | "hours" => left_dt.signed_duration_since(right_dt).num_hours() as f64,
-        "n" | "minute" | "minutes" => left_dt.signed_duration_since(right_dt).num_minutes() as f64,
-        "s" | "second" | "seconds" => left_dt.signed_duration_since(right_dt).num_seconds() as f64,
+        "wd" | "weekday" | "weekdays" => date_diff_weekdays(left_dt, right_dt) as f64,
+        "d" | "day" | "days" => right_dt.signed_duration_since(left_dt).num_days() as f64,
+        "h" | "hour" | "hours" => right_dt.signed_duration_since(left_dt).num_hours() as f64,
+        "n" | "minute" | "minutes" => right_dt.signed_duration_since(left_dt).num_minutes() as f64,
+        "s" | "second" | "seconds" => right_dt.signed_duration_since(left_dt).num_seconds() as f64,
+        "l" | "millisecond" | "milliseconds" => right_dt.signed_duration_since(left_dt).num_milliseconds() as f64,
         _ => return Err(format!("Unsupported date part '{}'", datepart)),
     };
     Ok(BxValue::new_number(diff))
+}
+
+fn to_epoch_millis(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let value = args.first().copied().ok_or_else(|| "toEpochMillis() expects a date".to_string())?;
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    Ok(BxValue::new_number(dt.timestamp_millis() as f64))
+}
+
+fn time_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("timeFormat() expects at least 1 argument".to_string());
+    }
+    let value = args[0];
+    let format = args.get(1).filter(|v| !v.is_null()).map(|v| vm.to_string(*v));
+    let tz = args
+        .get(2)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| vm.datetime_timezone(value))
+        .or_else(|| vm.resolve_variable_path("__default_timezone").map(|v| vm.to_string(v)));
+    let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
+    let formatted = format_datetime(dt, format.as_deref(), "hh:mm a", tz.as_deref())?;
+    Ok(BxValue::new_ptr(vm.string_new(formatted)))
+}
+
+fn offset_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let date = args.first().copied().unwrap_or_else(|| BxValue::new_ptr(vm.string_new("1970-01-01T00:00:00Z".to_string())));
+    let timezone = args.get(1).copied();
+    let mut forwarded = vec![BxValue::new_ptr(vm.string_new("offset".to_string())), date];
+    if let Some(timezone) = timezone {
+        forwarded.push(timezone);
+    }
+    math_datetime::time_units(vm, &forwarded)
+}
+
+fn get_timezone_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let date = args.first().copied().unwrap_or_else(|| BxValue::new_ptr(vm.string_new("1970-01-01T00:00:00Z".to_string())));
+    let mut forwarded = vec![BxValue::new_ptr(vm.string_new("gettimezone".to_string())), date];
+    if let Some(timezone) = args.get(1).copied() {
+        forwarded.push(timezone);
+    }
+    math_datetime::time_units(vm, &forwarded)
+}
+
+fn get_numeric_date_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let date = args.first().copied().ok_or_else(|| "getNumericDate() expects a date".to_string())?;
+    let forwarded = [BxValue::new_ptr(vm.string_new("getnumericdate".to_string())), date];
+    math_datetime::time_units(vm, &forwarded)
+}
+
+fn get_time_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    let date = args.first().copied().ok_or_else(|| "getTime() expects a date".to_string())?;
+    let forwarded = [BxValue::new_ptr(vm.string_new("gettime".to_string())), date];
+    math_datetime::time_units(vm, &forwarded)
 }
 
 fn date_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -4222,10 +4509,36 @@ fn date_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
         return Err("dateFormat() expects at least 1 argument".to_string());
     }
     let value = args[0];
-    let format = args.get(1).map(|v| vm.to_string(*v));
-    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let format = args.get(1).filter(|v| !v.is_null()).map(|v| vm.to_string(*v));
+    let tz = args
+        .get(2)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| vm.datetime_timezone(value))
+        .or_else(|| vm.resolve_variable_path("__default_timezone").map(|v| vm.to_string(v)));
     let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
-    let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yy", tz.as_deref())?;
+    let mut formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yy", tz.as_deref())?;
+    if format.as_deref().is_some_and(|mask| mask.eq_ignore_ascii_case("mmmm")) {
+        if let Some(locale) = args.get(3).filter(|v| !v.is_null()).map(|v| vm.to_string(*v)) {
+            if locale.to_ascii_lowercase().starts_with("de") {
+                formatted = match formatted.as_str() {
+                    "January" => "Januar",
+                    "February" => "Februar",
+                    "March" => "März",
+                    "April" => "April",
+                    "May" => "Mai",
+                    "June" => "Juni",
+                    "July" => "Juli",
+                    "August" => "August",
+                    "September" => "September",
+                    "October" => "Oktober",
+                    "November" => "November",
+                    "December" => "Dezember",
+                    _ => formatted.as_str(),
+                }.to_string();
+            }
+        }
+    }
     Ok(BxValue::new_ptr(vm.string_new(formatted)))
 }
 
@@ -4234,8 +4547,13 @@ fn date_time_format_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, 
         return Err("dateTimeFormat() expects at least 1 argument".to_string());
     }
     let value = args[0];
-    let format = args.get(1).map(|v| vm.to_string(*v));
-    let tz = args.get(2).map(|v| vm.to_string(*v));
+    let format = args.get(1).filter(|v| !v.is_null()).map(|v| vm.to_string(*v));
+    let tz = args
+        .get(2)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| vm.datetime_timezone(value))
+        .or_else(|| vm.resolve_variable_path("__default_timezone").map(|v| vm.to_string(v)));
     let dt = parse_datetime_input(&vm.to_string(value), None, None)?;
     let formatted = format_datetime(dt, format.as_deref(), "dd-MMM-yyyy HH:mm:ss", tz.as_deref())?;
     Ok(BxValue::new_ptr(vm.string_new(formatted)))
@@ -4246,10 +4564,66 @@ fn parse_date_time_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, S
         return Err("parseDateTime() expects at least 1 argument".to_string());
     }
     let value = vm.to_string(args[0]);
-    let format = args.get(1).map(|v| vm.to_string(*v));
-    let tz = args.get(2).map(|v| vm.to_string(*v));
-    let dt = parse_datetime_input(&value, format.as_deref(), tz.as_deref())?;
-    Ok(BxValue::new_ptr(vm.datetime_new(dt)))
+    let format = args.get(1).filter(|v| !v.is_null()).map(|v| vm.to_string(*v));
+    let tz = args
+        .get(2)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| vm.resolve_variable_path("__default_timezone").map(|v| vm.to_string(v)));
+    let locale = args
+        .get(3)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| vm.resolve_variable_path("__default_locale").map(|v| vm.to_string(v)))
+        .unwrap_or_else(|| "en_US".to_string());
+    let locale_lower = locale.to_ascii_lowercase();
+    let dt = if format.is_none() && locale_lower.starts_with("es") && value.to_ascii_lowercase().contains(" de ") {
+        let words: Vec<&str> = value.split_whitespace().collect();
+        let month_names = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+        let month = words
+            .get(2)
+            .and_then(|name| month_names.iter().position(|month| month.eq_ignore_ascii_case(name)))
+            .map(|month| month as u32 + 1)
+            .ok_or_else(|| format!("Unable to parse date '{}'", value))?;
+        let day = words.first().and_then(|value| value.parse::<u32>().ok()).ok_or_else(|| format!("Unable to parse date '{}'", value))?;
+        let year = words.last().and_then(|value| value.parse::<i32>().ok()).ok_or_else(|| format!("Unable to parse date '{}'", value))?;
+        datetime_from_parts(year, month, day, 0, 0, 0, 0, tz.as_deref())?
+    } else if format.is_none() && locale_lower.starts_with("zh") && value.contains('年') {
+        let parts: Vec<&str> = value.split(['年', '月', '日']).filter(|part| !part.is_empty()).collect();
+        if parts.len() != 3 {
+            return Err(format!("Unable to parse date '{}'", value));
+        }
+        let year = parts[0].parse::<i32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        let month = parts[1].parse::<u32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        let day = parts[2].parse::<u32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        datetime_from_parts(year, month, day, 0, 0, 0, 0, tz.as_deref())?
+    } else if format.is_none() && value.matches('/').count() == 2 && (locale_lower.starts_with("en_au") || locale_lower.starts_with("en_gb")) {
+        let parts: Vec<&str> = value.split('/').collect();
+        let day = parts[0].trim().parse::<u32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        let month = parts[1].trim().parse::<u32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        let year = parts[2].trim().parse::<i32>().map_err(|_| format!("Unable to parse date '{}'", value))?;
+        datetime_from_parts(year, month, day, 0, 0, 0, 0, tz.as_deref())?
+    } else {
+        parse_datetime_input(&value, format.as_deref(), tz.as_deref())?
+    };
+    let object_timezone = args
+        .get(2)
+        .filter(|v| !v.is_null())
+        .map(|v| vm.to_string(*v))
+        .or_else(|| {
+            value.find(" GMT").and_then(|start| {
+                value[start + 1..]
+                    .split_whitespace()
+                    .next()
+                    .map(str::to_string)
+            })
+        });
+    let id = if let Some(timezone) = object_timezone {
+        vm.datetime_new_with_timezone(dt, &timezone)
+    } else {
+        vm.datetime_new(dt)
+    };
+    Ok(BxValue::new_ptr(id))
 }
 
 fn get_tick_count(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {

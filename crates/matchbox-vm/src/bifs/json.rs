@@ -281,10 +281,20 @@ fn bx_to_json_inner(vm: &dyn BxVM, val: BxValue, seen: &mut HashSet<usize>) -> J
         .is_some_and(|name| name.eq_ignore_ascii_case("datetime"))
     {
         let value = vm.to_string(val);
-        let value = value
-            .strip_suffix(".000Z")
-            .map(|prefix| format!("{}Z", prefix))
-            .unwrap_or(value);
+        let value = if let Some(prefix) = value.strip_suffix('Z') {
+            if let Some(dot) = prefix.rfind('.') {
+                let fraction = &prefix[dot + 1..];
+                if fraction.chars().all(|ch| ch == '0') {
+                    format!("{}Z", &prefix[..dot])
+                } else {
+                    format!("{}{}Z", &prefix[..dot + 1], fraction.trim_end_matches('0'))
+                }
+            } else {
+                value
+            }
+        } else {
+            value
+        };
         JsonValue::String(value.to_string())
     } else if vm.is_struct_value(val) {
         if let Some(id) = val.as_gc_id() {

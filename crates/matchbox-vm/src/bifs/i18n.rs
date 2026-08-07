@@ -176,11 +176,15 @@ fn set_locale(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
     let locale = parse_locale(&vm.to_string(args[0]))?;
     *locale_store().lock().unwrap() = locale.clone();
+    let locale_value = vm.string_new(locale.clone());
+    vm.insert_global("__default_locale".to_string(), BxValue::new_ptr(locale_value));
     Ok(BxValue::new_ptr(vm.string_new(locale_display_name(&locale, "en_US"))))
 }
 
 fn clear_locale(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     *locale_store().lock().unwrap() = "en_US".to_string();
+    let locale_value = vm.string_new("en_US".to_string());
+    vm.insert_global("__default_locale".to_string(), BxValue::new_ptr(locale_value));
     Ok(BxValue::new_null())
 }
 

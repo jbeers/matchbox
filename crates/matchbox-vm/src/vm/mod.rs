@@ -503,6 +503,7 @@ pub struct VM {
     pub cli_args: Vec<String>,
     pub output_buffer: Option<String>,
     pub gc_suspended: bool,
+    datetime_timezones: HashMap<usize, String>,
     /// GC tuning parameters; use `VM::with_config()` or accept defaults.
     pub config: GCConfig,
     native_completions: VecDeque<NativeCompletion>,
@@ -1426,6 +1427,16 @@ impl BxVM for VM {
         self.heap.alloc(GcObject::DateTime(dt))
     }
 
+    fn datetime_new_with_timezone(&mut self, dt: DateTime<Utc>, timezone: &str) -> usize {
+        let id = self.datetime_new(dt);
+        self.datetime_timezones.insert(id, timezone.to_string());
+        id
+    }
+
+    fn datetime_timezone(&self, value: BxValue) -> Option<String> {
+        value.as_gc_id().and_then(|id| self.datetime_timezones.get(&id).cloned())
+    }
+
     fn string_new(&mut self, s: String) -> usize {
         self.heap.alloc(GcObject::String(BoxString::new(&s)))
     }
@@ -1935,7 +1946,7 @@ impl VM {
                         .join(",")
                 ),
                 GcObject::Range(range) => format!("{}", range),
-                GcObject::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Millis, true),
+                GcObject::DateTime(dt) => dt.to_rfc3339_opts(SecondsFormat::Nanos, true),
                 GcObject::Struct(_) => self.bx_to_json(&val).to_string(),
                 GcObject::Instance(inst) => format!("<instance of {}>", inst.class.borrow().name),
                 GcObject::Future(_) => format!("<future id:{}>", id),
@@ -2101,6 +2112,7 @@ impl VM {
             cli_args: Vec::new(),
             output_buffer: None,
             gc_suspended: false,
+            datetime_timezones: HashMap::new(),
             native_completions: VecDeque::new(),
             native_future_tx,
             native_future_rx,
@@ -2494,8 +2506,29 @@ impl VM {
                      "val" => Some("val".to_string()),
                      "urlencodedformat" => Some("urlencodedformat".to_string()),
                      "xmlformat" => Some("xmlformat".to_string()),
-                     "todatetime" => Some("parsedatetime".to_string()),
+                      "todatetime" => Some("parsedatetime".to_string()),
+                      "dateformat" => Some("dateformat".to_string()),
+                      "datetimeformat" => Some("datetimeformat".to_string()),
+                      "timeformat" => Some("timeformat".to_string()),
                      "tojson" => Some("serializejson".to_string()),
+                     "year" => Some("year".to_string()),
+                     "quarter" => Some("quarter".to_string()),
+                     "month" => Some("month".to_string()),
+                     "monthasstring" => Some("monthasstring".to_string()),
+                     "monthshortasstring" => Some("monthshortasstring".to_string()),
+                     "day" => Some("day".to_string()),
+                     "daysinmonth" => Some("daysinmonth".to_string()),
+                     "daysinyear" => Some("daysinyear".to_string()),
+                     "dayofweek" => Some("dayofweek".to_string()),
+                     "dayofweekasstring" => Some("dayofweekasstring".to_string()),
+                     "dayofweekshortasstring" => Some("dayofweekshortasstring".to_string()),
+                     "dayofyear" => Some("dayofyear".to_string()),
+                     "firstdayofmonth" => Some("firstdayofmonth".to_string()),
+                     "week" => Some("week".to_string()),
+                     "hour" => Some("hour".to_string()),
+                     "minute" => Some("minute".to_string()),
+                     "second" => Some("second".to_string()),
+                     "millisecond" => Some("millisecond".to_string()),
                     "fromjson" => Some("deserializejson".to_string()),
                     "rematch" => Some("rematch".to_string()),
                     "rematchnocase" => Some("rematchnocase".to_string()),
@@ -2669,13 +2702,42 @@ impl VM {
                     "get" => Some("futureget".to_string()),
                     _ => None,
                 },
-                GcObject::DateTime(_) => match name.as_str() {
+                 GcObject::DateTime(_) => match name.as_str() {
                     "len" => Some("len".to_string()),
                     "add" => Some("dateadd".to_string()),
                     "diff" => Some("datediff".to_string()),
-                    "format" => Some("datetimeformat".to_string()),
+                     "format" => Some("datetimeformat".to_string()),
+                     "timeformat" => Some("timeformat".to_string()),
                     "dateformat" => Some("dateformat".to_string()),
-                    "datetimeformat" => Some("datetimeformat".to_string()),
+                     "datetimeformat" => Some("datetimeformat".to_string()),
+                     "compare" => Some("datecompare".to_string()),
+                     "toodbcdatetime" => Some("createodbcdatetime".to_string()),
+                     "toodbcdate" => Some("createodbcdate".to_string()),
+                     "toodbctime" => Some("createodbctime".to_string()),
+                     "toepochmillis" => Some("toepochmillis".to_string()),
+                     "offset" => Some("offset".to_string()),
+                     "timezone" | "gettimezone" => Some("gettimezone".to_string()),
+                     "getnumericdate" => Some("getnumericdate".to_string()),
+                     "gettime" => Some("gettime".to_string()),
+                     "nanosecond" => Some("nanosecond".to_string()),
+                     "year" => Some("year".to_string()),
+                     "quarter" => Some("quarter".to_string()),
+                     "month" => Some("month".to_string()),
+                     "monthasstring" => Some("monthasstring".to_string()),
+                     "monthshortasstring" => Some("monthshortasstring".to_string()),
+                     "day" => Some("day".to_string()),
+                     "daysinmonth" => Some("daysinmonth".to_string()),
+                     "daysinyear" => Some("daysinyear".to_string()),
+                     "dayofweek" => Some("dayofweek".to_string()),
+                     "dayofweekasstring" => Some("dayofweekasstring".to_string()),
+                     "dayofweekshortasstring" => Some("dayofweekshortasstring".to_string()),
+                     "dayofyear" => Some("dayofyear".to_string()),
+                     "firstdayofmonth" => Some("firstdayofmonth".to_string()),
+                     "week" => Some("week".to_string()),
+                     "hour" => Some("hour".to_string()),
+                     "minute" => Some("minute".to_string()),
+                     "second" => Some("second".to_string()),
+                     "millisecond" => Some("millisecond".to_string()),
                     "duplicate" => Some("duplicate".to_string()),
                     _ => None,
                 },
@@ -7281,6 +7343,9 @@ impl VM {
         };
 
         let params: Vec<&str> = match function_name.to_ascii_lowercase().as_str() {
+            "dateformat" | "datetimeformat" => vec!["date", "format", "timezone", "locale"],
+            "timeformat" => vec!["date", "format", "timezone"],
+            "parsedatetime" => vec!["date", "format", "timezone", "locale"],
             "gettoken" => vec!["list", "position", "delimiter"],
             "listavg" => vec!["list", "delimiter"],
             "listchangedelims" => {
@@ -7366,9 +7431,14 @@ impl VM {
         let mut positional_args = Vec::new();
         for (index, value) in args.into_iter().enumerate() {
             if index < names.len() && !names[index].is_empty() {
+                let name = if names[index].eq_ignore_ascii_case("mask") {
+                    "format"
+                } else {
+                    names[index].as_str()
+                };
                 if let Some(param_index) = params
                     .iter()
-                    .position(|param| *param == names[index].to_ascii_lowercase())
+                    .position(|param| *param == name.to_ascii_lowercase())
                 {
                     final_args[param_index] = value;
                 }
@@ -8515,7 +8585,7 @@ impl VM {
             match self.heap.get(id) {
                 GcObject::String(s) => serde_json::Value::String(s.to_string()),
                 GcObject::DateTime(dt) => {
-                    serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::Millis, true))
+                    serde_json::Value::String(dt.to_rfc3339_opts(SecondsFormat::AutoSi, true))
                 }
                 GcObject::Array(arr) => {
                     let json_arr: Vec<serde_json::Value> =
