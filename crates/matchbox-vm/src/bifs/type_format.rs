@@ -81,6 +81,14 @@ fn is_empty_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
 fn is_file_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() { return Ok(BxValue::new_bool(false)); }
+    if let Some(id) = args[0].as_gc_id() {
+        if vm
+            .native_object_call_method(id, "__is_file", &[])
+            .is_ok_and(|value| value.is_bool() && value.as_bool())
+        {
+            return Ok(BxValue::new_bool(true));
+        }
+    }
     let result = vm.type_name_from_value(args[0])
         .map(|name| name.eq_ignore_ascii_case("file"))
         .unwrap_or(false);

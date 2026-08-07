@@ -1,18 +1,83 @@
 #[cfg(feature = "bif-io")]
-use crate::types::{BxVM, BxValue};
+use crate::types::{BxNativeObject, BxVM, BxValue};
 #[cfg(feature = "bif-io")]
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 #[cfg(feature = "bif-io")]
 use std::fs;
+#[cfg(feature = "bif-io")]
+use std::io::Write;
 #[cfg(all(feature = "bif-io", unix))]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(feature = "bif-io")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "bif-io")]
 use uuid::Uuid;
 
+#[cfg(all(feature = "bif-io", not(target_arch = "wasm32")))]
+use crate::datasource::{
+    traits::{QueryColumn, QueryColumnType, QueryResult, SqlValue},
+    BxQuery,
+};
+#[cfg(feature = "bif-io")]
+use std::{cell::RefCell, rc::Rc};
+
 #[cfg(feature = "bif-io")]
 use walkdir::WalkDir;
+
+#[cfg(feature = "bif-io")]
+#[derive(Debug)]
+struct FileObject {
+    path: String,
+    mode: String,
+}
+
+#[cfg(feature = "bif-io")]
+impl BxNativeObject for FileObject {
+    fn get_property(&self, _name: &str) -> BxValue {
+        BxValue::new_null()
+    }
+
+    fn set_property(&mut self, _name: &str, _value: BxValue) {}
+
+    fn call_method(
+        &mut self,
+        vm: &mut dyn BxVM,
+        id: usize,
+        name: &str,
+        args: &[BxValue],
+    ) -> Result<BxValue, String> {
+        match name.to_ascii_lowercase().as_str() {
+            "__is_file" => Ok(BxValue::new_bool(true)),
+            "tostring" => Ok(BxValue::new_ptr(vm.string_new(self.path.clone()))),
+            "readline" => {
+                let content = fs::read_to_string(&self.path).map_err(|error| error.to_string())?;
+                match content.lines().next() {
+                    Some(line) => Ok(BxValue::new_ptr(vm.string_new(line.to_string()))),
+                    None => Ok(BxValue::new_null()),
+                }
+            }
+            "writeline" => {
+                let data = args
+                    .first()
+                    .copied()
+                    .map(|value| vm.to_string(value))
+                    .ok_or_else(|| "fileWriteLine() expects 1 argument".to_string())?;
+                let mut file = fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(&self.path)
+                    .map_err(|error| error.to_string())?;
+                writeln!(file, "{}", data).map_err(|error| error.to_string())?;
+                Ok(BxValue::new_ptr(id))
+            }
+            "close" => {
+                self.mode = "closed".to_string();
+                Ok(BxValue::new_null())
+            }
+            _ => Err(format!("File method '{}' not found", name)),
+        }
+    }
+}
 
 #[cfg(feature = "bif-io")]
 fn normalize_path_string(path: &Path) -> String {
@@ -102,21 +167,230 @@ pub fn directory_list(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
         false
     };
 
-    let array_id = vm.array_new();
-
     let walker = if recurse {
         WalkDir::new(&path_str).min_depth(1)
     } else {
         WalkDir::new(&path_str).min_depth(1).max_depth(1)
     };
 
-    for entry in walker.into_iter().filter_map(|e| e.ok()) {
-        let p = entry.path().to_string_lossy().to_string();
-        let s_id = vm.string_new(p);
-        vm.array_push(array_id, BxValue::new_ptr(s_id));
+    let list_info = args
+        .get(2)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value).to_lowercase())
+        .unwrap_or_else(|| "path".to_string());
+    let filter = args
+        .get(3)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value));
+    let sort = args
+        .get(4)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value))
+        .unwrap_or_else(|| "name".to_string());
+    let item_type = args
+        .get(5)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value).to_lowercase())
+        .unwrap_or_else(|| "all".to_string());
+
+    let mut entries = walker
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.into_path())
+        .filter(|path| match item_type.as_str() {
+            "file" => path.is_file(),
+            "dir" | "directory" => path.is_dir(),
+            _ => true,
+        })
+        .filter(|path| {
+            filter
+                .as_deref()
+                .map(|pattern| glob_matches(pattern, file_name(path)))
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
+
+    sort_directory_entries(&mut entries, &sort);
+
+    if list_info == "query" {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let query = directory_entries_to_query(&entries);
+            let id = vm.native_object_new(Rc::new(RefCell::new(BxQuery::from_result(query))));
+            return Ok(BxValue::new_ptr(id));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            return Err("directoryList(query) is not available in this build".to_string());
+        }
     }
 
+    let array_id = vm.array_new();
+    for path in entries {
+        let value = if list_info == "name" {
+            file_name(&path).to_string()
+        } else {
+            path.to_string_lossy().to_string()
+        };
+        let s_id = vm.string_new(value);
+        vm.array_push(array_id, BxValue::new_ptr(s_id));
+    }
     Ok(BxValue::new_ptr(array_id))
+}
+
+#[cfg(feature = "bif-io")]
+fn file_name(path: &Path) -> &str {
+    path.file_name().and_then(|name| name.to_str()).unwrap_or_default()
+}
+
+#[cfg(feature = "bif-io")]
+fn glob_matches(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.chars().collect::<Vec<_>>();
+    let value = value.chars().collect::<Vec<_>>();
+    let mut matches = vec![vec![false; value.len() + 1]; pattern.len() + 1];
+    matches[0][0] = true;
+
+    for pattern_index in 0..pattern.len() {
+        for value_index in 0..=value.len() {
+            if !matches[pattern_index][value_index] {
+                continue;
+            }
+            match pattern[pattern_index] {
+                '*' => {
+                    matches[pattern_index + 1][value_index] = true;
+                    if value_index < value.len() {
+                        matches[pattern_index][value_index + 1] = true;
+                    }
+                }
+                '?' if value_index < value.len() => {
+                    matches[pattern_index + 1][value_index + 1] = true;
+                }
+                character if value_index < value.len() && character == value[value_index] => {
+                    matches[pattern_index + 1][value_index + 1] = true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    matches[pattern.len()][value.len()]
+}
+
+#[cfg(feature = "bif-io")]
+fn sort_directory_entries(entries: &mut [PathBuf], sort: &str) {
+    let mut directives = sort.split_whitespace();
+    let column = directives.next().unwrap_or("name").to_lowercase();
+    let descending = directives
+        .next()
+        .map(|direction| direction.eq_ignore_ascii_case("desc"))
+        .unwrap_or(false);
+
+    entries.sort_by(|left, right| {
+        let ordering = match column.as_str() {
+            "size" => file_size(left).cmp(&file_size(right)),
+            "date" | "datelastmodified" => file_modified(left).cmp(&file_modified(right)),
+            "type" => is_directory(left).cmp(&is_directory(right)),
+            _ => file_name(left).cmp(file_name(right)),
+        };
+        if descending {
+            ordering.reverse()
+        } else {
+            ordering
+        }
+    });
+}
+
+#[cfg(feature = "bif-io")]
+fn file_size(path: &Path) -> u64 {
+    path.metadata().map(|metadata| metadata.len()).unwrap_or(0)
+}
+
+#[cfg(feature = "bif-io")]
+fn file_modified(path: &Path) -> std::time::SystemTime {
+    path.metadata()
+        .and_then(|metadata| metadata.modified())
+        .unwrap_or(std::time::UNIX_EPOCH)
+}
+
+#[cfg(feature = "bif-io")]
+fn is_directory(path: &Path) -> bool {
+    path.is_dir()
+}
+
+#[cfg(all(feature = "bif-io", not(target_arch = "wasm32")))]
+fn directory_entries_to_query(entries: &[PathBuf]) -> QueryResult {
+    let columns = vec![
+        QueryColumn {
+            name: "name".to_string(),
+            col_type: QueryColumnType::Varchar,
+        },
+        QueryColumn {
+            name: "size".to_string(),
+            col_type: QueryColumnType::BigInt,
+        },
+        QueryColumn {
+            name: "type".to_string(),
+            col_type: QueryColumnType::Varchar,
+        },
+        QueryColumn {
+            name: "dateLastModified".to_string(),
+            col_type: QueryColumnType::Timestamp,
+        },
+        QueryColumn {
+            name: "attributes".to_string(),
+            col_type: QueryColumnType::Varchar,
+        },
+        QueryColumn {
+            name: "mode".to_string(),
+            col_type: QueryColumnType::Varchar,
+        },
+        QueryColumn {
+            name: "directory".to_string(),
+            col_type: QueryColumnType::Varchar,
+        },
+    ];
+    let rows = entries
+        .iter()
+        .map(|path| {
+            let metadata = path.metadata().ok();
+            let size = metadata.as_ref().map(|metadata| metadata.len()).unwrap_or(0);
+            let modified = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .map(DateTime::<Utc>::from)
+                .map(|date| date.to_rfc3339())
+                .unwrap_or_default();
+            let directory = path
+                .parent()
+                .map(|parent| parent.to_string_lossy().to_string())
+                .unwrap_or_default();
+            vec![
+                SqlValue::Text(file_name(path).to_string()),
+                SqlValue::Int(size as i64),
+                SqlValue::Text(if path.is_dir() { "Dir" } else { "File" }.to_string()),
+                SqlValue::Text(modified),
+                SqlValue::Text(file_attributes(path)),
+                SqlValue::Text(String::new()),
+                SqlValue::Text(directory),
+            ]
+        })
+        .collect();
+    QueryResult { columns, rows }
+}
+
+#[cfg(feature = "bif-io")]
+fn file_attributes(path: &Path) -> String {
+    let mut attributes = String::new();
+    if fs::metadata(path).is_ok() {
+        attributes.push('R');
+        if !fs::metadata(path)
+            .map(|metadata| metadata.permissions().readonly())
+            .unwrap_or(true)
+        {
+            attributes.push('W');
+        }
+    }
+    attributes
 }
 
 #[cfg(feature = "bif-io")]
@@ -510,6 +784,10 @@ pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
     } else {
         false
     };
+    let filter = args
+        .get(3)
+        .filter(|value| !value.is_null())
+        .map(|value| vm.to_string(*value));
     let create_path = if args.len() > 4 {
         args[4].as_bool()
     } else {
@@ -544,6 +822,13 @@ pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
                     fs::create_dir_all(&target).map_err(|e| e.to_string())?;
                 }
             } else {
+                if filter
+                    .as_deref()
+                    .map(|pattern| !glob_matches(pattern, file_name(entry.path())))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 if target.exists() && !overwrite {
                     continue;
                 }
@@ -560,6 +845,13 @@ pub fn directory_copy(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, St
             let entry = entry.map_err(|e| e.to_string())?;
             let target = dest_path.join(entry.file_name());
             if entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                if filter
+                    .as_deref()
+                    .map(|pattern| !glob_matches(pattern, file_name(&entry.path())))
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 if target.exists() && !overwrite {
                     continue;
                 }
@@ -624,8 +916,16 @@ pub fn expand_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 }
 
 #[cfg(feature = "bif-io")]
-pub fn file_close(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Err("fileClose() is not yet implemented: file handle infrastructure required".to_string())
+pub fn file_close(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("fileClose() expects 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        if vm.native_object_call_method(id, "close", &[]).is_ok() {
+            return Ok(BxValue::new_null());
+        }
+    }
+    Ok(BxValue::new_null())
 }
 
 #[cfg(feature = "bif-io")]
@@ -708,13 +1008,69 @@ pub fn file_is_eof(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, Str
 }
 
 #[cfg(feature = "bif-io")]
-pub fn file_open(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Err("fileOpen() is not yet implemented: file handle infrastructure required".to_string())
+pub fn file_open(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("fileOpen() expects at least 1 argument".to_string());
+    }
+    let path = vm.to_string(args[0]);
+    let mode = args
+        .get(1)
+        .map(|value| vm.to_string(*value).to_lowercase())
+        .unwrap_or_else(|| "read".to_string());
+    let charset = args
+        .get(2)
+        .map(|value| vm.to_string(*value).to_lowercase())
+        .unwrap_or_else(|| "utf-8".to_string());
+
+    if !matches!(
+        charset.as_str(),
+        "utf-8" | "utf8" | "us-ascii" | "ascii" | "iso-8859-1" | "latin1" | "windows-1252"
+    ) {
+        return Err(format!("Unsupported charset: {}", charset));
+    }
+
+    match mode.as_str() {
+        "read" | "readbinary" => {
+            fs::File::open(&path).map_err(|error| error.to_string())?;
+        }
+        "write" => {
+            fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&path)
+                .map_err(|error| error.to_string())?;
+        }
+        "append" => {
+            fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&path)
+                .map_err(|error| error.to_string())?;
+        }
+        _ => return Err(format!("Unsupported file mode: {}", mode)),
+    }
+
+    let id = vm.native_object_new(Rc::new(RefCell::new(FileObject { path, mode })));
+    Ok(BxValue::new_ptr(id))
 }
 
 #[cfg(feature = "bif-io")]
-pub fn file_read_line(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Err("fileReadLine() is not yet implemented: file handle infrastructure required".to_string())
+pub fn file_read_line(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() {
+        return Err("fileReadLine() expects 1 argument".to_string());
+    }
+    if let Some(id) = args[0].as_gc_id() {
+        if let Ok(value) = vm.native_object_call_method(id, "readline", &[]) {
+            return Ok(value);
+        }
+    }
+    let path = vm.to_string(args[0]);
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    match content.lines().next() {
+        Some(line) => Ok(BxValue::new_ptr(vm.string_new(line.to_string()))),
+        None => Ok(BxValue::new_null()),
+    }
 }
 
 #[cfg(feature = "bif-io")]
@@ -814,8 +1170,24 @@ pub fn file_set_last_modified(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxV
 }
 
 #[cfg(feature = "bif-io")]
-pub fn file_write_line(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    Err("fileWriteLine() is not yet implemented: file handle infrastructure required".to_string())
+pub fn file_write_line(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.len() < 2 {
+        return Err("fileWriteLine() expects 2 arguments".to_string());
+    }
+    let data = vm.to_string(args[1]);
+    if let Some(id) = args[0].as_gc_id() {
+        if let Ok(value) = vm.native_object_call_method(id, "writeline", &[args[1]]) {
+            return Ok(value);
+        }
+    }
+    let path = vm.to_string(args[0]);
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    writeln!(file, "{}", data).map_err(|error| error.to_string())?;
+    Ok(BxValue::new_null())
 }
 
 #[cfg(feature = "bif-io")]

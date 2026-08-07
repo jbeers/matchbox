@@ -45,6 +45,7 @@ mod i18n;
 mod json;
 mod list_query_extra;
 mod math_datetime;
+mod net;
 mod set;
 mod system_execute;
 mod system_output;
@@ -587,6 +588,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
             fs::directory_move as BxNativeFunction,
         );
         bifs.insert(
+            "directoryrename".to_string(),
+            fs::directory_move as BxNativeFunction,
+        );
+        bifs.insert(
             "expandpath".to_string(),
             fs::expand_path as BxNativeFunction,
         );
@@ -860,6 +865,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     i18n::register_i18n_bifs(&mut bifs);
     watcher::register_watcher_bifs(&mut bifs);
     cache::register_cache_bifs(&mut bifs);
+    net::register_net_bifs(&mut bifs);
 
     bifs
 }
@@ -2525,10 +2531,18 @@ fn regex_replace_non_quantifier_curly_braces(input: &str) -> String {
                 has_digit = true;
                 j += 1;
             }
-            if j < chars.len() && chars[j] == '}' && has_digit {
-                escaped.push(c);
-                i += 1;
-                continue;
+            if has_digit {
+                if j < chars.len() && chars[j] == ',' {
+                    j += 1;
+                    while j < chars.len() && chars[j].is_ascii_digit() {
+                        j += 1;
+                    }
+                }
+                if j < chars.len() && chars[j] == '}' {
+                    escaped.extend(chars[i..=j].iter());
+                    i = j + 1;
+                    continue;
+                }
             }
             escaped.push_str("\\{");
         } else if c == '}' {
