@@ -185,6 +185,20 @@ pub trait BxVM {
     fn future_schedule_reject(&mut self, future: BxValue, error: BxValue) -> Result<(), String>;
     fn native_future_new(&mut self) -> NativeFutureHandle;
     fn future_on_error(&mut self, id: usize, handler: BxValue);
+    fn future_on_success(&mut self, _id: usize, _handler: BxValue) {}
+    fn future_status(&self, _future: BxValue) -> Option<FutureStatus> {
+        None
+    }
+    fn future_value(&self, _future: BxValue) -> Option<BxValue> {
+        None
+    }
+    fn future_wait(&mut self, _future: BxValue) -> Result<BxValue, String> {
+        Err("Future waiting is not supported".to_string())
+    }
+    fn mark_future_as_thread(&mut self, _future: BxValue) {}
+    fn is_in_thread(&self) -> bool {
+        false
+    }
     fn native_object_new(&mut self, obj: Rc<RefCell<dyn BxNativeObject>>) -> usize;
     fn native_object_call_method(&mut self, id: usize, name: &str, args: &[BxValue]) -> Result<BxValue, String>;
     fn construct_native_class(&mut self, class_name: &str, args: &[BxValue]) -> Result<BxValue, String>;
@@ -201,6 +215,9 @@ pub trait BxVM {
     fn to_string(&self, val: BxValue) -> String;
     fn to_box_string(&self, val: BxValue) -> BoxString;
     fn insert_global(&mut self, name: String, val: BxValue);
+    fn get_global_value(&self, _name: &str) -> Option<BxValue> {
+        None
+    }
     #[cfg(not(target_arch = "wasm32"))]
     fn resolve_query_source_path(&self, path: &[String]) -> Option<BxValue>;
     #[cfg(not(target_arch = "wasm32"))]
@@ -565,6 +582,8 @@ pub struct BxFuture {
     pub status: FutureStatus,
     #[serde(skip)]
     pub error_handler: Option<BxValue>,
+    #[serde(skip)]
+    pub success_handler: Option<BxValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

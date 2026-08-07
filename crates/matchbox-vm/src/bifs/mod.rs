@@ -37,6 +37,7 @@ mod cache;
 mod cli;
 mod conversion;
 mod crypto;
+mod async_runtime;
 #[cfg(feature = "bif-datasource")]
 mod datasource;
 mod fs;
@@ -533,6 +534,7 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
 
     // Async BIFs
     bifs.insert("runasync".to_string(), run_async as BxNativeFunction);
+    async_runtime::register_async_bifs(&mut bifs);
 
     // IO BIFs
     #[cfg(feature = "bif-io")]

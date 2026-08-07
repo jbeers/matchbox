@@ -24,7 +24,6 @@ use crate::types::{register_wasm_future_thunk, take_wasm_future_thunk};
 use anyhow::{Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
 use std::cell::RefCell;
-#[cfg(all(target_arch = "wasm32", feature = "js"))]
 use std::collections::HashSet;
 use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
@@ -503,6 +502,7 @@ pub struct VM {
     pub cli_args: Vec<String>,
     pub output_buffer: Option<String>,
     pub gc_suspended: bool,
+    thread_futures: HashSet<usize>,
     datetime_timezones: HashMap<usize, String>,
     /// GC tuning parameters; use `VM::with_config()` or accept defaults.
     pub config: GCConfig,
@@ -1296,6 +1296,7 @@ impl BxVM for VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         })))
     }
 
@@ -1368,6 +1369,62 @@ impl BxVM for VM {
         if let GcObject::Future(f) = self.heap.get_mut(id) {
             f.error_handler = Some(handler);
         }
+    }
+
+    fn future_on_success(&mut self, id: usize, handler: BxValue) {
+        if let GcObject::Future(f) = self.heap.get_mut(id) {
+            f.success_handler = Some(handler);
+        }
+    }
+
+    fn future_status(&self, future: BxValue) -> Option<FutureStatus> {
+        future
+            .as_gc_id()
+            .and_then(|id| match self.heap.get(id) {
+                GcObject::Future(f) => Some(f.status.clone()),
+                _ => None,
+            })
+    }
+
+    fn future_value(&self, future: BxValue) -> Option<BxValue> {
+        future
+            .as_gc_id()
+            .and_then(|id| match self.heap.get(id) {
+                GcObject::Future(f) => Some(f.value),
+                _ => None,
+            })
+    }
+
+    fn future_wait(&mut self, future: BxValue) -> Result<BxValue, String> {
+        let previous_fiber = self.current_fiber_idx;
+        let result = match self.future_status(future) {
+            Some(FutureStatus::Completed) => Ok(self.future_value(future).unwrap_or(BxValue::new_null())),
+            Some(FutureStatus::Failed(error)) => Err(self.to_string(error)),
+            Some(FutureStatus::Pending) => {
+                let fiber_idx = self
+                    .fibers
+                    .iter()
+                    .position(|fiber| BxValue::new_ptr(fiber.future_id) == future)
+                    .ok_or_else(|| "Future is not scheduled".to_string())?;
+                self.run_fiber_to_completion(fiber_idx)
+                    .map_err(|error| error.to_string())
+            }
+            None => Err("Value is not a future".to_string()),
+        };
+        self.current_fiber_idx = previous_fiber;
+        result
+    }
+
+    fn mark_future_as_thread(&mut self, future: BxValue) {
+        if let Some(id) = future.as_gc_id() {
+            self.thread_futures.insert(id);
+        }
+    }
+
+    fn is_in_thread(&self) -> bool {
+        self.current_fiber_idx
+            .and_then(|idx| self.fibers.get(idx))
+            .is_some_and(|fiber| self.thread_futures.contains(&fiber.future_id))
     }
 
     fn native_object_new(&mut self, obj: Rc<RefCell<dyn BxNativeObject>>) -> usize {
@@ -1456,6 +1513,10 @@ impl BxVM for VM {
 
     fn insert_global(&mut self, name: String, val: BxValue) {
         VM::insert_global(self, name, val);
+    }
+
+    fn get_global_value(&self, name: &str) -> Option<BxValue> {
+        self.get_global(name)
     }
 
     fn resolve_variable_path(&self, path: &str) -> Option<BxValue> {
@@ -1807,6 +1868,7 @@ impl VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         }));
 
         let mut stack = Vec::with_capacity(function.arity as usize + 1);
@@ -2112,6 +2174,7 @@ impl VM {
             cli_args: Vec::new(),
             output_buffer: None,
             gc_suspended: false,
+            thread_futures: HashSet::new(),
             datetime_timezones: HashMap::new(),
             native_completions: VecDeque::new(),
             native_future_tx,
@@ -2676,6 +2739,7 @@ impl VM {
                 },
                 GcObject::Struct(_) => match name.as_str() {
                     "len" | "count" => Some("len".to_string()),
+                     "tostring" => Some("tostring".to_string()),
                     "exists" | "keyexists" => Some("structkeyexists".to_string()),
                      "find" => Some("structfind".to_string()),
                      "append" => Some("structappend".to_string()),
@@ -2700,6 +2764,17 @@ impl VM {
                 GcObject::Future(_) => match name.as_str() {
                     "onerror" => Some("futureonerror".to_string()),
                     "get" => Some("futureget".to_string()),
+                    "completeexceptionally" => Some("futurecompleteexceptionally".to_string()),
+                    "completeontimeout" => Some("futurecompleteontimeout".to_string()),
+                    "joinordefault" => Some("futurejoinordefault".to_string()),
+                    "getordefault" => Some("futuregetordefault".to_string()),
+                    "ortimeout" => Some("futureortimeout".to_string()),
+                    "iscompletedexceptionally" => {
+                        Some("futureiscompletedexceptionally".to_string())
+                    }
+                    "exceptionally" => Some("futureexceptionally".to_string()),
+                    "then" => Some("futurethen".to_string()),
+                    "getasattempt" => Some("futuregetasattempt".to_string()),
                     _ => None,
                 },
                  GcObject::DateTime(_) => match name.as_str() {
@@ -2844,6 +2919,7 @@ impl VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         }));
 
         let fiber = BxFiber {
@@ -2893,6 +2969,7 @@ impl VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         }));
 
         let fiber = BxFiber {
@@ -2993,10 +3070,7 @@ impl VM {
             match self.run_fiber(i, None) {
                 Ok(Some(result)) => {
                     let fiber = self.fibers.swap_remove(i);
-                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                        f.value = result;
-                        f.status = FutureStatus::Completed;
-                    }
+                    self.settle_future_success(fiber.future_id, result)?;
                 }
                 Ok(None) => {
                     i += 1;
@@ -3006,9 +3080,7 @@ impl VM {
                     let err_id = self.string_new(err_str);
                     let err_val = BxValue::new_ptr(err_id);
                     let fiber = self.fibers.swap_remove(i);
-                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                        f.status = FutureStatus::Failed(err_val);
-                    }
+                    self.settle_future_error(fiber.future_id, err_val)?;
                 }
             }
         }
@@ -3037,6 +3109,7 @@ impl VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         }));
 
         let fiber = BxFiber {
@@ -3256,6 +3329,7 @@ impl VM {
             value: BxValue::new_null(),
             status: FutureStatus::Pending,
             error_handler: None,
+            success_handler: None,
         }));
 
         let mut stack = Vec::with_capacity(func.arity as usize + 1);
@@ -3353,10 +3427,7 @@ impl VM {
                 match self.run_fiber(i, deadline) {
                     Ok(Some(result)) => {
                         let fiber = self.fibers.swap_remove(i);
-                        if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                            f.value = result;
-                            f.status = FutureStatus::Completed;
-                        }
+                        self.settle_future_success(fiber.future_id, result)?;
                         last_result = result;
                         // No i += 1 here because swap_remove moved another fiber into index i
                     }
@@ -3371,14 +3442,21 @@ impl VM {
                                 .alloc(GcObject::String(BoxString::new(&e.to_string()))),
                         );
                         if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                            f.status = FutureStatus::Failed(err_val);
-                            handler = f.error_handler;
+                            if matches!(f.status, FutureStatus::Pending) {
+                                f.status = FutureStatus::Failed(err_val);
+                                handler = f.error_handler.take();
+                            }
                         }
 
                         if let Some(h) = handler {
-                            self.spawn_error_handler(h, err_val);
-                            // Since we spawned a new fiber, it will be at the end of the list.
-                            // The swap_removed fiber is gone, index i now has a different fiber.
+                            if let Ok(value) = self.call_function_value(h, vec![err_val], None) {
+                                if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
+                                    if matches!(f.status, FutureStatus::Failed(_)) {
+                                        f.value = value;
+                                        f.status = FutureStatus::Completed;
+                                    }
+                                }
+                            }
                         } else {
                             if self.fibers.is_empty() {
                                 return Err(e);
@@ -3412,6 +3490,60 @@ impl VM {
         Ok(last_result)
     }
 
+    fn settle_future_success(&mut self, future_id: usize, result: BxValue) -> Result<()> {
+        let handler = match self.heap.get_mut(future_id) {
+            GcObject::Future(f) if matches!(f.status, FutureStatus::Pending) => {
+                f.success_handler.take()
+            }
+            _ => return Ok(()),
+        };
+
+        let result = if let Some(handler) = handler {
+            match self.call_function_value(handler, vec![result], None) {
+                Ok(value) => value,
+                Err(error) => {
+                    let error_id = self.string_new(error.to_string());
+                    if let GcObject::Future(f) = self.heap.get_mut(future_id) {
+                        f.status = FutureStatus::Failed(BxValue::new_ptr(error_id));
+                    }
+                    return Ok(());
+                }
+            }
+        } else {
+            result
+        };
+
+        if let GcObject::Future(f) = self.heap.get_mut(future_id) {
+            if matches!(f.status, FutureStatus::Pending) {
+                f.value = result;
+                f.status = FutureStatus::Completed;
+            }
+        }
+        Ok(())
+    }
+
+    fn settle_future_error(&mut self, future_id: usize, error: BxValue) -> Result<()> {
+        let handler = match self.heap.get_mut(future_id) {
+            GcObject::Future(f) if matches!(f.status, FutureStatus::Pending) => {
+                f.status = FutureStatus::Failed(error);
+                f.error_handler.take()
+            }
+            _ => return Ok(()),
+        };
+
+        if let Some(handler) = handler {
+            if let Ok(value) = self.call_function_value(handler, vec![error], None) {
+                if let GcObject::Future(f) = self.heap.get_mut(future_id) {
+                    if matches!(f.status, FutureStatus::Failed(_)) {
+                        f.value = value;
+                        f.status = FutureStatus::Completed;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn run_fiber_to_completion(&mut self, fiber_idx: usize) -> Result<BxValue> {
         loop {
             self.drain_native_completions();
@@ -3433,10 +3565,7 @@ impl VM {
             match self.run_fiber(fiber_idx, None) {
                 Ok(Some(result)) => {
                     let fiber = self.fibers.swap_remove(fiber_idx);
-                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                        f.value = result;
-                        f.status = FutureStatus::Completed;
-                    }
+                    self.settle_future_success(fiber.future_id, result)?;
                     self.current_fiber_idx = None;
                     return Ok(result);
                 }
@@ -3449,9 +3578,7 @@ impl VM {
                         self.heap
                             .alloc(GcObject::String(BoxString::new(&e.to_string()))),
                     );
-                    if let GcObject::Future(f) = self.heap.get_mut(fiber.future_id) {
-                        f.status = FutureStatus::Failed(err_val);
-                    }
+                    self.settle_future_error(fiber.future_id, err_val)?;
                     self.current_fiber_idx = None;
                     return Err(e);
                 }
@@ -7424,6 +7551,8 @@ impl VM {
             "setnew" => vec!["type", "values", "casesensitive", "issynchronized"],
             "listtoset" => vec!["list", "delimiter", "type", "casesensitive"],
             "getlocaledisplayname" | "getlocaleinfo" => vec!["locale", "dsplocale"],
+            "asyncallapply" => vec!["items", "mapper", "timeout", "timeunit"],
+            "threadnew" => vec!["runnable", "name", "virtual"],
             _ => return args,
         };
 
@@ -7458,24 +7587,6 @@ impl VM {
             final_args.pop();
         }
         final_args
-    }
-
-    fn spawn_error_handler(&mut self, handler: BxValue, err_val: BxValue) {
-        if let Some(id) = handler.as_gc_id() {
-            match self.heap.get(id) {
-                GcObject::CompiledFunction(f) => {
-                    let f_rc = Rc::clone(f);
-                    let dummy_chunk = Rc::new(RefCell::new(Chunk::default()));
-                    self.spawn(f_rc, vec![err_val], 1, dummy_chunk, Some(handler));
-                }
-
-                GcObject::NativeFunction(f) => {
-                    let f = *f;
-                    let _ = f(self, &[err_val]);
-                }
-                _ => {}
-            }
-        }
     }
 
     fn execute_call(
@@ -7868,7 +7979,9 @@ impl VM {
                     if name == "get" {
                         match status {
                             FutureStatus::Pending => {
-                                eprintln!("[future.get] pending in execute_invoke");
+                                if arg_count > 0 {
+                                    return self.throw_error(fiber_idx, "Future get timed out");
+                                }
                                 // Suspend this fiber and return to the host loop.
                                 // We don't pop anything; we stay at the current instruction
                                 // so that we retry when the fiber resumes.
@@ -7878,10 +7991,6 @@ impl VM {
                                 return Ok(());
                             }
                             FutureStatus::Completed => {
-                                eprintln!(
-                                    "[future.get] completed in execute_invoke -> {:?}",
-                                    self.to_string(value)
-                                );
                                 for _ in 0..arg_count {
                                     self.fibers[fiber_idx].stack.pop();
                                 }
@@ -8133,6 +8242,9 @@ impl VM {
                 if let GcObject::Future(f) = self.heap.get(id) {
                     match f.status.clone() {
                         FutureStatus::Pending => {
+                            if arg_count > 0 {
+                                return self.throw_error(fiber_idx, "Future get timed out");
+                            }
                             if let Some(frame) = self.fibers[fiber_idx].frames.last_mut() {
                                 if frame.ip > 0 {
                                     frame.ip -= 1;
