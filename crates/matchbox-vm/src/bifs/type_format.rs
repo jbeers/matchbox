@@ -291,7 +291,86 @@ fn is_valid_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     Ok(BxValue::new_bool(result))
 }
 
-fn is_xml_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
+fn is_xml_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+    if args.is_empty() || !vm.is_string_value(args[0]) {
+        return Ok(BxValue::new_bool(false));
+    }
+    Ok(BxValue::new_bool(is_well_formed_xml(&vm.to_string(args[0]))))
+}
+
+fn is_well_formed_xml(input: &str) -> bool {
+    let input = input.trim();
+    if input.is_empty() || !input.starts_with('<') {
+        return false;
+    }
+
+    let mut stack = Vec::new();
+    let mut cursor = 0;
+    let mut root_count = 0;
+    while cursor < input.len() {
+        let Some(relative_start) = input[cursor..].find('<') else {
+            return stack.is_empty() && input[cursor..].trim().is_empty();
+        };
+        let start = cursor + relative_start;
+        if stack.is_empty() && !input[cursor..start].trim().is_empty() {
+            return false;
+        }
+
+        let Some(end) = xml_tag_end(input, start + 1) else {
+            return false;
+        };
+        let tag = input[start + 1..end].trim();
+        cursor = end + 1;
+
+        if tag.starts_with('?') || tag.starts_with('!') {
+            continue;
+        }
+        if let Some(closing) = tag.strip_prefix('/') {
+            let name = closing.trim();
+            if stack.pop().as_deref() != Some(name) {
+                return false;
+            }
+            continue;
+        }
+
+        let self_closing = tag.ends_with('/');
+        let name = tag
+            .trim_end_matches('/')
+            .split_whitespace()
+            .next()
+            .unwrap_or_default();
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | ':' | '.'))
+        {
+            return false;
+        }
+        if stack.is_empty() {
+            root_count += 1;
+            if root_count > 1 {
+                return false;
+            }
+        }
+        if !self_closing {
+            stack.push(name.to_string());
+        }
+    }
+    stack.is_empty() && root_count == 1
+}
+
+fn xml_tag_end(input: &str, start: usize) -> Option<usize> {
+    let mut quote = None;
+    for (offset, character) in input[start..].char_indices() {
+        match (quote, character) {
+            (Some(current), value) if current == value => quote = None,
+            (None, '\'' | '"') => quote = Some(character),
+            (None, '>') => return Some(start + offset),
+            _ => {}
+        }
+    }
+    None
+}
 fn is_xml_attribute_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
 fn is_xml_doc_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
 fn is_xml_element_bif(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> { Ok(BxValue::new_bool(false)) }
