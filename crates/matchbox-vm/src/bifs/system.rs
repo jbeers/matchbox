@@ -36,3 +36,49 @@ pub fn trace(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
 pub fn write_log(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_null())
 }
+
+pub fn get_base_tag_data(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_null())
+}
+
+pub fn get_base_tag_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.string_new(String::new())))
+}
+
+pub fn get_base_template_path(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.string_new(String::new())))
+}
+
+pub fn get_current_template_path(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.string_new(String::new())))
+}
+
+pub fn get_box_version_info(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    let id = vm.struct_new();
+    for (key, value) in [
+        ("version", "0.9.0"),
+        ("buildDate", ""),
+        ("codename", ""),
+        ("boxlangId", "matchbox"),
+    ] {
+        let value_id = vm.string_new(value.to_string());
+        vm.struct_set(id, key, BxValue::new_ptr(value_id));
+    }
+    Ok(BxValue::new_ptr(id))
+}
+
+pub fn get_component_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.struct_new()))
+}
+
+pub fn get_function_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.struct_new()))
+}
+
+pub fn get_module_info(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.struct_new()))
+}
+
+pub fn get_module_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    Ok(BxValue::new_ptr(vm.struct_new()))
+}

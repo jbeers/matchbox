@@ -69,6 +69,15 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert("boxannounce".to_string(), system::box_announce as BxNativeFunction);
     bifs.insert("trace".to_string(), system::trace as BxNativeFunction);
     bifs.insert("writelog".to_string(), system::write_log as BxNativeFunction);
+    bifs.insert("getbasetagdata".to_string(), system::get_base_tag_data as BxNativeFunction);
+    bifs.insert("getbasetaglist".to_string(), system::get_base_tag_list as BxNativeFunction);
+    bifs.insert("getbasetemplatepath".to_string(), system::get_base_template_path as BxNativeFunction);
+    bifs.insert("getcurrenttemplatepath".to_string(), system::get_current_template_path as BxNativeFunction);
+    bifs.insert("getboxversioninfo".to_string(), system::get_box_version_info as BxNativeFunction);
+    bifs.insert("getcomponentlist".to_string(), system::get_component_list as BxNativeFunction);
+    bifs.insert("getfunctionlist".to_string(), system::get_function_list as BxNativeFunction);
+    bifs.insert("getmoduleinfo".to_string(), system::get_module_info as BxNativeFunction);
+    bifs.insert("getmodulelist".to_string(), system::get_module_list as BxNativeFunction);
     bifs.insert(
         "urlencodedformat".to_string(),
         system::url_encoded_format as BxNativeFunction,
