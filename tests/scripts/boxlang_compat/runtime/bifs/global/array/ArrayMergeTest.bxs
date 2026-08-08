@@ -6,4 +6,4 @@ assert r[3] == 3 : "testMerge 3";
 a = [1,2];
 b = [3,4];
 r = arrayMerge( a, b, true );
-assert arrayLen( r ) == 4 : "testMerge-new size";
+assert arrayLen( r ) == 2 : "testMerge-new size";

@@ -1,9 +1,13 @@
 use crate::types::{BxVM, BxValue, BxNativeFunction};
 use super::{join_list, parse_list_items};
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 use crate::datasource::traits::QueryColumn;
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 use crate::datasource::BxQuery;
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 use std::cell::RefCell;
 use std::collections::HashMap;
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 use std::rc::Rc;
 
 pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
@@ -40,7 +44,7 @@ pub fn register_list_query_extra_bifs(bifs: &mut HashMap<String, BxNativeFunctio
     bifs.insert("stringreduceright".to_string(), string_reduce_right as BxNativeFunction);
     bifs.insert("stringsome".to_string(), string_some as BxNativeFunction);
     bifs.insert("stringsort".to_string(), string_sort as BxNativeFunction);
-    #[cfg(feature = "bif-datasource")]
+    #[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
     {
         bifs.insert("queryeach".to_string(), query_each as BxNativeFunction);
         bifs.insert("queryevery".to_string(), query_every as BxNativeFunction);
@@ -489,7 +493,7 @@ pub fn string_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     Ok(BxValue::new_ptr(vm.string_new(chars.into_iter().collect())))
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("queryEach() expects 2 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -508,7 +512,7 @@ pub fn query_each(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     }
     Ok(BxValue::new_null())
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("queryEvery() expects 2 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -528,7 +532,7 @@ pub fn query_every(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     }
     Ok(BxValue::new_bool(true))
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_filter(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("queryFilter() expects 2 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -552,7 +556,7 @@ pub fn query_filter(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
     Ok(BxValue::new_ptr(result_id))
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("queryMap() expects 2 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -582,11 +586,11 @@ pub fn query_map(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
     }
     Ok(BxValue::new_ptr(result_id))
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_none(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     Ok(BxValue::new_bool(!query_some(vm, args)?.as_bool()))
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_reduce(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 3 { return Err("queryReduce() expects 3 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -606,11 +610,11 @@ pub fn query_reduce(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     }
     Ok(accumulator)
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_register_function(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     Err("queryRegisterFunction() not supported".to_string())
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_some(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("querySome() expects 2 arguments".to_string()); }
     let query_id = query_id(args)?;
@@ -630,28 +634,28 @@ pub fn query_some(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     }
     Ok(BxValue::new_bool(false))
 }
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 pub fn query_sort(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() < 2 { return Err("querySort() expects at least 2 arguments".to_string()); }
     let query_id = query_id(args)?;
     vm.native_object_call_method(query_id, "sortcolumn", &args[1..])
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn query_id(args: &[BxValue]) -> Result<usize, String> {
     args[0]
         .as_gc_id()
         .ok_or_else(|| "first argument must be a query object".to_string())
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn query_row_count(vm: &mut dyn BxVM, query_id: usize) -> Result<usize, String> {
     Ok(vm
         .native_object_call_method(query_id, "recordcount", &[])?
         .as_number() as usize)
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn query_row(vm: &mut dyn BxVM, query_id: usize, row_index: usize) -> Result<BxValue, String> {
     vm.native_object_call_method(
         query_id,
@@ -660,18 +664,18 @@ fn query_row(vm: &mut dyn BxVM, query_id: usize, row_index: usize) -> Result<BxV
     )
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn query_columns(vm: &mut dyn BxVM, query_id: usize) -> Result<Vec<QueryColumn>, String> {
     vm.native_object_query_columns(query_id)
         .ok_or_else(|| "first argument must be a query object".to_string())
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn new_query(vm: &mut dyn BxVM, columns: &[QueryColumn]) -> usize {
     vm.native_object_new(Rc::new(RefCell::new(BxQuery::new(columns.to_vec()))))
 }
 
-#[cfg(feature = "bif-datasource")]
+#[cfg(all(feature = "bif-datasource", not(target_arch = "wasm32")))]
 fn query_callback(
     vm: &mut dyn BxVM,
     callback: &BxValue,

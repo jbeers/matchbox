@@ -552,6 +552,21 @@ function arrayUnshift(array, value) {
  */
 function arrayMerge(array1, array2, leaveIndex = false) {
     var result = [];
+    if (leaveIndex) {
+        if (len(array1) >= len(array2)) {
+            for (var i = 1; i <= len(array1); i++) {
+                result[i] = array1[i];
+            }
+        } else {
+            for (var i = 1; i <= len(array2); i++) {
+                result[i] = array2[i];
+            }
+            for (var i = 1; i <= len(array1); i++) {
+                result[i] = array1[i];
+            }
+        }
+        return result;
+    }
     for (var item in array1) {
         arrayAppend(result, item);
     }
@@ -1142,6 +1157,9 @@ function structSort(struct, sortType = "text", sortOrder = "asc", path = "", cal
                         if (sortType != "text" || path != "") {
                             leftValue = _structSortValue(struct, work[l], path);
                             rightValue = _structSortValue(struct, work[r], path);
+                        } else {
+                            leftValue = work[l];
+                            rightValue = work[r];
                         }
                         comesBefore = _sortShouldComeBefore(leftValue, rightValue, sortType, sortOrder);
                     }

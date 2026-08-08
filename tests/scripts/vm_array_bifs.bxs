@@ -210,8 +210,9 @@ if (zipCb[3] != "3c") { throw "arrayZip callback 3 failed: got " & zipCb[3]; }
 // Remove elements
 var spArr = [1, 2, 3, 4, 5];
 var spResult = arraySplice(spArr, 2, 2);
-if (len(spResult) != 3) { throw "arraySplice remove length failed: got " & len(spResult); }
-if (spResult[1] != 1 || spResult[2] != 4 || spResult[3] != 5) { throw "arraySplice remove values failed"; }
+if (len(spResult) != 2) { throw "arraySplice removed length failed: got " & len(spResult); }
+if (spResult[1] != 2 || spResult[2] != 3) { throw "arraySplice removed values failed"; }
+if (len(spArr) != 3 || spArr[1] != 1 || spArr[2] != 4 || spArr[3] != 5) { throw "arraySplice remove result failed"; }
 
 // Insert without removal
 var spArr2 = [1, 2, 3];

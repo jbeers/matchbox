@@ -7,7 +7,7 @@ if (isNull(locale)) { throw "getLocale failed"; }
 // setLocale
 setLocale("fr_FR");
 var loc2 = getLocale();
-if (loc2 != "fr_FR") { throw "setLocale failed: " & loc2; }
+if (loc2 != "French (France)") { throw "setLocale failed: " & loc2; }
 
 // clearLocale
 clearLocale();

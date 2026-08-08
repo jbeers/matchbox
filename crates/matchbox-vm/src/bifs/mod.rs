@@ -2070,7 +2070,7 @@ fn list_rest(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let cutoff = offset.min(items.len());
     items.drain(0..cutoff);
     Ok(BxValue::new_ptr(
-        vm.string_new(join_list(&items, ",", false)),
+        vm.string_new(join_list(&items, &delimiter, multi)),
     ))
 }
 
@@ -4821,9 +4821,12 @@ fn is_object_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String>
         return Ok(BxValue::new_bool(false));
     }
     let value = args[0];
+    #[cfg(not(target_arch = "wasm32"))]
     let is_query = value
         .as_gc_id()
         .is_some_and(|id| vm.native_object_query_row_count(id).is_some());
+    #[cfg(target_arch = "wasm32")]
+    let is_query = false;
     let is_object = if value.is_null()
         || value.is_bool()
         || value.is_number()

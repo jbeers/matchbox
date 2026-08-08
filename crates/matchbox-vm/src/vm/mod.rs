@@ -5529,7 +5529,10 @@ impl VM {
                             GcObject::NativeObject(obj) => {
                                 let name =
                                     self.interner.resolve(name_id).to_string().to_lowercase();
+                                #[cfg(not(target_arch = "wasm32"))]
                                 let is_query = obj.borrow().query_columns().is_some();
+                                #[cfg(target_arch = "wasm32")]
+                                let is_query = false;
                                 let property = obj.borrow().get_property(&name);
                                 let val = if !property.is_null() {
                                     property

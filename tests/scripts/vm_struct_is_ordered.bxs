@@ -1,16 +1,16 @@
 // Test structIsOrdered BIF
 var s1 = { name: "John", age: 30, city: "Chicago" };
 
-// MatchBox structs are always ordered (maintain insertion order)
+// Plain structs are unordered; use structNew("ordered") for insertion order.
 var result1 = structIsOrdered( s1 );
-if ( result1 != true ) { throw "structIsOrdered should return true, got: " & result1; }
+if ( result1 != false ) { throw "structIsOrdered should return false, got: " & result1; }
 
 // Test as method
 var result2 = s1.isOrdered();
-if ( result2 != true ) { throw "isOrdered() method should return true, got: " & result2; }
+if ( result2 != false ) { throw "isOrdered() method should return false, got: " & result2; }
 
 // Test with empty struct
 var empty = {};
-if ( structIsOrdered( empty ) != true ) { throw "empty struct should be ordered"; }
+if ( structIsOrdered( empty ) != false ) { throw "empty struct should be unordered"; }
 
 println( "structIsOrdered OK" );

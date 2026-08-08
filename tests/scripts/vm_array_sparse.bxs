@@ -12,9 +12,8 @@ if (sparse[3] != "c") { throw "sparse[3] should be 'c', got " & sparse[3] }
 // Length reflects highest assigned index
 if (len(sparse) != 3) { throw "sparse array length should be 3, got " & len(sparse) }
 
-// Out-of-bounds read returns null/falsy (no throw)
-nothing = sparse[10]
-if (nothing) { throw "out-of-bounds read should be falsy" }
+// Normal out-of-bounds reads throw; use arrayIndexExists to probe safely.
+if (arrayIndexExists(sparse, 10)) { throw "out-of-bounds index should not exist" }
 
 // Overwrite an existing slot
 sparse[2] = "b"

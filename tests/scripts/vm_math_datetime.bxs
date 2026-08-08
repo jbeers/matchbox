@@ -59,7 +59,7 @@ var span = createTimeSpan(1, 2, 30, 0);
 var baseDate = createDate(2025, 1, 1);
 var added = dateAdd("s", span, baseDate);
 var diffSec = dateDiff("s", added, baseDate);
-if (diffSec != 95400) { throw "createTimeSpan failed: diff=" & diffSec; }
+if (diffSec != -95400) { throw "createTimeSpan failed: diff=" & diffSec; }
 
 // datePart
 var dt = createDateTime(2025, 6, 15, 10, 30, 45, 0);

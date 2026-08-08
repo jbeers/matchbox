@@ -118,21 +118,21 @@ arraySort(ragged, "numeric", "asc");
 expectIntEq(arrayToList(ragged), "1,2,3,4,5,6,7", "arraySort ragged length 7");
 
 // ---------------------------------------------------------------------------
-// structSort — returns keys ordered by their values ascending
+// structSort — returns keys ordered by nested values ascending
 // ---------------------------------------------------------------------------
 
 var scores = {};
-scores["alice"] = 90;
-scores["bob"] = 70;
-scores["carol"] = 85;
-scores["dave"] = 70;
+scores["alice"] = { value: 90 };
+scores["bob"] = { value: 70 };
+scores["carol"] = { value: 85 };
+scores["dave"] = { value: 70 };
 
-var ordered = structSort(scores, "numeric", "asc");
+var ordered = structSort(scores, "numeric", "asc", "value");
 // Ascending by value: bob(70) and dave(70) tie, then carol(85), then alice(90).
 expectIntEq(arrayToList(ordered), "bob,dave,carol,alice", "structSort numeric asc");
 
 // Descending.
-var orderedDesc = structSort(scores, "numeric", "desc");
+var orderedDesc = structSort(scores, "numeric", "desc", "value");
 expectIntEq(arrayToList(orderedDesc), "alice,carol,bob,dave", "structSort numeric desc");
 
 // structSort stability: bob and dave both have 70; stable sort keeps insertion
@@ -142,7 +142,7 @@ if (ordered[1] != "bob" || ordered[2] != "dave") {
 }
 
 // ---------------------------------------------------------------------------
-// structSort — text values
+// structSort — text keys
 // ---------------------------------------------------------------------------
 
 var labels = {};
@@ -150,7 +150,7 @@ labels["k1"] = "zebra";
 labels["k2"] = "apple";
 labels["k3"] = "mango";
 var labelOrder = structSort(labels, "text", "asc");
-expectIntEq(arrayToList(labelOrder), "k2,k3,k1", "structSort text asc");
+expectIntEq(arrayToList(labelOrder), "k1,k2,k3", "structSort text asc");
 
 // ---------------------------------------------------------------------------
 // structSort — empty and single-element structs

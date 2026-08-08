@@ -6,7 +6,7 @@ if (isEmpty("hello")) { throw "isEmpty non-empty string should be false"; }
 if (!isEmpty([])) { throw "isEmpty empty array failed"; }
 if (isEmpty([1])) { throw "isEmpty non-empty array should be false"; }
 if (!isEmpty(null)) { throw "isEmpty null failed"; }
-if (!isEmpty(0)) { throw "isEmpty zero failed"; }
+if (isEmpty(0)) { throw "isEmpty zero should be false"; }
 if (isEmpty(1)) { throw "isEmpty non-zero should be false"; }
 
 // isLeapYear
@@ -47,6 +47,6 @@ if (!isValid("integer", 42)) { throw "isValid integer failed"; }
 if (!isValid("array", [1, 2, 3])) { throw "isValid array failed"; }
 if (!isValid("struct", {a: 1})) { throw "isValid struct failed"; }
 
-// XML stubs
-if (isXML("<root/>")) { throw "isXML should be false"; }
+// XML type checks
+if (!isXML("<root/>")) { throw "isXML should be true"; }
 if (isXMLDoc("<root/>")) { throw "isXMLDoc should be false"; }

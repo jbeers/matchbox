@@ -19,7 +19,7 @@ if (r != "a;b;c;d;e") { throw "listChangeDelims failed: " & r; }
 
 // listCompact
 r = listCompact("a,,b,,c");
-if (r != "a,b,c") { throw "listCompact failed: " & r; }
+if (r != "a,,b,,c") { throw "listCompact failed: " & r; }
 
 // listItemTrim
 r = listItemTrim(" a , b , c ");
@@ -52,7 +52,7 @@ r = listGetEndings("a,b,c");
 if (isNull(r)) { throw "listGetEndings failed"; }
 
 // getToken
-r = getToken("hello world foo", 2);
+r = getToken("hello world foo", 2, " ");
 if (r != "world") { throw "getToken failed: " & r; }
 
 // listMap

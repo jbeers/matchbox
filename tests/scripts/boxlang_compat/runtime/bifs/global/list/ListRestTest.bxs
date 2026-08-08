@@ -2,6 +2,6 @@
 list = "a,b,c";
 assert listRest( list ) == "b,c" : "testRest default";
 list = "a|b|c";
-assert listRest( list, "|" ) == "b,c" : "testRest pipe";
+assert listRest( list, "|" ) == "b|c" : "testRest pipe";
 list = "a?b?c";
-assert listRest( list, "?" ) == "b,c" : "testRest question";
+assert listRest( list, "?" ) == "b?c" : "testRest question";

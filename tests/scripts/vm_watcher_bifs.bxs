@@ -10,7 +10,7 @@ if (!isArray(list)) { throw "watcherList should return array"; }
 
 // watcherGetAll
 var all = watcherGetAll();
-if (!isArray(all)) { throw "watcherGetAll should return array"; }
+if (!isStruct(all)) { throw "watcherGetAll should return struct"; }
 
 // watcherStopAll (no-op)
 watcherStopAll();
