@@ -1,7 +1,7 @@
 #[cfg(feature = "bif-cli")]
 use crate::types::{BxVM, BxValue};
 #[cfg(feature = "bif-cli")]
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 
 #[cfg(feature = "bif-cli")]
 pub fn cli_clear(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
@@ -115,6 +115,71 @@ pub fn cli_read(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
     #[cfg(target_arch = "wasm32")]
     Err("cliRead not supported in WASM environment".to_string())
+}
+
+#[cfg(feature = "bif-cli")]
+pub fn cli_is_terminal(_vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    return Ok(BxValue::new_bool(io::stdin().is_terminal()));
+
+    #[cfg(target_arch = "wasm32")]
+    Ok(BxValue::new_bool(false))
+}
+
+#[cfg(feature = "bif-cli")]
+pub fn cli_read_key(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "espidf")))]
+    {
+        use crossterm::{
+            event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+            terminal::{disable_raw_mode, enable_raw_mode},
+        };
+
+        if !io::stdin().is_terminal() {
+            return Ok(BxValue::new_ptr(vm.string_new(String::new())));
+        }
+
+        enable_raw_mode().map_err(|error| error.to_string())?;
+        let result = (|| -> Result<String, String> {
+            loop {
+                if let Event::Key(KeyEvent {
+                    code,
+                    modifiers,
+                    kind,
+                    ..
+                }) = event::read().map_err(|error| error.to_string())?
+                {
+                    if kind == KeyEventKind::Release {
+                        continue;
+                    }
+                    return Ok(match code {
+                        KeyCode::Left => "left".to_string(),
+                        KeyCode::Right => "right".to_string(),
+                        KeyCode::Up => "up".to_string(),
+                        KeyCode::Down => "down".to_string(),
+                        KeyCode::Enter => "enter".to_string(),
+                        KeyCode::Esc => "escape".to_string(),
+                        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            "ctrl-c".to_string()
+                        }
+                        KeyCode::Char(character)
+                            if !modifiers.intersects(
+                                KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER,
+                            ) =>
+                        {
+                            character.to_string()
+                        }
+                        _ => continue,
+                    });
+                }
+            }
+        })();
+        disable_raw_mode().map_err(|error| error.to_string())?;
+        return result.map(|key| BxValue::new_ptr(vm.string_new(key)));
+    }
+
+    #[cfg(any(target_arch = "wasm32", target_os = "espidf"))]
+    Ok(BxValue::new_ptr(vm.string_new(String::new())))
 }
 
 #[cfg(feature = "bif-cli")]

@@ -536,6 +536,14 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
         );
         bifs.insert("cliread".to_string(), cli::cli_read as BxNativeFunction);
         bifs.insert(
+            "cliisterminal".to_string(),
+            cli::cli_is_terminal as BxNativeFunction,
+        );
+        bifs.insert(
+            "clireadkey".to_string(),
+            cli::cli_read_key as BxNativeFunction,
+        );
+        bifs.insert(
             "clireadpassword".to_string(),
             cli::cli_read_password as BxNativeFunction,
         );
