@@ -391,6 +391,24 @@ jobs:
           name: aggregated-stubs
           path: stubs
 
+      - name: Install Cross-Compilers (Linux ARM)
+        if: matrix.target == 'aarch64-unknown-linux-gnu' || matrix.target == 'armv7-unknown-linux-gnueabihf'
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          version: 1.0
+
+      - name: Add i386 Architecture
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        run: sudo dpkg --add-architecture i386
+
+      - name: Install Cross-Compilers (Linux x86)
+        if: matrix.target == 'i686-unknown-linux-gnu'
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: gcc-multilib libc6-dev-i386
+          version: 1.0
+
       - name: Build All CLIs
         shell: bash
         run: |
