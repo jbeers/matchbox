@@ -11,12 +11,70 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-static MATH_RNG: OnceLock<Mutex<StdRng>> = OnceLock::new();
+const MATH_RNG: &str = "__matchboxMathRng";
 static UNSYNCHRONIZED_ARRAYS: OnceLock<Mutex<HashSet<(usize, usize)>>> = OnceLock::new();
 static ARRAY_DIMENSIONS: OnceLock<Mutex<HashMap<(usize, usize), usize>>> = OnceLock::new();
 
-fn math_rng() -> &'static Mutex<StdRng> {
-    MATH_RNG.get_or_init(|| Mutex::new(StdRng::seed_from_u64(0)))
+#[derive(Debug)]
+struct MathRng {
+    rng: StdRng,
+}
+
+impl BxNativeObject for MathRng {
+    fn get_property(&self, _name: &str) -> BxValue {
+        BxValue::new_null()
+    }
+
+    fn set_property(&mut self, _name: &str, _value: BxValue) {}
+
+    fn call_method(
+        &mut self,
+        _vm: &mut dyn BxVM,
+        _id: usize,
+        name: &str,
+        args: &[BxValue],
+    ) -> Result<BxValue, String> {
+        match name {
+            "random" => Ok(BxValue::new_number(self.rng.random::<f64>())),
+            "randomrange" => {
+                let [low, high] = args else {
+                    return Err("randomrange requires two numbers".to_string());
+                };
+                if !low.is_number() || !high.is_number() {
+                    return Err("randomrange requires two numbers".to_string());
+                }
+                let low = low.as_number();
+                let high = high.as_number();
+                let value = if low.fract() == 0.0 && high.fract() == 0.0 {
+                    self.rng.random_range((low as i64)..=(high as i64)) as f64
+                } else {
+                    self.rng.random_range(low..=high)
+                };
+                Ok(BxValue::new_number(value))
+            }
+            "seed" => {
+                let seed = args
+                    .first()
+                    .filter(|value| value.is_number())
+                    .ok_or_else(|| "seed requires a number".to_string())?;
+                self.rng = StdRng::seed_from_u64(seed.as_number() as u64);
+                Ok(BxValue::new_null())
+            }
+            _ => Err(format!("Math RNG method '{}' not found", name)),
+        }
+    }
+}
+
+fn math_rng(vm: &mut dyn BxVM) -> usize {
+    vm.get_global_value(MATH_RNG)
+        .and_then(|value| value.as_gc_id())
+        .unwrap_or_else(|| {
+            let id = vm.native_object_new(Rc::new(RefCell::new(MathRng {
+                rng: StdRng::seed_from_u64(0),
+            })));
+            vm.insert_global(MATH_RNG.to_string(), BxValue::new_ptr(id));
+            id
+        })
 }
 
 #[cfg(feature = "bif-jni")]
@@ -2730,37 +2788,26 @@ fn max_bif(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     }
 }
 
-fn rand_range(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn rand_range(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.len() != 2 {
         return Err("randRange() expects exactly 2 arguments".to_string());
     }
-    if args[0].is_number() && args[1].is_number() {
-        let mut rng = math_rng()
-            .lock()
-            .map_err(|_| "random generator is unavailable".to_string())?;
-        let low = args[0].as_number();
-        let high = args[1].as_number();
-        if low.fract() == 0.0 && high.fract() == 0.0 {
-            Ok(BxValue::new_number(rng.random_range((low as i64)..=(high as i64)) as f64))
-        } else {
-            Ok(BxValue::new_number(rng.random_range(low..=high)))
-        }
-    } else {
-        Err("randRange() expects numbers".to_string())
+    if !args[0].is_number() || !args[1].is_number() {
+        return Err("randRange() expects numbers".to_string());
     }
+    let id = math_rng(vm);
+    vm.native_object_call_method(id, "randomrange", args)
 }
 
-fn rand(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn rand(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if !args.is_empty() {
         return Err("rand() expects no arguments".to_string());
     }
-    let mut rng = math_rng()
-        .lock()
-        .map_err(|_| "random generator is unavailable".to_string())?;
-    Ok(BxValue::new_number(rng.random::<f64>()))
+    let id = math_rng(vm);
+    vm.native_object_call_method(id, "random", &[])
 }
 
-fn randomize(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
+fn randomize(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if args.is_empty() {
         return Err("randomize() expects at least 1 argument".to_string());
     }
@@ -2770,12 +2817,8 @@ fn randomize(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if !args[0].is_number() {
         return Err("randomize() expects a number".to_string());
     }
-    let seed = args[0].as_number() as u64;
-    let mut rng = math_rng()
-        .lock()
-        .map_err(|_| "random generator is unavailable".to_string())?;
-    *rng = StdRng::seed_from_u64(seed);
-    Ok(BxValue::new_null())
+    let id = math_rng(vm);
+    vm.native_object_call_method(id, "seed", &[args[0]])
 }
 
 fn pi(_vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
@@ -5286,4 +5329,25 @@ fn sql_prettify_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Stri
     result = result.trim().to_string();
 
     Ok(BxValue::new_ptr(vm.string_new(result)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{rand, randomize};
+    use crate::{types::BxValue, vm::VM};
+
+    #[test]
+    fn seeded_random_generators_are_vm_local() {
+        let mut first = VM::new();
+        let mut second = VM::new();
+        let seed = [BxValue::new_int(12345)];
+
+        randomize(&mut first, &seed).unwrap();
+        let expected = rand(&mut first, &[]).unwrap();
+        randomize(&mut first, &seed).unwrap();
+        rand(&mut second, &[]).unwrap();
+        let actual = rand(&mut first, &[]).unwrap();
+
+        assert_eq!(actual, expected);
+    }
 }

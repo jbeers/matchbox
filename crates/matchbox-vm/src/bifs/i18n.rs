@@ -1,12 +1,17 @@
 use crate::types::{BxNativeFunction, BxVM, BxValue};
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::sync::OnceLock;
 
-static CURRENT_LOCALE: OnceLock<Mutex<String>> = OnceLock::new();
+const DEFAULT_LOCALE: &str = "__default_locale";
 
-fn locale_store() -> &'static Mutex<String> {
-    CURRENT_LOCALE.get_or_init(|| Mutex::new("en_US".to_string()))
+fn current_locale(vm: &dyn BxVM) -> String {
+    vm.get_global_value(DEFAULT_LOCALE)
+        .map(|value| vm.to_string(value))
+        .unwrap_or_else(|| "en_US".to_string())
+}
+
+fn store_locale(vm: &mut dyn BxVM, locale: &str) {
+    let value = BxValue::new_ptr(vm.string_new(locale.to_string()));
+    vm.insert_global(DEFAULT_LOCALE.to_string(), value);
 }
 
 #[derive(Clone, Copy)]
@@ -161,7 +166,7 @@ pub fn register_i18n_bifs(bifs: &mut HashMap<String, BxNativeFunction>) {
 }
 
 fn get_locale(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    let locale = locale_store().lock().unwrap().clone();
+    let locale = current_locale(vm);
     let display_name = if locale == "en_US" {
         "English (US)".to_string()
     } else {
@@ -175,16 +180,12 @@ fn set_locale(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         return Err("setLocale() expects 1 argument".to_string());
     }
     let locale = parse_locale(&vm.to_string(args[0]))?;
-    *locale_store().lock().unwrap() = locale.clone();
-    let locale_value = vm.string_new(locale.clone());
-    vm.insert_global("__default_locale".to_string(), BxValue::new_ptr(locale_value));
+    store_locale(vm, &locale);
     Ok(BxValue::new_ptr(vm.string_new(locale_display_name(&locale, "en_US"))))
 }
 
 fn clear_locale(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    *locale_store().lock().unwrap() = "en_US".to_string();
-    let locale_value = vm.string_new("en_US".to_string());
-    vm.insert_global("__default_locale".to_string(), BxValue::new_ptr(locale_value));
+    store_locale(vm, "en_US");
     Ok(BxValue::new_null())
 }
 
@@ -205,7 +206,7 @@ fn currency_format(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     let locale = if args.get(2).is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[2]))?
     } else {
-        locale_store().lock().unwrap().clone()
+        current_locale(vm)
     };
     let result = format_currency(num, &kind, &locale)?;
     Ok(BxValue::new_ptr(vm.string_new(result)))
@@ -215,7 +216,7 @@ fn get_locale_display_name(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValu
     let locale = if args.first().is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[0]))?
     } else {
-        locale_store().lock().unwrap().clone()
+        current_locale(vm)
     };
     let display_locale = if args.get(1).is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[1]))?
@@ -229,7 +230,7 @@ fn get_locale_info(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     let locale = if args.first().is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[0]))?
     } else {
-        locale_store().lock().unwrap().clone()
+        current_locale(vm)
     };
     let display_locale = if args.get(1).is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[1]))?
@@ -295,7 +296,7 @@ fn is_currency(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let locale = if args.get(1).is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[1]))?
     } else {
-        locale_store().lock().unwrap().clone()
+        current_locale(vm)
     };
     let has_marker = s.chars().any(|ch| matches!(ch, '$' | '€' | '£' | '¥' | '￥'))
         || s.contains("USD")
@@ -325,7 +326,7 @@ fn parse_currency(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String
     let locale = if args.get(1).is_some_and(|value| !value.is_null()) {
         parse_locale(&vm.to_string(args[1]))?
     } else {
-        locale_store().lock().unwrap().clone()
+        current_locale(vm)
     };
     let num = parse_currency_value(&s, &locale).map_err(|_| format!("parseCurrency() cannot parse '{}'", s))?;
     Ok(BxValue::new_number(num))
@@ -434,5 +435,26 @@ fn arabic_digit(ch: char) -> Option<char> {
         '0'..='9' => Some(ch),
         '٠'..='٩' => char::from_u32('0' as u32 + (ch as u32 - '٠' as u32)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_locale, set_locale};
+    use crate::{
+        types::{BxVM, BxValue},
+        vm::VM,
+    };
+
+    #[test]
+    fn locales_are_vm_local() {
+        let mut first = VM::new();
+        let mut second = VM::new();
+        let german = BxValue::new_ptr(first.string_new("de_DE".to_string()));
+
+        set_locale(&mut first, &[german]).unwrap();
+        let second_locale = get_locale(&mut second, &[]).unwrap();
+
+        assert_eq!(second.to_string(second_locale), "English (US)");
     }
 }
