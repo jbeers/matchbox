@@ -77,6 +77,7 @@ macro_rules! script_test {
 
 script_test!(arrays, "arrays.bxs");
 script_test!(bifs, "bifs.bxs");
+script_test!(deserialize_toml, "deserialize_toml.bxs");
 script_test!(deserialize_yaml, "deserialize_yaml.bxs");
 script_test!(bytes_bifs, "bytes_bifs.bxs");
 script_test!(for_in_loops, "for_in_loops.bxs");

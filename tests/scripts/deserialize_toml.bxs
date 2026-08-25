@@ -1,0 +1,33 @@
+var config = deserializeTOML('name = "MatchBox"
+count = 2
+active = true
+when = 2026-08-25T12:00:00Z
+items = ["one", "two"]
+[provider]
+model = "small"');
+
+if (!isStruct(config)) { throw "deserializeTOML table failed"; }
+if (config.name != "MatchBox") { throw "deserializeTOML string failed"; }
+if (config.count != 2) { throw "deserializeTOML integer failed"; }
+if (!config.active) { throw "deserializeTOML boolean failed"; }
+if (config.when != "2026-08-25T12:00:00Z") { throw "deserializeTOML datetime failed"; }
+if (config.items[2] != "two") { throw "deserializeTOML array failed"; }
+if (config.provider.model != "small") { throw "deserializeTOML nested table failed"; }
+
+var invalid = false;
+try {
+    deserializeTOML('name = "unterminated');
+} catch (e) {
+    invalid = true;
+}
+if (!invalid) { throw "deserializeTOML should reject invalid TOML"; }
+
+var wrongType = false;
+try {
+    deserializeTOML(42);
+} catch (e) {
+    wrongType = true;
+}
+if (!wrongType) { throw "deserializeTOML should reject non-string input"; }
+
+println("toml passed");

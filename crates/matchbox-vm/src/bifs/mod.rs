@@ -109,6 +109,7 @@ mod set;
 mod system_execute;
 mod system_output;
 mod system;
+mod toml;
 mod type_format;
 mod watcher;
 mod yaml;
@@ -771,6 +772,10 @@ pub fn register_all() -> HashMap<String, BxNativeFunction> {
     bifs.insert(
         "deserializeyaml".to_string(),
         yaml::yaml_deserialize as BxNativeFunction,
+    );
+    bifs.insert(
+        "deserializetoml".to_string(),
+        toml::toml_deserialize as BxNativeFunction,
     );
     bifs.insert(
         "jsondeserialize".to_string(),
