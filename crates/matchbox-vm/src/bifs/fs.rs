@@ -649,12 +649,10 @@ pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let cwd_text = normalize_path_string(&cwd);
     let cwd = Path::new(&cwd_text);
-    let relative = path.strip_prefix(cwd).unwrap_or(path);
-    let result = relative.to_string_lossy().to_string();
-    let result = if result.is_empty() {
-        ".".to_string()
-    } else {
-        result
+    let result = match path.strip_prefix(cwd) {
+        Ok(relative) if relative.as_os_str().is_empty() => ".".to_string(),
+        Ok(relative) => format!("/{}", relative.to_string_lossy().replace('\\', "/")),
+        Err(_) => path_text.replace('\\', "/"),
     };
     let s_id = vm.string_new(result);
     Ok(BxValue::new_ptr(s_id))
@@ -901,12 +899,15 @@ pub fn expand_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
     let path = Path::new(&path_str);
     let has_trailing = path_str.ends_with('/') || path_str.ends_with('\\');
 
-    let expanded = if path.is_absolute() {
+    let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+    let expanded = if path.is_absolute() && path.exists() {
+        path.to_path_buf()
+    } else if path_str.starts_with(['/', '\\']) {
+        cwd.join(path_str.trim_start_matches(['/', '\\']))
+    } else if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(path)
+        cwd.join(path)
     };
 
     let resolved = expanded.canonicalize().unwrap_or(expanded);
@@ -1088,12 +1089,14 @@ pub fn file_set_access_mode(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVal
     }
     let path_str = vm.to_string(args[0]);
     let mode_str = vm.to_string(args[1]);
+    if mode_str.len() != 3 || !mode_str.bytes().all(|digit| matches!(digit, b'0'..=b'7')) {
+        return Err(format!("Invalid POSIX mode string: {}", mode_str));
+    }
+    let mode = u32::from_str_radix(&mode_str, 8).expect("validated octal mode");
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mode = u32::from_str_radix(&mode_str, 8)
-            .map_err(|_| format!("Invalid POSIX mode string: {}", mode_str))?;
         let mut perms = fs::metadata(&path_str)
             .map_err(|e| e.to_string())?
             .permissions();
@@ -1103,7 +1106,7 @@ pub fn file_set_access_mode(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxVal
 
     #[cfg(not(unix))]
     {
-        let _ = (path_str, mode_str);
+        let _ = (path_str, mode);
     }
 
     Ok(BxValue::new_bool(true))

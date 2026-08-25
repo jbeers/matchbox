@@ -51,6 +51,6 @@ sleep( 5000 );
 assert received : "testWatcherStartDispatchesFilesystemEvent received";
 assert watcherGet( "eventWatcher" ).isRunning() : "testWatcherStartDispatchesFilesystemEvent running";
 assert eventKind == "CREATED" : "testWatcherStartDispatchesFilesystemEvent kind";
-assert eventPath == createdDir : "testWatcherStartDispatchesFilesystemEvent path";
+assert getCanonicalPath( eventPath ) == getCanonicalPath( createdDir ) : "testWatcherStartDispatchesFilesystemEvent path";
 assert eventWatchRoot == tempRoot : "testWatcherStartDispatchesFilesystemEvent watch-root";
 assert eventRelativePath == "created-dir" : "testWatcherStartDispatchesFilesystemEvent relative-path";
