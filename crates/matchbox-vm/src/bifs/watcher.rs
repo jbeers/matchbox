@@ -2,13 +2,21 @@ use crate::types::{BxNativeFunction, BxNativeObject, BxVM, BxValue};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
 
-static WATCHERS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+const WATCHER_REGISTRY: &str = "__matchboxWatcherRegistry";
 static NEXT_WATCHER_NAME: AtomicUsize = AtomicUsize::new(1);
 
-fn watchers() -> &'static Mutex<HashMap<String, usize>> {
-    WATCHERS.get_or_init(|| Mutex::new(HashMap::new()))
+fn watcher_registry(vm: &dyn BxVM) -> Option<usize> {
+    vm.get_global_value(WATCHER_REGISTRY)
+        .and_then(|value| value.as_gc_id())
+}
+
+fn ensure_watcher_registry(vm: &mut dyn BxVM) -> usize {
+    watcher_registry(vm).unwrap_or_else(|| {
+        let id = vm.struct_new();
+        vm.insert_global(WATCHER_REGISTRY.to_string(), BxValue::new_ptr(id));
+        id
+    })
 }
 
 #[derive(Debug)]
@@ -214,20 +222,16 @@ fn watcher_name(vm: &dyn BxVM, args: &[BxValue]) -> Result<String, String> {
 
 fn watcher_id(vm: &dyn BxVM, args: &[BxValue]) -> Result<usize, String> {
     let name = watcher_name(vm, args)?;
-    watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .get(&name)
-        .copied()
+    watcher_registry(vm)
+        .map(|registry| vm.struct_get(registry, &name))
+        .and_then(|value| value.as_gc_id())
         .ok_or_else(|| format!("Watcher '{}' does not exist", name))
 }
 
 fn watcher_exists(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let name = watcher_name(vm, args)?;
-    let exists = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .contains_key(&name);
+    let exists = watcher_registry(vm)
+        .is_some_and(|registry| vm.struct_key_exists(registry, &name));
     Ok(BxValue::new_bool(exists))
 }
 
@@ -237,24 +241,22 @@ fn watcher_get(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
 
 fn watcher_get_all(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     let result_id = vm.struct_new();
-    let entries = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .clone();
-    for (name, id) in entries {
-        vm.struct_set(result_id, &name, BxValue::new_ptr(id));
+    if let Some(registry) = watcher_registry(vm) {
+        for name in vm.struct_key_array(registry) {
+            let watcher = vm.struct_get(registry, &name);
+            vm.struct_set(result_id, &name, watcher);
+        }
     }
     Ok(BxValue::new_ptr(result_id))
 }
 
 fn watcher_list(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
     let result_id = vm.array_new();
-    let entries = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?;
-    for name in entries.keys() {
-        let name_id = vm.string_new(name.clone());
-        vm.array_push(result_id, BxValue::new_ptr(name_id));
+    if let Some(registry) = watcher_registry(vm) {
+        for name in vm.struct_key_array(registry) {
+            let name_id = vm.string_new(name);
+            vm.array_push(result_id, BxValue::new_ptr(name_id));
+        }
     }
     Ok(BxValue::new_ptr(result_id))
 }
@@ -278,14 +280,12 @@ fn watcher_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         );
     }
     let force = args.get(3).is_some_and(|value| value.as_bool());
-    let mut registry = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?;
-    if registry.contains_key(&name) {
+    let registry = ensure_watcher_registry(vm);
+    if vm.struct_key_exists(registry, &name) {
         if !force {
             return Err(format!("Watcher '{}' already exists", name));
         }
-        registry.remove(&name);
+        vm.struct_delete(registry, &name);
     }
     let roots = if vm.is_string_value(args[1]) {
         vec![PathBuf::from(vm.to_string(args[1]))]
@@ -307,7 +307,7 @@ fn watcher_new(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
         listener: args[2],
         known_paths: HashSet::new(),
     })));
-    registry.insert(name, id);
+    vm.struct_set(registry, &name, BxValue::new_ptr(id));
     Ok(BxValue::new_ptr(id))
 }
 
@@ -318,21 +318,19 @@ fn watcher_restart(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Strin
 
 fn watcher_shutdown(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     let name = watcher_name(vm, args)?;
-    let id = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .remove(&name)
-        .ok_or_else(|| format!("Watcher '{}' does not exist", name))?;
+    let id = watcher_id(vm, args)?;
+    vm.struct_delete(
+        watcher_registry(vm).expect("watcher registry exists when watcher ID exists"),
+        &name,
+    );
     let _ = vm.native_object_call_method(id, "shutdown", &[]);
     Ok(BxValue::new_bool(true))
 }
 
 fn watcher_shutdown_all(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    let _ = vm;
-    watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .clear();
+    if let Some(registry) = watcher_registry(vm) {
+        vm.struct_clear(registry);
+    }
     Ok(BxValue::new_null())
 }
 
@@ -347,24 +345,22 @@ fn watcher_stop(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 }
 
 fn watcher_stop_all(vm: &mut dyn BxVM, _args: &[BxValue]) -> Result<BxValue, String> {
-    let entries = watchers()
-        .lock()
-        .map_err(|_| "Watcher registry is poisoned".to_string())?
-        .values()
-        .copied()
-        .collect::<Vec<_>>();
-    for id in entries {
-        let _ = vm.native_object_call_method(id, "stop", &[]);
+    if let Some(registry) = watcher_registry(vm) {
+        for name in vm.struct_key_array(registry) {
+            if let Some(id) = vm.struct_get(registry, &name).as_gc_id() {
+                let _ = vm.native_object_call_method(id, "stop", &[]);
+            }
+        }
     }
     Ok(BxValue::new_null())
 }
 
 pub(crate) fn poll_watchers(vm: &mut dyn BxVM) {
-    let entries = watchers()
-        .lock()
-        .map(|registry| registry.values().copied().collect::<Vec<_>>())
-        .unwrap_or_default();
-    for id in entries {
-        let _ = vm.native_object_call_method(id, "poll", &[]);
+    if let Some(registry) = watcher_registry(vm) {
+        for name in vm.struct_key_array(registry) {
+            if let Some(id) = vm.struct_get(registry, &name).as_gc_id() {
+                let _ = vm.native_object_call_method(id, "poll", &[]);
+            }
+        }
     }
 }

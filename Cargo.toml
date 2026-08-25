@@ -49,7 +49,7 @@ wasm-bindgen = "=0.2.114"
 js-sys = "0.3.77"
 
 [features]
-default = ["bif-io", "bif-jni", "bif-crypto", "bif-cli", "jit", "server"]
+default = ["bif-io", "bif-jni", "bif-crypto", "bif-cli", "bif-http", "jit", "server"]
 cross-compile = []
 server = ["matchbox_server", "tokio"]
 jit = ["matchbox_vm/jit"]
