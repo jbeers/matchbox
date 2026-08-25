@@ -494,7 +494,7 @@ jobs:
         id: extract_changelog
         run: |
           # Extract content between [Unreleased] and the next ## heading
-          sed -n '/## \[Unreleased\]/,/## /p' CHANGELOG.md | sed '1d;$d' > release_notes.md
+          sed -n '/^## \[Unreleased\]/,/^## /p' CHANGELOG.md | sed '1d;$d' > release_notes.md
           echo "BODY_PATH=release_notes.md" >> $GITHUB_OUTPUT
 
       - name: Download Fat CLIs
