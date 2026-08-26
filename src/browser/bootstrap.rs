@@ -339,7 +339,15 @@ pub fn render_fusion_js_bootstrap(functions: &[String], module_name: &str) -> St
     bootstrap.push_str("async function ensureInit() {\n");
     bootstrap.push_str("    if (!__matchboxReady) {\n");
     bootstrap.push_str("        __matchboxReady = (async () => {\n");
-    bootstrap.push_str("            await __wbg_init();\n");
+    // Non-browser hosts (Cloudflare Workers, other WASM-module-import edge
+    // runtimes) have no relative-URL-fetchable `import.meta.url` for the
+    // default `__wbg_init()` fallback to resolve - they get the compiled
+    // WebAssembly.Module directly via their own `.wasm` ES module import
+    // instead. Checking a `globalThis` override here lets that host hand it
+    // in (`globalThis.__matchboxWasmModule = wasmModule` before the first
+    // exported call) without touching browser behavior at all: when the
+    // override isn't set, this is exactly the old zero-arg call.
+    bootstrap.push_str("            await __wbg_init(typeof globalThis !== \"undefined\" && globalThis.__matchboxWasmModule !== undefined ? { module_or_path: globalThis.__matchboxWasmModule } : undefined);\n");
     bootstrap.push_str("            if (!vm) {\n");
     bootstrap.push_str("                vm = new BoxLangVM();\n");
     bootstrap.push_str("                if (typeof window !== \"undefined\" && window.MatchBox && window.MatchBox.registerCallbackBridge) {\n");
@@ -737,7 +745,9 @@ pub fn render_stub_js_bootstrap(
     bootstrap.push_str("async function ensureInit() {\n");
     bootstrap.push_str("    if (!__matchboxReady) {\n");
     bootstrap.push_str("        __matchboxReady = (async () => {\n");
-    bootstrap.push_str("            await __wbg_init();\n");
+    // See the sibling ensureInit() above for why this checks a globalThis
+    // override before falling back to the zero-arg browser-fetch path.
+    bootstrap.push_str("            await __wbg_init(typeof globalThis !== \"undefined\" && globalThis.__matchboxWasmModule !== undefined ? { module_or_path: globalThis.__matchboxWasmModule } : undefined);\n");
     bootstrap.push_str("            if (!vm) {\n");
     bootstrap.push_str("                vm = new BoxLangVM();\n");
     bootstrap.push_str("                if (typeof window !== \"undefined\" && window.MatchBox && window.MatchBox.registerCallbackBridge) {\n");
@@ -871,7 +881,9 @@ mod tests {
         assert!(bootstrap.contains("registerCallbackBridge"));
         assert!(bootstrap.contains("invokeCallback"));
         assert!(bootstrap.contains("BoxLangVM.prototype.free"));
-        assert!(bootstrap.contains("await __wbg_init();"));
+        assert!(bootstrap.contains(
+            "await __wbg_init(typeof globalThis !== \"undefined\" && globalThis.__matchboxWasmModule !== undefined ? { module_or_path: globalThis.__matchboxWasmModule } : undefined);"
+        ));
         assert!(bootstrap.contains("vm = new BoxLangVM();"));
         assert!(bootstrap.contains("vm.init();"));
         assert!(bootstrap.contains("return await vm.call(\"hello\", args);"));
@@ -895,6 +907,7 @@ mod tests {
         assert!(bootstrap.contains("getInstanceKeys"));
         assert!(bootstrap.contains("setInstanceProperty"));
         assert!(bootstrap.contains("wrapInstancePropertyValue"));
+        assert!(bootstrap.contains("globalThis.__matchboxWasmModule"));
         assert!(bootstrap.contains("vm = new BoxLangVM();"));
         assert!(bootstrap.contains("vm.load_bytecode(bytecodeBytes);"));
         assert!(bootstrap.contains("return await vm.call(\"hello\", args);"));
