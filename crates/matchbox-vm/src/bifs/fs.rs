@@ -659,15 +659,20 @@ pub fn contract_path(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
 }
 
 #[cfg(feature = "bif-io")]
+fn with_trailing_separator(mut directory: String) -> String {
+    if !directory.ends_with('/') && !directory.ends_with('\\') {
+        directory.push(std::path::MAIN_SEPARATOR);
+    }
+    directory
+}
+
+#[cfg(feature = "bif-io")]
 pub fn get_temp_directory(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> {
     if !args.is_empty() {
         return Err("getTempDirectory() expects no arguments".to_string());
     }
 
-    let mut directory = std::env::temp_dir().to_string_lossy().to_string();
-    if !directory.ends_with(std::path::MAIN_SEPARATOR) {
-        directory.push(std::path::MAIN_SEPARATOR);
-    }
+    let directory = with_trailing_separator(std::env::temp_dir().to_string_lossy().to_string());
     Ok(BxValue::new_ptr(vm.string_new(directory)))
 }
 
@@ -1277,4 +1282,21 @@ pub fn property_file(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, Str
     }
 
     Ok(BxValue::new_ptr(struct_id))
+}
+
+#[cfg(all(test, feature = "bif-io"))]
+mod tests {
+    use super::with_trailing_separator;
+
+    #[test]
+    fn preserves_either_supported_separator() {
+        assert_eq!(with_trailing_separator("C:\\Temp\\".to_string()), "C:\\Temp\\");
+        assert_eq!(with_trailing_separator("C:/Temp/".to_string()), "C:/Temp/");
+    }
+
+    #[test]
+    fn appends_the_host_separator_when_missing() {
+        let result = with_trailing_separator("C:/Temp".to_string());
+        assert!(result.ends_with(std::path::MAIN_SEPARATOR));
+    }
 }

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Runtime Reliability**: System output streams now flush after writes and garbage collection thresholds are configurable.
 
 ### Fixed
+- Corrected `getTempDirectory()` to preserve either path separator on every host, including Windows paths returned with `/`.
 - Corrected BoxLang string parsing so backslashes remain literal and doubled quote delimiters produce one quote.
 - Isolated seeded random number generators and locale settings per VM so parallel scripts cannot interfere with one another.
 - Corrected BoxLang operator, tokenizer, temporal, filesystem, and cross-target compatibility behavior.
