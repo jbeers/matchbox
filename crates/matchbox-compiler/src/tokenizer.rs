@@ -862,13 +862,6 @@ impl<'a> Lexer<'a> {
                 }
                 break; // closing quote
             }
-            if ch == '\\' {
-                self.advance();
-                if self.pos < self.source.len() {
-                    self.advance();
-                }
-                continue;
-            }
             if ch == '#' {
                 let mut lookahead = self.pos + 1;
                 let mut has_closing_hash = false;

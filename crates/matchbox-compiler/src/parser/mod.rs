@@ -1879,6 +1879,7 @@ impl<'a> Parser<'a> {
 // Parse string content (between quotes) into StringParts, handling #expr# interpolation
 fn parse_string_content(raw: &str) -> Vec<StringPart> {
     let inner = if raw.len() >= 2 { &raw[1..raw.len() - 1] } else { return vec![]; };
+    let quote = raw.chars().next().unwrap_or('"');
 
     let mut parts = Vec::new();
     let mut text = String::new();
@@ -1886,21 +1887,10 @@ fn parse_string_content(raw: &str) -> Vec<StringPart> {
     let chars: Vec<char> = inner.chars().collect();
 
     while i < chars.len() {
-        if chars[i] == '\\' && i + 1 < chars.len() {
-            let escaped = match chars[i + 1] {
-                'n' => Some('\n'),
-                'r' => Some('\r'),
-                't' => Some('\t'),
-                '\\' => Some('\\'),
-                '"' => Some('"'),
-                '\'' => Some('\''),
-                _ => None,
-            };
-            if let Some(escaped) = escaped {
-                text.push(escaped);
-                i += 2;
-                continue;
-            }
+        if chars[i] == quote && i + 1 < chars.len() && chars[i + 1] == quote {
+            text.push(quote);
+            i += 2;
+            continue;
         }
         if chars[i] == '#' {
             let closing = chars[i + 1..].iter().position(|character| *character == '#');
@@ -2172,5 +2162,38 @@ mod tests {
         let ast = parse("throw(message=\"error\");\n", None).unwrap();
         assert_eq!(ast.len(), 1);
         assert!(matches!(ast[0].kind, StatementKind::Throw(_)));
+    }
+
+    #[test]
+    fn parses_a_literal_backslash_before_a_closing_quote() {
+        let source = format!("var separator = {}{}{};", '"', char::from(92), '"');
+        let ast = parse(&source, None).unwrap();
+        match &ast[0].kind {
+            StatementKind::VariableDecl { value, .. } => match &value.kind {
+                ExpressionKind::Literal(Literal::String(parts)) => {
+                    assert_eq!(parts, &vec![StringPart::Text("\\".to_string())]);
+                }
+                other => panic!("Expected string literal, got {:?}", other),
+            },
+            other => panic!("Expected variable declaration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn preserves_backslash_sequences_in_string_literals() {
+        let source = format!("{}{}{}{}", '"', char::from(92), 'n', '"');
+        assert_eq!(
+            parse_string_content(&source),
+            vec![StringPart::Text(format!("{}{}", char::from(92), 'n'))]
+        );
+    }
+
+    #[test]
+    fn collapses_doubled_string_delimiters() {
+        let source = format!("{}he{}{}llo{}", '"', '"', '"', '"');
+        assert_eq!(
+            parse_string_content(&source),
+            vec![StringPart::Text("he\"llo".to_string())]
+        );
     }
 }

@@ -184,7 +184,7 @@ assert result == 2 : "testStructValueSet size";
 // testJsonSerialization
 s = setNew( type="linked", values=["a","b","c"] );
 result = jsonSerialize( s );
-assert result == "[\"a\",\"b\",\"c\"]" : "testJsonSerialization";
+assert result == "[""a"",""b"",""c""]" : "testJsonSerialization";
 
 // testSortedOrder
 s = setNew( type="sorted", values=[9, 1, 5, 3] );
