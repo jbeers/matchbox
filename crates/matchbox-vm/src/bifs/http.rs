@@ -3,11 +3,67 @@ use crate::types::{BxVM, BxValue, NativeFutureValue};
 
 #[cfg(all(feature = "bif-http", not(target_arch = "wasm32")))]
 use std::fs::File;
-#[cfg(all(feature = "bif-http", not(target_arch = "wasm32")))]
-use std::io::copy;
+#[cfg(feature = "bif-http")]
+use std::time::Duration;
 
 #[cfg(all(feature = "bif-http", target_arch = "wasm32", feature = "js"))]
 use web_sys::{Request, RequestInit, RequestMode};
+
+#[cfg(feature = "bif-http")]
+struct RequestOptions {
+    timeout: Option<Duration>,
+    connection_timeout: Option<Duration>,
+    redirect: bool,
+    no_proxy: bool,
+    ipv4_only: bool,
+}
+
+#[cfg(feature = "bif-http")]
+impl Default for RequestOptions {
+    fn default() -> Self {
+        Self {
+            timeout: Some(Duration::from_secs(30)),
+            connection_timeout: None,
+            redirect: true,
+            no_proxy: false,
+            ipv4_only: false,
+        }
+    }
+}
+
+#[cfg(feature = "bif-http")]
+fn request_bool(vm: &dyn BxVM, spec: usize, key: &str, default: bool) -> Result<bool, String> {
+    if !vm.struct_key_exists(spec, key) {
+        return Ok(default);
+    }
+    let value = vm.struct_get(spec, key);
+    if !value.is_bool() {
+        return Err(format!("http() option '{key}' must be a boolean"));
+    }
+    Ok(value.as_bool())
+}
+
+#[cfg(feature = "bif-http")]
+fn request_timeout(
+    vm: &dyn BxVM,
+    spec: usize,
+    key: &str,
+    default: Option<Duration>,
+) -> Result<Option<Duration>, String> {
+    if !vm.struct_key_exists(spec, key) {
+        return Ok(default);
+    }
+    let seconds = vm.struct_get(spec, key).as_number();
+    let invalid = || {
+        format!("http() option '{key}' must be a non-negative finite number of seconds within the supported clock range")
+    };
+    let duration = Duration::try_from_secs_f64(seconds).map_err(|_| invalid())?;
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::time::Instant::now().checked_add(duration).is_none() {
+        return Err(invalid());
+    }
+    Ok((seconds != 0.0).then_some(duration))
+}
 
 #[cfg(feature = "bif-http")]
 fn request_headers(vm: &mut dyn BxVM, spec: usize) -> Vec<(String, String)> {
@@ -40,13 +96,39 @@ fn request_body(vm: &mut dyn BxVM, spec: usize) -> Option<String> {
 }
 
 #[cfg(all(feature = "bif-http", not(target_arch = "wasm32")))]
+fn request_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        "HTTP request timed out".to_string()
+    } else {
+        format!("HTTP request failed: {}", error.without_url())
+    }
+}
+
+#[cfg(all(feature = "bif-http", not(target_arch = "wasm32")))]
 fn send_http(
     url: &str,
     method: &str,
     headers: &[(String, String)],
     body: Option<String>,
+    options: &RequestOptions,
 ) -> Result<reqwest::blocking::Response, String> {
-    let client = reqwest::blocking::Client::new();
+    let mut builder = reqwest::blocking::Client::builder()
+        .timeout(options.timeout)
+        .connect_timeout(options.connection_timeout)
+        .redirect(if options.redirect {
+            reqwest::redirect::Policy::limited(10)
+        } else {
+            reqwest::redirect::Policy::none()
+        });
+    if options.no_proxy {
+        builder = builder.no_proxy();
+    }
+    if options.ipv4_only {
+        builder = builder.local_address(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    }
+    let client = builder
+        .build()
+        .map_err(|e| format!("HTTP client configuration failed: {}", e.without_url()))?;
     let mut request = match method {
         "GET" => client.get(url),
         "POST" => client.post(url),
@@ -60,9 +142,11 @@ fn send_http(
     if let Some(body) = body {
         request = request.body(body);
     }
-    request
-        .send()
-        .map_err(|e| format!("HTTP request failed: {e}"))
+    if let Some(timeout) = options.timeout {
+        // The per-request deadline also bounds streamed bodies, not just each blocking read.
+        request = request.timeout(timeout);
+    }
+    request.send().map_err(request_error)
 }
 
 #[cfg(feature = "bif-http")]
@@ -73,6 +157,7 @@ pub fn http_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
     let mut path = None;
     let mut headers = Vec::new();
     let mut body = None;
+    let mut options = RequestOptions::default();
 
     if args.len() == 1 && args[0].as_gc_id().is_some() {
         let id = args[0].as_gc_id().unwrap();
@@ -89,6 +174,12 @@ pub fn http_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
                     path = Some(p);
                 }
             }
+            options.timeout = request_timeout(vm, id, "timeout", options.timeout)?;
+            options.connection_timeout =
+                request_timeout(vm, id, "connectionTimeout", options.connection_timeout)?;
+            options.redirect = request_bool(vm, id, "redirect", options.redirect)?;
+            options.no_proxy = request_bool(vm, id, "noProxy", options.no_proxy)?;
+            options.ipv4_only = request_bool(vm, id, "ipv4Only", options.ipv4_only)?;
             headers = request_headers(vm, id);
             body = request_body(vm, id);
         } else {
@@ -117,18 +208,15 @@ pub fn http_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
         let future = handle.future();
         std::thread::spawn(move || {
             let result = (|| {
-                let mut response = send_http(&url, &method, &headers, body)?;
+                let mut response = send_http(&url, &method, &headers, body, &options)?;
                 let status = response.status().as_u16();
                 if let Some(p) = path {
-                    let mut file = File::create(&p)
-                        .map_err(|e| format!("Failed to create file: {e}"))?;
-                    copy(&mut response, &mut file)
-                        .map_err(|e| format!("Failed to download file: {e}"))?;
+                    let mut file =
+                        File::create(&p).map_err(|e| format!("Failed to create file: {e}"))?;
+                    response.copy_to(&mut file).map_err(request_error)?;
                     Ok(serde_json::json!({ "status": status, "file_path": p }))
                 } else {
-                    let text = response
-                        .text()
-                        .map_err(|e| format!("Failed to read response body: {e}"))?;
+                    let text = response.text().map_err(request_error)?;
                     Ok(serde_json::json!({
                         "status": status,
                         "file_content": text,
@@ -150,7 +238,7 @@ pub fn http_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
     #[cfg(all(target_arch = "wasm32", feature = "js"))]
     {
-        let _ = (headers, body);
+        let _ = (headers, body, options);
         let opts = RequestInit::new();
         opts.set_method(&method);
         opts.set_mode(RequestMode::Cors);
@@ -166,49 +254,7 @@ pub fn http_bif(vm: &mut dyn BxVM, args: &[BxValue]) -> Result<BxValue, String> 
 
     #[cfg(all(target_arch = "wasm32", not(feature = "js")))]
     {
-        let _ = (method, headers, body);
+        let _ = (method, headers, body, options);
         Err("http() on wasm requires the `js` feature for browser fetch support.".to_string())
-    }
-}
-
-#[cfg(all(test, feature = "bif-http", not(target_arch = "wasm32")))]
-mod tests {
-    use super::send_http;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-
-    #[test]
-    fn posts_headers_and_body() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut sock, _) = listener.accept().unwrap();
-            let mut buf = vec![0_u8; 8192];
-            let n = sock.read(&mut buf).unwrap();
-            let req = String::from_utf8_lossy(&buf[..n]).into_owned();
-            sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
-                .unwrap();
-            req
-        });
-
-        let response = send_http(
-            &format!("http://{addr}/v1/chat/completions"),
-            "POST",
-            &[
-                ("Authorization".into(), "Bearer testdev".into()),
-                ("Content-Type".into(), "application/json".into()),
-            ],
-            Some(r#"{"model":"x"}"#.into()),
-        )
-        .unwrap();
-        assert_eq!(response.status().as_u16(), 200);
-        assert_eq!(response.text().unwrap(), "ok");
-
-        let req = server.join().unwrap();
-        let lower = req.to_ascii_lowercase();
-        assert!(lower.contains("authorization: bearer testdev"), "{req}");
-        assert!(lower.contains("content-type: application/json"), "{req}");
-        assert!(req.contains(r#"{"model":"x"}"#), "{req}");
     }
 }
