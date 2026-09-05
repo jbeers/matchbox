@@ -51,6 +51,7 @@ The JVM BoxLang runtime ships with a very large standard library of BIFs coverin
 | `arrayToList()` | ✅ | ✅ |
 | `abs()`, `min()`, `max()` | ✅ | ✅ |
 | `runAsync()`, `sleep()` | ✅ | ✅ |
+| `http()` | ✅ Native; different API | ✅ |
 | Date / time functions | ❌ | ✅ |
 | JSON encode / decode | ❌ | ✅ |
 | File I/O BIFs | ❌ | ✅ |
@@ -59,6 +60,12 @@ The JVM BoxLang runtime ships with a very large standard library of BIFs coverin
 | `createObject()` (Java) | ❌ | ✅ |
 
 > **Workaround:** Missing BIFs can often be implemented in pure BoxLang and placed in the `prelude.bxs` or a shared include file, or implemented as [Native Fusion](building-and-deploying/native-builds.md#native-fusion-rust-interop) Rust BIFs.
+
+---
+
+## HTTP Client API
+
+Native MatchBox uses `http(requestStruct).get()` and returns JSON text containing the HTTP status and response body or download path. This is not JVM BoxLang's fluent HTTP client API. Request deadlines use seconds; `noProxy` and `ipv4Only` are native MatchBox extensions. WASM HTTP future completion is not implemented. See [HTTP Requests](http.md) for supported options, defaults, and examples.
 
 ---
 
@@ -83,7 +90,7 @@ These BoxLang language features exist in the JVM runtime but are not yet availab
 | :--- | :--- | :--- |
 | `include` / `import` multi-file | ⚠️ Partial | `import` works for classes; `include` not fully supported |
 | Switch / match statements | ❌ | Use `if/else if` chains |
-| `cfhttp` / HTTP requests | ❌ | Use Native Fusion + a Rust HTTP crate |
+| `cfhttp` / HTTP component syntax | ❌ | Use the native [`http()` BIF](http.md) instead |
 | Template / tag syntax | ❌ | Script syntax only |
 | Query of Queries | ❌ | No database layer |
 | Component (`cfc`) files | ❌ | Use `.bxs` class files |
